@@ -1,15 +1,16 @@
 package main
 
 import (
-	"fmt"
 	"os"
+
+	logger "github.com/sirupsen/logrus"
 
 	"github.com/rios0rios0/autoupdate/cmd"
 )
 
 func main() {
 	if err := cmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		logger.Errorf("Error: %v", err)
 		os.Exit(1)
 	}
 }

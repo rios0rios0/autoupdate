@@ -1,252 +1,194 @@
 # autoupdate
 
-A CLI tool that automatically scans Azure DevOps repositories for Terraform module dependencies, detects outdated versions, and creates Pull Requests to upgrade them.
+A self-hosted Dependabot alternative that automatically discovers repositories, detects outdated dependencies across multiple ecosystems, and creates Pull Requests to upgrade them.
 
 ## Features
 
-- **Project Discovery**: Automatically discovers all Azure DevOps projects you have access to
-- **Dependency Scanning**: Parses Terraform files to find Git-based module dependencies
-- **Version Detection**: Identifies available versions (tags) for module repositories
-- **Automatic Upgrades**: Creates PRs to upgrade outdated dependencies
-- **Dry Run Mode**: Preview changes before applying them
-- **Flexible Filtering**: Filter by project, repository, or specific modules
+- **Multi-Provider**: Supports GitHub, GitLab, and Azure DevOps as Git hosting providers
+- **API-Based Discovery**: Automatically discovers all repositories in an organization, group, or user account
+- **Extensible Updaters**: Plugin-based architecture for dependency ecosystems (Terraform modules, Go projects, and more coming)
+- **Cronjob-Ready**: Designed to run unattended on a schedule for daily dependency updates
+- **Dry Run Mode**: Preview all changes before creating any PRs
+- **Flexible Filtering**: Run against a specific provider, organization, or updater
+
+## Supported Ecosystems
+
+| Ecosystem | What it does                                                               |
+|-----------|----------------------------------------------------------------------------|
+| Terraform | Detects Git-based module sources with `?ref=` tags, upgrades to latest tag |
+| Go        | Upgrades Go version in `go.mod`, runs `go get -u ./...` and `go mod tidy`  |
 
 ## Installation
 
 ### From Source
 
 ```bash
-# Clone the repository
 git clone https://github.com/rios0rios0/autoupdate.git
 cd autoupdate
-
-# Build
 go build -o autoupdate .
-
-# Or install globally
-go install .
 ```
-
-### Binary Releases
-
-Download pre-built binaries from the [Releases](https://github.com/rios0rios0/autoupdate/releases) page.
 
 ## Configuration
 
-### Authentication
+Create an `autoupdate.yaml` (or `.autoupdate.yaml`) in the current directory, `~/.config/`, or pass it with `--config`.
 
-The tool requires a Personal Access Token (PAT) with the following permissions:
-- **Code**: Read & Write (to scan repos and create branches)
-- **Pull Request Contribute**: Read & Write (to create PRs)
+```yaml
+providers:
+  - type: github
+    token: "${GITHUB_TOKEN}"
+    organizations:
+      - "my-org"
 
-Set your credentials via environment variables or CLI flags:
+  - type: azuredevops
+    token: "${AZURE_DEVOPS_PAT}"
+    organizations:
+      - "https://dev.azure.com/MyOrg"
 
-```bash
-# Environment variables (recommended)
-export AZURE_DEVOPS_ORG="https://dev.azure.com/MyOrganization"
-export AZURE_DEVOPS_PAT="your-personal-access-token"
+  - type: gitlab
+    token: "${GITLAB_TOKEN}"
+    organizations:
+      - "my-group"
 
-# Or use CLI flags
-autoupdate --organization "https://dev.azure.com/MyOrg" --pat "your-pat" scan
+updaters:
+  terraform:
+    enabled: true
+    auto_complete: false
+    target_branch: "main"
+  golang:
+    enabled: true
+    target_branch: "main"
 ```
+
+### Token Resolution
+
+Tokens support three formats:
+- **Inline**: `token: "ghp_abc123"`
+- **Environment variable**: `token: "${GITHUB_TOKEN}"` (expanded at runtime)
+- **File path**: `token: "/run/secrets/github_token"` (read from file if path exists)
 
 ## Usage
 
-### Scan for Dependencies
-
-Discover all Terraform module dependencies across your repositories:
+### Run the Update Engine
 
 ```bash
-# Scan all projects
-autoupdate scan
+# Run all configured providers and updaters
+autoupdate run
 
-# Scan a specific project
-autoupdate scan --project "MyProject"
+# Dry run — preview what would happen
+autoupdate run --dry-run
 
-# Scan a specific repository
-autoupdate scan --project "MyProject" --repo "infrastructure"
+# Only process GitHub repos
+autoupdate run --provider github
 
-# Verbose output
-autoupdate scan -v
+# Only process a specific organization
+autoupdate run --provider github --org my-org
+
+# Only run the Terraform updater
+autoupdate run --updater terraform
+
+# Verbose logging
+autoupdate run -v
 ```
 
-### List Dependencies with Status
+### CI/CD Integration (Cronjob)
 
-View all dependencies and their upgrade status:
+```yaml
+# GitHub Actions example
+name: Dependency Updates
+on:
+  schedule:
+    - cron: '0 6 * * 1-5'  # Weekdays at 6 AM
 
-```bash
-# List all dependencies
-autoupdate list
-
-# Show only outdated dependencies
-autoupdate list --outdated
-
-# Output as markdown (great for documentation)
-autoupdate list --output markdown
-
-# Output as JSON (for automation)
-autoupdate list --output json
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: go install github.com/rios0rios0/autoupdate@latest
+      - run: autoupdate run
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
-
-### Upgrade Dependencies
-
-Create PRs to upgrade outdated dependencies:
-
-```bash
-# Preview what would be upgraded (dry run)
-autoupdate upgrade --dry-run
-
-# Create upgrade PRs for all outdated dependencies
-autoupdate upgrade
-
-# Upgrade a specific module
-autoupdate upgrade --module "terraform-module-networking"
-
-# Upgrade to a specific version
-autoupdate upgrade --module "terraform-module-networking" --version "v2.0.0"
-
-# Filter by project/repository
-autoupdate upgrade --project "MyProject" --repo "infrastructure"
-
-# Set auto-complete on created PRs
-autoupdate upgrade --auto-complete
-
-# Custom PR settings
-autoupdate upgrade --pr-title "Custom title" --target-branch "develop"
-```
-
-## How It Works
-
-### Dependency Detection
-
-The tool scans for Terraform module blocks with Git-based sources:
-
-```hcl
-module "networking" {
-  source = "git::https://dev.azure.com/MyOrg/Modules/_git/terraform-module-networking?ref=v1.2.3"
-  # ... module configuration
-}
-```
-
-Supported source formats:
-- `git::https://dev.azure.com/org/project/_git/repo?ref=tag`
-- `git::ssh://git@ssh.dev.azure.com/v3/org/project/repo?ref=tag`
-- GitHub, GitLab, Bitbucket URLs with `?ref=` parameter
-
-### Module Repository Discovery
-
-The tool identifies module repositories by:
-1. Naming conventions (`terraform-module-*`, `tf-module-*`, `module-*`)
-2. Repository structure (presence of `main.tf` and `variables.tf` at root)
-
-### Version Comparison
-
-Versions are compared using semantic versioning when possible:
-- `v1.0.0` < `v1.1.0` < `v2.0.0`
-- Falls back to string comparison for non-semver tags
-
-## Examples
-
-### Example Workflow
-
-```bash
-# 1. First, scan to see what dependencies exist
-autoupdate scan
-
-# Output:
-# 📁 MyProject/app-infrastructure
-#    └─ networking @ v1.0.0 (from /terraform/main.tf)
-#    └─ storage @ v2.1.0 (from /terraform/main.tf)
-
-# 2. List with status to see what needs upgrading
-autoupdate list --outdated
-
-# Output:
-# Project     Repository          Module      Source      Current  Latest   Status
-# MyProject   app-infrastructure  networking  networking  v1.0.0   v1.2.0   🟡 Minor update
-
-# 3. Preview the upgrades
-autoupdate upgrade --dry-run
-
-# Output:
-# [DRY RUN] Would create PR for MyProject/app-infrastructure:
-#    - networking: v1.0.0 -> v1.2.0
-
-# 4. Create the PRs
-autoupdate upgrade
-
-# Output:
-# ✅ Created PR #123 for MyProject/app-infrastructure: https://dev.azure.com/...
-```
-
-### CI/CD Integration
-
-Run as a scheduled job to keep dependencies up to date:
 
 ```yaml
 # Azure Pipelines example
 schedules:
-  - cron: "0 6 * * 1"  # Every Monday at 6 AM
+  - cron: "0 6 * * 1"
     displayName: Weekly dependency check
     branches:
       include:
         - main
 
 steps:
-  - script: |
-      autoupdate upgrade --auto-complete
+  - script: autoupdate run
     env:
-      AZURE_DEVOPS_ORG: $(System.CollectionUri)
       AZURE_DEVOPS_PAT: $(System.AccessToken)
-    displayName: Create upgrade PRs
+```
+
+## Architecture
+
+```
+autoupdate/
+├── cmd/                             # CLI layer (Cobra commands)
+│   ├── root.go                      # Global flags: --config, --verbose, --dry-run
+│   └── run.go                       # Main "run" command
+├── domain/                          # Interfaces and models (no dependencies)
+│   ├── models.go                    # Repository, Dependency, PullRequest, etc.
+│   ├── provider.go                  # Provider interface
+│   └── updater.go                   # Updater interface
+├── infrastructure/                  # Implementations
+│   ├── provider/
+│   │   ├── registry.go              # Provider registry
+│   │   ├── github/github.go         # GitHub provider
+│   │   ├── gitlab/gitlab.go         # GitLab provider
+│   │   └── azuredevops/azuredevops.go # Azure DevOps provider
+│   └── updater/
+│       ├── registry.go              # Updater registry
+│       ├── terraform/terraform.go   # Terraform module updater
+│       └── golang/golang.go         # Go dependency updater
+├── application/
+│   └── service.go                   # Orchestration service
+├── config/
+│   └── config.go                    # YAML config loading
+├── main.go                          # Entry point
+└── autoupdate.yaml                  # Config template
+```
+
+### Adding a New Provider
+
+Implement the `domain.Provider` interface and register it in `cmd/run.go`:
+
+```go
+reg.Register("bitbucket", bitbucket.New)
+```
+
+### Adding a New Updater
+
+Implement the `domain.Updater` interface and register it in `cmd/run.go`:
+
+```go
+reg.Register(npmUpdater.New())
 ```
 
 ## Command Reference
 
 ### Global Flags
 
-| Flag             | Short | Description                      |
-|------------------|-------|----------------------------------|
-| `--organization` | `-o`  | Azure DevOps organization URL    |
-| `--pat`          | `-p`  | Personal Access Token            |
-| `--dry-run`      |       | Preview changes without applying |
-| `--verbose`      | `-v`  | Enable verbose output            |
+| Flag        | Short | Description                         |
+|-------------|-------|-------------------------------------|
+| `--config`  | `-c`  | Path to config file (auto-detected) |
+| `--dry-run` |       | Preview changes without applying    |
+| `--verbose` | `-v`  | Enable verbose output               |
 
-### scan
+### run
 
-Scan repositories for Terraform dependencies.
+Run the dependency update engine.
 
-| Flag        | Description               |
-|-------------|---------------------------|
-| `--project` | Filter by project name    |
-| `--repo`    | Filter by repository name |
-
-### list
-
-List dependencies with their versions.
-
-| Flag         | Description                          |
-|--------------|--------------------------------------|
-| `--outdated` | Show only outdated dependencies      |
-| `--output`   | Output format: table, json, markdown |
-| `--project`  | Filter by project name               |
-| `--repo`     | Filter by repository name            |
-
-### upgrade
-
-Create PRs to upgrade dependencies.
-
-| Flag               | Description                           |
-|--------------------|---------------------------------------|
-| `--target-branch`  | Target branch for PRs (default: main) |
-| `--commit-message` | Custom commit message                 |
-| `--pr-title`       | Custom PR title                       |
-| `--pr-description` | Custom PR description                 |
-| `--auto-complete`  | Set auto-complete on PRs              |
-| `--module`         | Upgrade specific module only          |
-| `--version`        | Upgrade to specific version           |
-| `--project`        | Filter by project name                |
-| `--repo`           | Filter by repository name             |
+| Flag         | Description                                            |
+|--------------|--------------------------------------------------------|
+| `--provider` | Only process this provider (github/gitlab/azuredevops) |
+| `--org`      | Only process this organization/group                   |
+| `--updater`  | Only run this updater (terraform/golang)               |
 
 ## Contributing
 

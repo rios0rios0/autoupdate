@@ -4,34 +4,42 @@ import (
 	"github.com/spf13/cobra"
 )
 
+//nolint:gochecknoglobals // required by cobra CLI pattern
 var (
-	// Global flags
-	organization string
-	pat          string
-	dryRun       bool
-	verbose      bool
+	configPath string
+	dryRun     bool
+	verbose    bool
 )
 
+//nolint:gochecknoglobals // required by cobra CLI pattern
 var rootCmd = &cobra.Command{
 	Use:   "autoupdate",
-	Short: "Terraform dependency autoupdate and upgrader for Azure DevOps",
-	Long: `A CLI tool that scans Azure DevOps repositories for Terraform module dependencies,
-detects outdated versions, and creates Pull Requests to upgrade them automatically.
+	Short: "Multi-provider dependency update engine",
+	Long: `A self-hosted Dependabot alternative that automatically discovers repositories,
+detects outdated dependencies across multiple ecosystems (Terraform, Go, etc.),
+and creates Pull Requests to upgrade them.
 
-This tool helps maintain consistency across your infrastructure as code by:
-- Scanning all projects you have access to
-- Detecting Git-based Terraform module dependencies
-- Identifying newer versions (tags) available
-- Creating PRs to upgrade dependencies`,
+Supports GitHub, GitLab, and Azure DevOps as Git hosting providers.
+Designed to run as a cronjob for daily dependency updates.`,
 }
 
+// Execute runs the root command.
 func Execute() error {
 	return rootCmd.Execute()
 }
 
+//nolint:gochecknoinits // required by cobra CLI pattern
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&organization, "organization", "o", "", "Azure DevOps organization URL (e.g., https://dev.azure.com/MyOrg)")
-	rootCmd.PersistentFlags().StringVarP(&pat, "pat", "p", "", "Personal Access Token for Azure DevOps (or set AZURE_DEVOPS_PAT env var)")
-	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+	rootCmd.PersistentFlags().StringVarP(
+		&configPath, "config", "c", "",
+		"Path to config file (default: auto-detect)",
+	)
+	rootCmd.PersistentFlags().BoolVar(
+		&dryRun, "dry-run", false,
+		"Show what would be done without making changes",
+	)
+	rootCmd.PersistentFlags().BoolVarP(
+		&verbose, "verbose", "v", false,
+		"Enable verbose output",
+	)
 }

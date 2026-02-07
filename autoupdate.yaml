@@ -1,0 +1,28 @@
+# autoupdate configuration
+# Tokens can be set inline, via environment variable references (${VAR}),
+# or as a path to a file containing the token.
+
+providers:
+  - type: github
+    token: "${GITHUB_TOKEN}"
+    organizations:
+      - "my-org"
+
+  # - type: azuredevops
+  #   token: "${AZURE_DEVOPS_PAT}"
+  #   organizations:
+  #     - "https://dev.azure.com/MyOrg"
+
+  # - type: gitlab
+  #   token: "${GITLAB_TOKEN}"
+  #   organizations:
+  #     - "my-group"
+
+updaters:
+  terraform:
+    enabled: true
+    auto_complete: false
+    target_branch: "main"
+  golang:
+    enabled: true
+    target_branch: "main"
