@@ -16,22 +16,24 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-02-07
+
 ### Added
 
-- added multi-provider support (GitHub, GitLab, Azure DevOps) for repository discovery and PR creation
-- added extensible updater plugin interface with Terraform and Go implementations
 - added Clean Architecture project structure (`domain/`, `application/`, `infrastructure/`, `cmd/`)
 - added YAML-based configuration with environment variable expansion for tokens
 - added comprehensive test suite with hand-crafted test doubles (spies, stubs, dummies)
-- added project boilerplate (`CHANGELOG`, `Makefile`, `LICENSE`, `.editorconfig`, `.gitignore`, `.github/`)
+- added extensible updater plugin interface with Terraform and Go implementations
+- added multi-provider support (GitHub, GitLab, Azure DevOps) for repository discovery and PR creation
+- added project boilerplate (`CHANGELOG.md`, `Makefile`, `LICENSE`, `.editorconfig`, `.gitignore`, `.github/`)
 
 ### Changed
 
-- **BREAKING CHANGE**: redesigned from single Azure DevOps provider to multi-provider architecture
 - changed CLI to use a single `run` command with `--config`, `--dry-run`, and `--verbose` flags
 - changed dependency management to use interface-based design for providers and updaters
+- redesigned from single Azure DevOps provider to multi-provider architecture
 
 ### Removed
 
-- removed tightly coupled Azure DevOps-only implementation
 - removed separate `scan`, `list`, and `upgrade` CLI commands
+- removed tightly coupled Azure DevOps-only implementation
