@@ -1,0 +1,5 @@
+infrastructure/provider/github/github_test.go
+infrastructure/provider/gitlab/gitlab_test.go
+a461b4424b0c13c0d178f76343bee2c25211cd07:infrastructure/provider/github/github.go
+a461b4424b0c13c0d178f76343bee2c25211cd07:infrastructure/provider/gitlab/gitlab.go
+a461b4424b0c13c0d178f76343bee2c25211cd07:infrastructure/updater/golang/golang.go
