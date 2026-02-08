@@ -20,12 +20,46 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 
 ## Installation
 
-### From Source
+### Quick Install (Recommended)
+
+Install `autoupdate` with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh
+```
+
+Or using wget:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh
+```
+
+#### Installation Options
+
+```bash
+# Install specific version
+curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --version v1.0.0
+
+# Install to custom directory
+curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --install-dir /usr/local/bin
+
+# Show what would be installed without doing it
+curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --dry-run
+
+# Force reinstallation
+curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --force
+```
+
+### Download Pre-built Binaries
+
+Download pre-built binaries from the [releases page](https://github.com/rios0rios0/autoupdate/releases).
+
+### Build from Source
 
 ```bash
 git clone https://github.com/rios0rios0/autoupdate.git
 cd autoupdate
-go build -o autoupdate .
+make build
 ```
 
 ## Configuration
@@ -104,8 +138,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: go install github.com/rios0rios0/autoupdate@latest
-      - run: autoupdate run
+      - name: 'Download Autoupdate'
+        run: curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --install-dir .
+      - run: ./autoupdate run
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -120,7 +155,9 @@ schedules:
         - main
 
 steps:
-  - script: autoupdate run
+  - script: curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --install-dir .
+    displayName: 'Download Autoupdate'
+  - script: ./autoupdate run
     env:
       AZURE_DEVOPS_PAT: $(System.AccessToken)
 ```
