@@ -282,6 +282,17 @@ func buildUpgradeScript(
 	sb.WriteString("export GIT_CONFIG_GLOBAL=\"$TEMP_GITCONFIG\"\n")
 	sb.WriteString("trap 'rm -f \"$TEMP_GITCONFIG\"' EXIT\n\n")
 
+	// Ensure git user identity is configured for committing. Only set
+	// defaults when the values are missing so that any user-provided
+	// configuration (e.g. from ~/.gitconfig) is preserved.
+	sb.WriteString("# Ensure git user identity is configured\n")
+	sb.WriteString("if ! git config --global user.name > /dev/null 2>&1; then\n")
+	sb.WriteString("    git config --global user.name \"autoupdate[bot]\"\n")
+	sb.WriteString("fi\n")
+	sb.WriteString("if ! git config --global user.email > /dev/null 2>&1; then\n")
+	sb.WriteString("    git config --global user.email \"autoupdate[bot]@users.noreply.github.com\"\n")
+	sb.WriteString("fi\n\n")
+
 	// Clone
 	sb.WriteString("echo \"Cloning repository...\"\n")
 	sb.WriteString("git clone --depth=1 --branch \"$DEFAULT_BRANCH\" \"$CLONE_URL\" \"$REPO_DIR\" 2>&1\n")
@@ -360,6 +371,9 @@ func writeCommitAndPush(sb *strings.Builder) {
 func buildEnv(params upgradeParams, repoDir, goBinary string) []string {
 	return append(os.Environ(),
 		"AUTH_TOKEN="+params.AuthToken,
+		// Export the token under common aliases so that repository-specific
+		// scripts (e.g. config.sh) can reference it by their expected name.
+		"GIT_HTTPS_TOKEN="+params.AuthToken,
 		"CLONE_URL="+params.CloneURL,
 		"BRANCH_NAME="+params.BranchName,
 		"GO_VERSION="+params.GoVersion,
