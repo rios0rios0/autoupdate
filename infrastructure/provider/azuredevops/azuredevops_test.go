@@ -117,6 +117,29 @@ func TestAzureDevOpsProvider(t *testing.T) {
 			)
 		})
 
+		t.Run("should strip existing username from RemoteURL before embedding PAT", func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			p := New("ado-secret-pat")
+			repo := domain.Repository{
+				Organization: "MyOrg",
+				Project:      "MyProject",
+				Name:         "MyRepo",
+				RemoteURL:    "https://MyOrg@dev.azure.com/MyOrg/MyProject/_git/MyRepo",
+			}
+
+			// when
+			cloneURL := p.CloneURL(repo)
+
+			// then
+			assert.Equal(
+				t,
+				"https://pat:ado-secret-pat@dev.azure.com/MyOrg/MyProject/_git/MyRepo",
+				cloneURL,
+			)
+		})
+
 		t.Run("should construct URL when RemoteURL is empty", func(t *testing.T) {
 			t.Parallel()
 

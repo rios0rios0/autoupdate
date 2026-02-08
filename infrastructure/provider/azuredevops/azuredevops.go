@@ -342,9 +342,17 @@ func (p *Provider) CloneURL(repo domain.Repository) string {
 			repo.Organization, repo.Project, repo.Name,
 		)
 	}
-	return strings.Replace(
-		remoteURL, "https://", "https://pat:"+p.token+"@", 1,
-	)
+
+	parsed, err := url.Parse(remoteURL)
+	if err != nil {
+		return strings.Replace(
+			remoteURL, "https://", "https://pat:"+p.token+"@", 1,
+		)
+	}
+
+	parsed.User = url.UserPassword("pat", p.token)
+
+	return parsed.String()
 }
 
 // --- internal helpers ---

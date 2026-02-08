@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Fixed
+
+- fixed the bug with the Azure DevOps formatting wrong URLs
+
 ## [0.1.0] - 2026-02-07
 
 ### Added
