@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-02-07
+
 ### Changed
 
 - changed the code to ensure Git user identity is configured for committing
