@@ -294,11 +294,11 @@ func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
 	var entry string
 	if vCtx.NeedsVersionUpgrade {
 		entry = fmt.Sprintf(
-			"- changed the GoLang version to %s and updated all module dependencies",
+			"- changed the Go version to `%s` and updated all module dependencies",
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the GoLang module dependencies to their latest versions"
+		entry = "- changed the Go module dependencies to their latest versions"
 	}
 
 	modified := domain.InsertChangelogEntry(string(content), []string{entry})
