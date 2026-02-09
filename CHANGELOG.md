@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-02-09
+
 ### Changed
 
 - corrected Markdown formatting of Go-updater generated changelog entries
