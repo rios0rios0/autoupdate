@@ -521,7 +521,7 @@ func TestGenerateBranchName(t *testing.T) {
 		name := generateBranchName(tasks)
 
 		// then
-		assert.Equal(t, "terraform-deps-upgrade/mod-net-v2.0.0", name)
+		assert.Equal(t, "chore/upgrade-mod-net-v2.0.0", name)
 	})
 
 	t.Run("should generate batch branch name for multiple modules", func(t *testing.T) {
@@ -538,7 +538,7 @@ func TestGenerateBranchName(t *testing.T) {
 		name := generateBranchName(tasks)
 
 		// then
-		assert.Equal(t, "terraform-deps-upgrade/batch-3-modules", name)
+		assert.Equal(t, "chore/upgrade-3-modules", name)
 	})
 }
 
@@ -605,7 +605,7 @@ func TestGeneratePRTitle(t *testing.T) {
 		title := generatePRTitle(tasks)
 
 		// then
-		assert.Equal(t, "chore(deps): Upgrade mod-storage to v3.1.0", title)
+		assert.Equal(t, "chore(deps): upgrade mod-storage to v3.1.0", title)
 	})
 
 	t.Run("should generate batch PR title", func(t *testing.T) {
@@ -624,7 +624,7 @@ func TestGeneratePRTitle(t *testing.T) {
 		// then
 		assert.Equal(
 			t,
-			"chore(deps): Upgrade 3 Terraform module dependencies",
+			"chore(deps): upgrade 3 Terraform module dependencies",
 			title,
 		)
 	})

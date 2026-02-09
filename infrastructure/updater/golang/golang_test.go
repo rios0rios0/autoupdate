@@ -1,9 +1,14 @@
 package golang //nolint:testpackage // tests unexported functions
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/rios0rios0/autoupdate/domain"
+	testdoubles "github.com/rios0rios0/autoupdate/test"
 )
 
 func TestGoUpdater_Name(t *testing.T) {
@@ -48,34 +53,55 @@ func TestFindGoBinary(t *testing.T) {
 func TestGenerateGoPRDescription(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should include Go version in description", func(t *testing.T) {
+	t.Run("should include Go version upgrade in description when version was updated", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		goVersion := "1.25"
+		goVersion := "1.25.7"
 		hasConfigSH := false
+		goVersionUpdated := true
 
 		// when
-		desc := generateGoPRDescription(goVersion, hasConfigSH)
+		desc := generateGoPRDescription(goVersion, hasConfigSH, goVersionUpdated)
 
 		// then
 		assert.Contains(t, desc, "## Summary")
-		assert.Contains(t, desc, "**1.25**")
+		assert.Contains(t, desc, "upgrades the Go version to **1.25.7**")
 		assert.Contains(t, desc, "go.mod")
 		assert.Contains(t, desc, "go get -u ./...")
 		assert.Contains(t, desc, "go mod tidy")
 		assert.NotContains(t, desc, "config.sh")
 	})
 
+	t.Run("should indicate deps-only update when version was already current", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		goVersion := "1.25.7"
+		hasConfigSH := false
+		goVersionUpdated := false
+
+		// when
+		desc := generateGoPRDescription(goVersion, hasConfigSH, goVersionUpdated)
+
+		// then
+		assert.Contains(t, desc, "## Summary")
+		assert.Contains(t, desc, "updates all Go module dependencies")
+		assert.Contains(t, desc, "already at **1.25.7**")
+		assert.NotContains(t, desc, "Updated `go.mod` Go directive")
+		assert.Contains(t, desc, "go get -u ./...")
+		assert.Contains(t, desc, "go mod tidy")
+	})
+
 	t.Run("should mention config.sh when present", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		goVersion := "1.25"
+		goVersion := "1.25.7"
 		hasConfigSH := true
 
 		// when
-		desc := generateGoPRDescription(goVersion, hasConfigSH)
+		desc := generateGoPRDescription(goVersion, hasConfigSH, true)
 
 		// then
 		assert.Contains(t, desc, "config.sh")
@@ -90,7 +116,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		hasConfigSH := false
 
 		// when
-		desc := generateGoPRDescription(goVersion, hasConfigSH)
+		desc := generateGoPRDescription(goVersion, hasConfigSH, true)
 
 		// then
 		assert.Contains(t, desc, "### Review Checklist")
@@ -103,10 +129,10 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given
-		goVersion := "1.25"
+		goVersion := "1.25.7"
 
 		// when
-		desc := generateGoPRDescription(goVersion, false)
+		desc := generateGoPRDescription(goVersion, false, true)
 
 		// then
 		assert.Contains(t, desc, "autoupdate")
@@ -114,18 +140,191 @@ func TestGenerateGoPRDescription(t *testing.T) {
 	})
 }
 
+func TestParseGoDirective(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should extract three-part version from go.mod content", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "module github.com/org/repo\n\ngo 1.25.7\n\nrequire (\n)\n"
+
+		// when
+		version := parseGoDirective(content)
+
+		// then
+		assert.Equal(t, "1.25.7", version)
+	})
+
+	t.Run("should extract two-part version from go.mod content", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "module github.com/org/repo\n\ngo 1.25\n"
+
+		// when
+		version := parseGoDirective(content)
+
+		// then
+		assert.Equal(t, "1.25", version)
+	})
+
+	t.Run("should return empty string when go directive is missing", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "module github.com/org/repo\n"
+
+		// when
+		version := parseGoDirective(content)
+
+		// then
+		assert.Empty(t, version)
+	})
+
+	t.Run("should handle leading/trailing whitespace on the go line", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "module github.com/org/repo\n  go 1.24.3  \n"
+
+		// when
+		version := parseGoDirective(content)
+
+		// then
+		assert.Equal(t, "1.24.3", version)
+	})
+
+	t.Run("should not match toolchain directive", func(t *testing.T) {
+		t.Parallel()
+
+		// given — "toolchain go1.25.7" should NOT be picked up
+		content := "module github.com/org/repo\n\ntoolchain go1.25.7\n"
+
+		// when
+		version := parseGoDirective(content)
+
+		// then
+		assert.Empty(t, version)
+	})
+}
+
+func TestResolveVersionContext(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should choose version-upgrade branch when go directive is older", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			FileContents: map[string]string{
+				"go.mod": "module example.com/repo\n\ngo 1.24.3\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+
+		// when
+		vCtx := resolveVersionContext(ctx, provider, repo, "1.25.7")
+
+		// then
+		assert.Equal(t, "1.25.7", vCtx.LatestVersion)
+		assert.True(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "chore/upgrade-go-1.25.7", vCtx.BranchName)
+	})
+
+	t.Run("should choose deps-only branch when go directive matches latest", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			FileContents: map[string]string{
+				"go.mod": "module example.com/repo\n\ngo 1.25.7\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+
+		// when
+		vCtx := resolveVersionContext(ctx, provider, repo, "1.25.7")
+
+		// then
+		assert.Equal(t, "1.25.7", vCtx.LatestVersion)
+		assert.False(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "chore/upgrade-deps-1.25.7", vCtx.BranchName)
+	})
+
+	t.Run("should default to version-upgrade when GetFileContent fails", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			FileContentErr: errors.New("file not found"),
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+
+		// when
+		vCtx := resolveVersionContext(ctx, provider, repo, "1.25.7")
+
+		// then
+		assert.True(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "chore/upgrade-go-1.25.7", vCtx.BranchName)
+	})
+
+	t.Run("should treat two-part version as needing upgrade to three-part latest", func(t *testing.T) {
+		t.Parallel()
+
+		// given — go.mod says "go 1.25" but latest is "1.25.7"
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			FileContents: map[string]string{
+				"go.mod": "module example.com/repo\n\ngo 1.25\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+
+		// when
+		vCtx := resolveVersionContext(ctx, provider, repo, "1.25.7")
+
+		// then
+		assert.True(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "chore/upgrade-go-1.25.7", vCtx.BranchName)
+	})
+
+	t.Run("should treat missing go directive as needing version upgrade", func(t *testing.T) {
+		t.Parallel()
+
+		// given — go.mod exists but has no go directive
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			FileContents: map[string]string{
+				"go.mod": "module example.com/repo\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+
+		// when
+		vCtx := resolveVersionContext(ctx, provider, repo, "1.25.7")
+
+		// then — parseGoDirective returns "" which != "1.25.7"
+		assert.True(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "chore/upgrade-go-1.25.7", vCtx.BranchName)
+	})
+}
+
 func TestBuildUpgradeScript(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should include clone and checkout commands", func(t *testing.T) {
+	t.Run("should include clone, checkout, and sed-based version update", func(t *testing.T) {
 		t.Parallel()
 
 		// given
 		params := upgradeParams{
 			CloneURL:      "https://github.com/org/repo.git",
 			DefaultBranch: "main",
-			BranchName:    "go-deps-upgrade/go-1.25",
-			GoVersion:     "1.25",
+			BranchName:    "chore/upgrade-go-1.25.7",
+			GoVersion:     "1.25.7",
 			AuthToken:     "token",
 			HasConfigSH:   false,
 			ProviderName:  "github",
@@ -139,9 +338,33 @@ func TestBuildUpgradeScript(t *testing.T) {
 		assert.Contains(t, script, "set -euo pipefail")
 		assert.Contains(t, script, "git clone")
 		assert.Contains(t, script, "git checkout -b")
-		assert.Contains(t, script, "mod edit -go=")
+
+		// Should use portable sed + redirect-and-move instead of go mod edit
+		assert.NotContains(t, script, "mod edit -go=")
+		assert.NotContains(t, script, "sed -i")
+		assert.Contains(t, script, "CURRENT_GO_VERSION=$(grep -m1")
+		assert.Contains(t, script, "go.mod > go.mod.tmp && mv go.mod.tmp go.mod")
+		assert.Contains(t, script, "GO_VERSION_UPDATED=true")
+		assert.Contains(t, script, "GO_VERSION_UPDATED=false")
+
+		// Should guard against missing go directive
+		assert.Contains(t, script, "if [ -z \"$CURRENT_GO_VERSION\" ]")
+		assert.Contains(t, script, "no go directive found")
+
+		// Should verify sed actually modified the file before setting flags
+		assert.Contains(t, script, "UPDATED_VERSION=$(grep -m1")
+		assert.Contains(t, script, "failed to update go directive")
+
+		// Should still run dependency updates
 		assert.Contains(t, script, "go get -u ./...")
 		assert.Contains(t, script, "go mod tidy")
+
+		// Should re-apply version after go mod tidy
+		assert.Contains(t, script, "Re-apply Go version if go mod tidy")
+		assert.Contains(t, script, "AFTER_TIDY_VERSION")
+
+		// Should have conditional commit messages
+		assert.Contains(t, script, "GO_VERSION_CHANGED")
 		assert.Contains(t, script, "CHANGES_PUSHED=true")
 		assert.Contains(t, script, "CHANGES_PUSHED=false")
 	})
@@ -154,7 +377,7 @@ func TestBuildUpgradeScript(t *testing.T) {
 			CloneURL:      "https://github.com/org/repo.git",
 			DefaultBranch: "main",
 			BranchName:    "branch",
-			GoVersion:     "1.25",
+			GoVersion:     "1.25.7",
 			AuthToken:     "token",
 			HasConfigSH:   true,
 			ProviderName:  "github",
@@ -176,7 +399,7 @@ func TestBuildUpgradeScript(t *testing.T) {
 			CloneURL:      "https://github.com/org/repo.git",
 			DefaultBranch: "main",
 			BranchName:    "branch",
-			GoVersion:     "1.25",
+			GoVersion:     "1.25.7",
 			AuthToken:     "token",
 			HasConfigSH:   false,
 			ProviderName:  "github",
@@ -252,7 +475,7 @@ func TestBuildEnv(t *testing.T) {
 			AuthToken:     "my-token",
 			CloneURL:      "https://example.com/repo.git",
 			BranchName:    "upgrade-branch",
-			GoVersion:     "1.25",
+			GoVersion:     "1.25.7",
 			DefaultBranch: "main",
 		}
 
@@ -263,7 +486,7 @@ func TestBuildEnv(t *testing.T) {
 		assert.Contains(t, env, "AUTH_TOKEN=my-token")
 		assert.Contains(t, env, "CLONE_URL=https://example.com/repo.git")
 		assert.Contains(t, env, "BRANCH_NAME=upgrade-branch")
-		assert.Contains(t, env, "GO_VERSION=1.25")
+		assert.Contains(t, env, "GO_VERSION=1.25.7")
 		assert.Contains(t, env, "REPO_DIR=/tmp/repo")
 		assert.Contains(t, env, "GO_BINARY=/usr/local/go/bin/go")
 		assert.Contains(t, env, "DEFAULT_BRANCH=main")
