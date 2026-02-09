@@ -1,12 +1,14 @@
 package terraform //nolint:testpackage // tests unexported functions
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/domain"
+	testdoubles "github.com/rios0rios0/autoupdate/test"
 )
 
 func TestTerraformUpdater_Name(t *testing.T) {
@@ -563,7 +565,7 @@ func TestGenerateCommitMessage(t *testing.T) {
 		msg := generateCommitMessage(tasks)
 
 		// then
-		assert.Equal(t, "chore(deps): upgrade mod-net from v1.0.0 to v2.0.0", msg)
+		assert.Equal(t, "chore(deps): upgraded `mod-net` from `v1.0.0` to `v2.0.0`", msg)
 	})
 
 	t.Run("should generate batch commit message", func(t *testing.T) {
@@ -581,7 +583,7 @@ func TestGenerateCommitMessage(t *testing.T) {
 		// then
 		assert.Equal(
 			t,
-			"chore(deps): upgrade 2 Terraform module dependencies",
+			"chore(deps): upgraded 2 Terraform module dependencies",
 			msg,
 		)
 	})
@@ -605,7 +607,7 @@ func TestGeneratePRTitle(t *testing.T) {
 		title := generatePRTitle(tasks)
 
 		// then
-		assert.Equal(t, "chore(deps): upgrade mod-storage to v3.1.0", title)
+		assert.Equal(t, "chore(deps): upgraded `mod-storage` to `v3.1.0`", title)
 	})
 
 	t.Run("should generate batch PR title", func(t *testing.T) {
@@ -624,7 +626,7 @@ func TestGeneratePRTitle(t *testing.T) {
 		// then
 		assert.Equal(
 			t,
-			"chore(deps): upgrade 3 Terraform module dependencies",
+			"chore(deps): upgraded 3 Terraform module dependencies",
 			title,
 		)
 	})
@@ -664,5 +666,126 @@ func TestGeneratePRDescription(t *testing.T) {
 		assert.Contains(t, desc, "| mod-a | v1.0.0 | v2.0.0 | /a.tf |")
 		assert.Contains(t, desc, "| mod-b | v0.5.0 | v1.0.0 | /b.tf |")
 		assert.Contains(t, desc, "autoupdate")
+	})
+}
+
+func TestAppendChangelogEntry(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should append changelog entry when CHANGELOG.md exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			ExistingFiles: map[string]bool{"CHANGELOG.md": true},
+			FileContents: map[string]string{
+				"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+		upgrades := []upgradeTask{
+			{
+				dep:        domain.Dependency{Source: "git::https://example.com/mod-net", CurrentVer: "v1.0.0"},
+				newVersion: "v2.0.0",
+			},
+		}
+		existing := []domain.FileChange{{Path: "main.tf", Content: "...", ChangeType: "edit"}}
+
+		// when
+		result := appendChangelogEntry(ctx, provider, repo, upgrades, existing)
+
+		// then
+		require.Len(t, result, 2)
+		assert.Equal(t, "main.tf", result[0].Path)
+		assert.Equal(t, "CHANGELOG.md", result[1].Path)
+		assert.Contains(t, result[1].Content, "### Changed")
+		assert.Contains(t, result[1].Content, "- changed the Terraform module mod-net from v1.0.0 to v2.0.0")
+	})
+
+	t.Run("should return unchanged file changes when CHANGELOG.md is absent", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			ExistingFiles: map[string]bool{},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+		upgrades := []upgradeTask{
+			{
+				dep:        domain.Dependency{Source: "git::https://example.com/mod-net", CurrentVer: "v1.0.0"},
+				newVersion: "v2.0.0",
+			},
+		}
+		existing := []domain.FileChange{{Path: "main.tf", Content: "...", ChangeType: "edit"}}
+
+		// when
+		result := appendChangelogEntry(ctx, provider, repo, upgrades, existing)
+
+		// then
+		require.Len(t, result, 1)
+		assert.Equal(t, "main.tf", result[0].Path)
+	})
+
+	t.Run("should generate one entry per upgrade", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			ExistingFiles: map[string]bool{"CHANGELOG.md": true},
+			FileContents: map[string]string{
+				"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+		upgrades := []upgradeTask{
+			{
+				dep:        domain.Dependency{Source: "git::https://example.com/mod-net", CurrentVer: "v1.0.0"},
+				newVersion: "v2.0.0",
+			},
+			{
+				dep:        domain.Dependency{Source: "git::https://example.com/mod-compute", CurrentVer: "v3.0.0"},
+				newVersion: "v4.0.0",
+			},
+		}
+
+		// when
+		result := appendChangelogEntry(ctx, provider, repo, upgrades, nil)
+
+		// then
+		require.Len(t, result, 1)
+		assert.Equal(t, "CHANGELOG.md", result[0].Path)
+		assert.Contains(t, result[0].Content, "- changed the Terraform module mod-net from v1.0.0 to v2.0.0")
+		assert.Contains(t, result[0].Content, "- changed the Terraform module mod-compute from v3.0.0 to v4.0.0")
+	})
+
+	t.Run("should return unchanged when CHANGELOG.md has no Unreleased section", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			ExistingFiles: map[string]bool{"CHANGELOG.md": true},
+			FileContents: map[string]string{
+				"CHANGELOG.md": "# Changelog\n\n## [1.0.0] - 2026-01-01\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+		upgrades := []upgradeTask{
+			{
+				dep:        domain.Dependency{Source: "git::https://example.com/mod-net", CurrentVer: "v1.0.0"},
+				newVersion: "v2.0.0",
+			},
+		}
+		existing := []domain.FileChange{{Path: "main.tf", Content: "...", ChangeType: "edit"}}
+
+		// when
+		result := appendChangelogEntry(ctx, provider, repo, upgrades, existing)
+
+		// then
+		require.Len(t, result, 1)
+		assert.Equal(t, "main.tf", result[0].Path)
 	})
 }
