@@ -193,6 +193,8 @@ func (u *Updater) createUpgradePR(
 	}
 
 	fileChanges := applyUpgrades(upgrades)
+	fileChanges = appendChangelogEntry(ctx, provider, repo, upgrades, fileChanges)
+
 	targetBranch := repo.DefaultBranch
 	if opts.TargetBranch != "" {
 		targetBranch = "refs/heads/" + opts.TargetBranch
@@ -522,14 +524,14 @@ func generateBranchName(tasks []upgradeTask) string {
 func generateCommitMessage(tasks []upgradeTask) string {
 	if len(tasks) == 1 {
 		return fmt.Sprintf(
-			"chore(deps): upgrade %s from %s to %s",
+			"chore(deps): upgraded `%s` from `%s` to `%s`",
 			extractRepoName(tasks[0].dep.Source),
 			tasks[0].dep.CurrentVer,
 			tasks[0].newVersion,
 		)
 	}
 	return fmt.Sprintf(
-		"chore(deps): upgrade %d Terraform module dependencies",
+		"chore(deps): upgraded %d Terraform module dependencies",
 		len(tasks),
 	)
 }
@@ -537,15 +539,55 @@ func generateCommitMessage(tasks []upgradeTask) string {
 func generatePRTitle(tasks []upgradeTask) string {
 	if len(tasks) == 1 {
 		return fmt.Sprintf(
-			"chore(deps): upgrade %s to %s",
+			"chore(deps): upgraded `%s` to `%s`",
 			extractRepoName(tasks[0].dep.Source),
 			tasks[0].newVersion,
 		)
 	}
 	return fmt.Sprintf(
-		"chore(deps): upgrade %d Terraform module dependencies",
+		"chore(deps): upgraded %d Terraform module dependencies",
 		len(tasks),
 	)
+}
+
+// appendChangelogEntry reads the target repo's CHANGELOG.md (if it exists),
+// inserts entries describing the Terraform module upgrades, and appends the
+// modified file to the change set.
+func appendChangelogEntry(
+	ctx context.Context,
+	provider domain.Provider,
+	repo domain.Repository,
+	upgrades []upgradeTask,
+	fileChanges []domain.FileChange,
+) []domain.FileChange {
+	if !provider.HasFile(ctx, repo, "CHANGELOG.md") {
+		return fileChanges
+	}
+
+	content, err := provider.GetFileContent(ctx, repo, "CHANGELOG.md")
+	if err != nil {
+		logger.Warnf("[terraform] Failed to read CHANGELOG.md: %v", err)
+		return fileChanges
+	}
+
+	entries := make([]string, 0, len(upgrades))
+	for _, up := range upgrades {
+		entries = append(entries, fmt.Sprintf(
+			"- changed the Terraform module %s from %s to %s",
+			extractRepoName(up.dep.Source), up.dep.CurrentVer, up.newVersion,
+		))
+	}
+
+	modified := domain.InsertChangelogEntry(content, entries)
+	if modified == content {
+		return fileChanges
+	}
+
+	return append(fileChanges, domain.FileChange{
+		Path:       "CHANGELOG.md",
+		Content:    modified,
+		ChangeType: "edit",
+	})
 }
 
 func generatePRDescription(tasks []upgradeTask) string {
