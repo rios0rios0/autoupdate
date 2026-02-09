@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Fixed
+
+- fixed the bug with the GoLang PRs removing the minor version while updating
+
 ## [0.1.2] - 2026-02-07
 
 ### Changed
