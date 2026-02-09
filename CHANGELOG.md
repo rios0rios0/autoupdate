@@ -18,7 +18,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Changed
 
-- corrected Markdown format within the `CHANGELOG.md` template
+- corrected Markdown formatting of Go-updater generated changelog entries
 
 ## [0.2.0] - 2026-02-09
 
