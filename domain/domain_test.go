@@ -115,14 +115,14 @@ func TestModels(t *testing.T) {
 		// given / when
 		pr := domain.PullRequest{
 			ID:     42,
-			Title:  "chore(deps): upgrade networking to v2.0.0",
+			Title:  "chore(deps): upgraded `networking` to `v2.0.0`",
 			URL:    "https://github.com/org/repo/pull/42",
 			Status: "open",
 		}
 
 		// then
 		assert.Equal(t, 42, pr.ID)
-		assert.Equal(t, "chore(deps): upgrade networking to v2.0.0", pr.Title)
+		assert.Equal(t, "chore(deps): upgraded `networking` to `v2.0.0`", pr.Title)
 		assert.Equal(t, "open", pr.Status)
 		assert.Contains(t, pr.URL, "/pull/42")
 	})

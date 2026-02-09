@@ -98,14 +98,34 @@ func (u *Updater) CreateUpdatePRs(
 		return []domain.PullRequest{}, nil
 	}
 
-	// Check if config.sh exists (for Azure DevOps private package setups)
-	hasConfigSH := provider.HasFile(ctx, repo, "config.sh")
+	result, hasConfigSH, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx)
+	if upgradeErr != nil {
+		return nil, upgradeErr
+	}
 
-	// Clone, upgrade, push
+	if !result.HasChanges {
+		logger.Infof("[golang] %s/%s: already up to date", repo.Organization, repo.Name)
+		return []domain.PullRequest{}, nil
+	}
+
+	return openPullRequest(ctx, provider, repo, opts, vCtx, result, hasConfigSH)
+}
+
+// cloneAndUpgrade prepares the changelog, clones the repository, runs the
+// upgrade script, and returns the result.
+func cloneAndUpgrade(
+	ctx context.Context,
+	provider domain.Provider,
+	repo domain.Repository,
+	vCtx *versionContext,
+) (*upgradeResult, bool, error) {
+	hasConfigSH := provider.HasFile(ctx, repo, "config.sh")
+	changelogFile := prepareChangelog(ctx, provider, repo, vCtx)
+
 	cloneURL := provider.CloneURL(repo)
 	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
 
-	result, upgradeErr := upgradeGoRepo(ctx, upgradeParams{
+	result, err := upgradeGoRepo(ctx, upgradeParams{
 		CloneURL:      cloneURL,
 		DefaultBranch: defaultBranch,
 		BranchName:    vCtx.BranchName,
@@ -113,20 +133,26 @@ func (u *Updater) CreateUpdatePRs(
 		AuthToken:     provider.AuthToken(),
 		HasConfigSH:   hasConfigSH,
 		ProviderName:  provider.Name(),
+		ChangelogFile: changelogFile,
 	})
-	if upgradeErr != nil {
-		return nil, fmt.Errorf("failed to upgrade: %w", upgradeErr)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	if !result.HasChanges {
-		logger.Infof(
-			"[golang] %s/%s: already up to date",
-			repo.Organization, repo.Name,
-		)
-		return []domain.PullRequest{}, nil
-	}
+	return result, hasConfigSH, nil
+}
 
-	// Create PR
+// openPullRequest creates the PR on the hosting provider after a successful
+// upgrade.
+func openPullRequest(
+	ctx context.Context,
+	provider domain.Provider,
+	repo domain.Repository,
+	opts domain.UpdateOptions,
+	vCtx *versionContext,
+	result *upgradeResult,
+	hasConfigSH bool,
+) ([]domain.PullRequest, error) {
 	targetBranch := repo.DefaultBranch
 	if opts.TargetBranch != "" {
 		targetBranch = "refs/heads/" + opts.TargetBranch
@@ -135,11 +161,11 @@ func (u *Updater) CreateUpdatePRs(
 	prTitle := "chore(deps): update Go module dependencies"
 	if result.GoVersionUpdated {
 		prTitle = fmt.Sprintf(
-			"chore(deps): upgrade Go to %s and update dependencies",
+			"chore(deps): upgraded Go version to `%s` and updated all dependencies",
 			vCtx.LatestVersion,
 		)
 	}
-	prDesc := generateGoPRDescription(vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated)
+	prDesc := GenerateGoPRDescription(vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated)
 
 	pr, createErr := provider.CreatePullRequest(ctx, repo, domain.PullRequestInput{
 		SourceBranch: "refs/heads/" + vCtx.BranchName,
@@ -205,6 +231,58 @@ func resolveVersionContext(
 	}
 }
 
+// prepareChangelog reads the target repo's CHANGELOG.md (if it exists),
+// inserts an entry describing the Go upgrade, and writes the modified
+// content to a temp file.  Returns the temp file path, or "" if no
+// changelog is present or reading/writing fails.
+func prepareChangelog(
+	ctx context.Context,
+	provider domain.Provider,
+	repo domain.Repository,
+	vCtx *versionContext,
+) string {
+	if !provider.HasFile(ctx, repo, "CHANGELOG.md") {
+		return ""
+	}
+
+	content, err := provider.GetFileContent(ctx, repo, "CHANGELOG.md")
+	if err != nil {
+		logger.Warnf("[golang] Failed to read CHANGELOG.md: %v", err)
+		return ""
+	}
+
+	var entry string
+	if vCtx.NeedsVersionUpgrade {
+		entry = fmt.Sprintf(
+			"- changed the GoLang version to %s and updated all module dependencies",
+			vCtx.LatestVersion,
+		)
+	} else {
+		entry = "- changed the GoLang module dependencies to their latest versions"
+	}
+
+	modified := domain.InsertChangelogEntry(content, []string{entry})
+	if modified == content {
+		return ""
+	}
+
+	tmpFile, writeErr := os.CreateTemp("", "changelog-*.md")
+	if writeErr != nil {
+		logger.Warnf("[golang] Failed to create temp changelog file: %v", writeErr)
+		return ""
+	}
+
+	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
+		logger.Warnf("[golang] Failed to write temp changelog: %v", writeErr)
+		return ""
+	}
+	_ = tmpFile.Close()
+
+	return tmpFile.Name()
+}
+
 // --- internal types ---
 
 type upgradeParams struct {
@@ -215,6 +293,7 @@ type upgradeParams struct {
 	AuthToken     string
 	HasConfigSH   bool
 	ProviderName  string
+	ChangelogFile string // path to a temp file with updated CHANGELOG.md content (empty = no changelog)
 }
 
 type upgradeResult struct {
@@ -387,6 +466,9 @@ func buildUpgradeScript(
 	// Go upgrade commands
 	writeGoUpgradeCommands(&sb)
 
+	// Overwrite CHANGELOG.md with the pre-generated content (if provided)
+	writeChangelogUpdate(&sb)
+
 	// Check for changes and commit/push
 	writeCommitAndPush(&sb)
 
@@ -477,12 +559,22 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("fi\n\n")
 }
 
+func writeChangelogUpdate(sb *strings.Builder) {
+	sb.WriteString("# Update CHANGELOG.md if a pre-generated file was provided\n")
+	sb.WriteString("if [ -n \"${CHANGELOG_FILE:-}\" ] && [ -f \"$CHANGELOG_FILE\" ]; then\n")
+	sb.WriteString("    echo \"Updating CHANGELOG.md...\"\n")
+	sb.WriteString("    cp \"$CHANGELOG_FILE\" CHANGELOG.md\n")
+	sb.WriteString("fi\n\n")
+}
+
 func writeCommitAndPush(sb *strings.Builder) {
 	sb.WriteString("if [ -n \"$(git status --porcelain)\" ]; then\n")
 	sb.WriteString("    echo \"Changes detected, committing and pushing...\"\n")
 	sb.WriteString("    git add -A\n")
 	sb.WriteString("    if [ \"$GO_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString("        git commit -m \"chore(deps): upgrade Go to $GO_VERSION and update dependencies\"\n")
+	sb.WriteString(
+		"        git commit -m \"chore(deps): upgraded Go version to `$GO_VERSION` and updated all dependencies\"\n",
+	)
 	sb.WriteString("    else\n")
 	sb.WriteString("        git commit -m \"chore(deps): update Go module dependencies\"\n")
 	sb.WriteString("    fi\n")
@@ -495,7 +587,7 @@ func writeCommitAndPush(sb *strings.Builder) {
 }
 
 func buildEnv(params upgradeParams, repoDir, goBinary string) []string {
-	return append(os.Environ(),
+	env := append(os.Environ(),
 		"AUTH_TOKEN="+params.AuthToken,
 		// Export the token under common aliases so that repository-specific
 		// scripts (e.g. config.sh) can reference it by their expected name.
@@ -507,6 +599,10 @@ func buildEnv(params upgradeParams, repoDir, goBinary string) []string {
 		"GO_BINARY="+goBinary,
 		"DEFAULT_BRANCH="+params.DefaultBranch,
 	)
+	if params.ChangelogFile != "" {
+		env = append(env, "CHANGELOG_FILE="+params.ChangelogFile)
+	}
+	return env
 }
 
 func findGoBinary() (string, error) {
@@ -560,7 +656,10 @@ func findGoBinaryInGVM(home string) (string, bool) {
 	return "", false
 }
 
-func generateGoPRDescription(goVersion string, hasConfigSH, goVersionUpdated bool) string {
+// GenerateGoPRDescription builds a markdown PR description for a Go
+// dependency upgrade.  Exported so that the local-mode CLI handler can
+// reuse the same description format.
+func GenerateGoPRDescription(goVersion string, hasConfigSH, goVersionUpdated bool) string {
 	var sb strings.Builder
 	sb.WriteString("## Summary\n\n")
 	if goVersionUpdated {

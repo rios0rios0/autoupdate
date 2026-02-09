@@ -3,9 +3,11 @@ package golang //nolint:testpackage // tests unexported functions
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/domain"
 	testdoubles "github.com/rios0rios0/autoupdate/test"
@@ -62,7 +64,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		goVersionUpdated := true
 
 		// when
-		desc := generateGoPRDescription(goVersion, hasConfigSH, goVersionUpdated)
+		desc := GenerateGoPRDescription(goVersion, hasConfigSH, goVersionUpdated)
 
 		// then
 		assert.Contains(t, desc, "## Summary")
@@ -82,7 +84,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		goVersionUpdated := false
 
 		// when
-		desc := generateGoPRDescription(goVersion, hasConfigSH, goVersionUpdated)
+		desc := GenerateGoPRDescription(goVersion, hasConfigSH, goVersionUpdated)
 
 		// then
 		assert.Contains(t, desc, "## Summary")
@@ -101,7 +103,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		hasConfigSH := true
 
 		// when
-		desc := generateGoPRDescription(goVersion, hasConfigSH, true)
+		desc := GenerateGoPRDescription(goVersion, hasConfigSH, true)
 
 		// then
 		assert.Contains(t, desc, "config.sh")
@@ -116,7 +118,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		hasConfigSH := false
 
 		// when
-		desc := generateGoPRDescription(goVersion, hasConfigSH, true)
+		desc := GenerateGoPRDescription(goVersion, hasConfigSH, true)
 
 		// then
 		assert.Contains(t, desc, "### Review Checklist")
@@ -132,7 +134,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		goVersion := "1.25.7"
 
 		// when
-		desc := generateGoPRDescription(goVersion, false, true)
+		desc := GenerateGoPRDescription(goVersion, false, true)
 
 		// then
 		assert.Contains(t, desc, "autoupdate")
@@ -313,6 +315,121 @@ func TestResolveVersionContext(t *testing.T) {
 	})
 }
 
+func TestPrepareChangelog(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return temp file path when CHANGELOG.md exists and version upgrade", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			ExistingFiles: map[string]bool{"CHANGELOG.md": true},
+			FileContents: map[string]string{
+				"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+		vCtx := &versionContext{
+			LatestVersion:       "1.25.7",
+			NeedsVersionUpgrade: true,
+			BranchName:          "chore/upgrade-go-1.25.7",
+		}
+
+		// when
+		path := prepareChangelog(ctx, provider, repo, vCtx)
+
+		// then
+		assert.NotEmpty(t, path)
+		// Verify the file contains the expected entry
+		content, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "### Changed")
+		assert.Contains(
+			t,
+			string(content),
+			"- changed the GoLang version to 1.25.7 and updated all module dependencies",
+		)
+		os.Remove(path) // cleanup
+	})
+
+	t.Run("should return temp file with deps-only entry when not upgrading version", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			ExistingFiles: map[string]bool{"CHANGELOG.md": true},
+			FileContents: map[string]string{
+				"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+		vCtx := &versionContext{
+			LatestVersion:       "1.25.7",
+			NeedsVersionUpgrade: false,
+			BranchName:          "chore/upgrade-deps-1.25.7",
+		}
+
+		// when
+		path := prepareChangelog(ctx, provider, repo, vCtx)
+
+		// then
+		assert.NotEmpty(t, path)
+		content, err := os.ReadFile(path)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "- changed the GoLang module dependencies to their latest versions")
+		os.Remove(path)
+	})
+
+	t.Run("should return empty string when CHANGELOG.md is absent", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			ExistingFiles: map[string]bool{},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+		vCtx := &versionContext{
+			LatestVersion:       "1.25.7",
+			NeedsVersionUpgrade: true,
+			BranchName:          "chore/upgrade-go-1.25.7",
+		}
+
+		// when
+		path := prepareChangelog(ctx, provider, repo, vCtx)
+
+		// then
+		assert.Empty(t, path)
+	})
+
+	t.Run("should return empty string when CHANGELOG.md has no Unreleased section", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			ExistingFiles: map[string]bool{"CHANGELOG.md": true},
+			FileContents: map[string]string{
+				"CHANGELOG.md": "# Changelog\n\n## [1.0.0] - 2026-01-01\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+		vCtx := &versionContext{
+			LatestVersion:       "1.25.7",
+			NeedsVersionUpgrade: true,
+			BranchName:          "chore/upgrade-go-1.25.7",
+		}
+
+		// when
+		path := prepareChangelog(ctx, provider, repo, vCtx)
+
+		// then
+		assert.Empty(t, path)
+	})
+}
+
 func TestBuildUpgradeScript(t *testing.T) {
 	t.Parallel()
 
@@ -490,5 +607,223 @@ func TestBuildEnv(t *testing.T) {
 		assert.Contains(t, env, "REPO_DIR=/tmp/repo")
 		assert.Contains(t, env, "GO_BINARY=/usr/local/go/bin/go")
 		assert.Contains(t, env, "DEFAULT_BRANCH=main")
+	})
+
+	t.Run("should include CHANGELOG_FILE when set", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := upgradeParams{
+			AuthToken:     "token",
+			ChangelogFile: "/tmp/changelog-12345.md",
+			DefaultBranch: "main",
+		}
+
+		// when
+		env := buildEnv(params, "/tmp/repo", "go")
+
+		// then
+		assert.Contains(t, env, "CHANGELOG_FILE=/tmp/changelog-12345.md")
+	})
+
+	t.Run("should not include CHANGELOG_FILE when empty", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := upgradeParams{
+			AuthToken:     "token",
+			DefaultBranch: "main",
+		}
+
+		// when
+		env := buildEnv(params, "/tmp/repo", "go")
+
+		// then
+		for _, e := range env {
+			assert.NotContains(t, e, "CHANGELOG_FILE")
+		}
+	})
+}
+
+func TestBuildUpgradeScriptChangelogSection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should include changelog update step in script", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := upgradeParams{
+			ProviderName: "github",
+			HasConfigSH:  false,
+		}
+
+		// when
+		script := buildUpgradeScript(params, "/tmp/repo", "go")
+
+		// then
+		assert.Contains(t, script, "CHANGELOG_FILE")
+		assert.Contains(t, script, "cp \"$CHANGELOG_FILE\" CHANGELOG.md")
+	})
+}
+
+func TestBuildLocalUpgradeScript(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should not include clone or auth when no token is provided", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := localUpgradeParams{
+			BranchName: "chore/upgrade-go-1.25.7",
+			GoVersion:  "1.25.7",
+		}
+
+		// when
+		script := buildLocalUpgradeScript(params)
+
+		// then
+		assert.Contains(t, script, "#!/bin/bash")
+		assert.Contains(t, script, "set -euo pipefail")
+
+		// Should NOT contain remote-mode clone or auth sections
+		assert.NotContains(t, script, "git clone")
+		assert.NotContains(t, script, "CLONE_URL")
+		assert.NotContains(t, script, "TEMP_GITCONFIG")
+		assert.NotContains(t, script, "x-access-token")
+		assert.NotContains(t, script, "config.sh")
+		assert.NotContains(t, script, "autoupdate[bot]")
+
+		// Should contain dirty-tree check
+		assert.Contains(t, script, "git status --porcelain")
+		assert.Contains(t, script, "uncommitted changes")
+
+		// Should contain branch creation
+		assert.Contains(t, script, "git checkout -b")
+
+		// Should contain Go upgrade commands
+		assert.Contains(t, script, "CURRENT_GO_VERSION")
+		assert.Contains(t, script, "go get -u ./...")
+		assert.Contains(t, script, "go mod tidy")
+		assert.Contains(t, script, "GO_VERSION_UPDATED")
+
+		// Should contain changelog update
+		assert.Contains(t, script, "CHANGELOG_FILE")
+		assert.Contains(t, script, "CHANGELOG.md")
+
+		// Should contain commit and push
+		assert.Contains(t, script, "git add -A")
+		assert.Contains(t, script, "git commit")
+		assert.Contains(t, script, "git push origin")
+		assert.Contains(t, script, "CHANGES_PUSHED")
+	})
+
+	t.Run("should include auth and config.sh when token and config are present", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := localUpgradeParams{
+			BranchName:   "chore/upgrade-go-1.25.7",
+			GoVersion:    "1.25.7",
+			AuthToken:    "my-token",
+			ProviderName: "azuredevops",
+			HasConfigSH:  true,
+		}
+
+		// when
+		script := buildLocalUpgradeScript(params)
+
+		// then
+		assert.Contains(t, script, "TEMP_GITCONFIG")
+		assert.Contains(t, script, "dev.azure.com")
+		assert.Contains(t, script, "pat:")
+		assert.Contains(t, script, "GIT_CONFIG_GLOBAL")
+		assert.Contains(t, script, "source ./config.sh")
+
+		// Should still NOT clone
+		assert.NotContains(t, script, "git clone")
+		assert.NotContains(t, script, "autoupdate[bot]")
+	})
+}
+
+func TestBuildLocalEnv(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should include core variables without auth when no token", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := localUpgradeParams{
+			BranchName: "chore/upgrade-go-1.25.7",
+			GoVersion:  "1.25.7",
+		}
+
+		// when
+		env := buildLocalEnv(params, "/usr/local/go/bin/go")
+
+		// then
+		assert.Contains(t, env, "BRANCH_NAME=chore/upgrade-go-1.25.7")
+		assert.Contains(t, env, "GO_VERSION=1.25.7")
+		assert.Contains(t, env, "GO_BINARY=/usr/local/go/bin/go")
+
+		// Should NOT contain remote-mode-only variables (CLONE_URL,
+		// DEFAULT_BRANCH are never inherited from the process env).
+		// Note: AUTH_TOKEN / GIT_HTTPS_TOKEN may exist in the process
+		// environment, so we only verify we didn't explicitly add them
+		// by checking the exact "our-value" entries are absent.
+		assert.NotContains(t, env, "CLONE_URL=")
+		assert.NotContains(t, env, "DEFAULT_BRANCH=")
+	})
+
+	t.Run("should include AUTH_TOKEN and GIT_HTTPS_TOKEN when token is provided", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := localUpgradeParams{
+			BranchName: "branch",
+			GoVersion:  "1.25.7",
+			AuthToken:  "my-secret-token",
+		}
+
+		// when
+		env := buildLocalEnv(params, "go")
+
+		// then
+		assert.Contains(t, env, "AUTH_TOKEN=my-secret-token")
+		assert.Contains(t, env, "GIT_HTTPS_TOKEN=my-secret-token")
+	})
+
+	t.Run("should include CHANGELOG_FILE when set", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := localUpgradeParams{
+			BranchName:    "branch",
+			GoVersion:     "1.25.7",
+			ChangelogFile: "/tmp/changelog-12345.md",
+		}
+
+		// when
+		env := buildLocalEnv(params, "go")
+
+		// then
+		assert.Contains(t, env, "CHANGELOG_FILE=/tmp/changelog-12345.md")
+	})
+
+	t.Run("should not include CHANGELOG_FILE when empty", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := localUpgradeParams{
+			BranchName: "branch",
+			GoVersion:  "1.25.7",
+		}
+
+		// when
+		env := buildLocalEnv(params, "go")
+
+		// then
+		for _, e := range env {
+			assert.NotContains(t, e, "CHANGELOG_FILE")
+		}
 	})
 }
