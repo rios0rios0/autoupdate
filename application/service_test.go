@@ -76,7 +76,7 @@ func TestUpdateService_Run(t *testing.T) {
 			PRs: []domain.PullRequest{
 				{
 					ID:    42,
-					Title: "chore(deps): Upgrade networking to v2.0.0",
+					Title: "chore(deps): upgrade networking to v2.0.0",
 					URL:   "https://github.com/test-org/repo-a/pull/42",
 				},
 			},

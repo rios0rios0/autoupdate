@@ -18,8 +18,8 @@ import (
 const (
 	updaterName     = "terraform"
 	minMatchLen     = 6
-	branchBatchFmt  = "terraform-deps-upgrade/batch-%d-modules"
-	branchSingleFmt = "terraform-deps-upgrade/%s-%s"
+	branchBatchFmt  = "chore/upgrade-%d-modules"
+	branchSingleFmt = "chore/upgrade-%s-%s"
 )
 
 // Updater implements domain.Updater for Terraform module dependencies.
@@ -537,13 +537,13 @@ func generateCommitMessage(tasks []upgradeTask) string {
 func generatePRTitle(tasks []upgradeTask) string {
 	if len(tasks) == 1 {
 		return fmt.Sprintf(
-			"chore(deps): Upgrade %s to %s",
+			"chore(deps): upgrade %s to %s",
 			extractRepoName(tasks[0].dep.Source),
 			tasks[0].newVersion,
 		)
 	}
 	return fmt.Sprintf(
-		"chore(deps): Upgrade %d Terraform module dependencies",
+		"chore(deps): upgrade %d Terraform module dependencies",
 		len(tasks),
 	)
 }
