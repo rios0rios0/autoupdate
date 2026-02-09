@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- corrected Markdown format within the `CHANGELOG.md` template
+
 ## [0.2.0] - 2026-02-09
 
 ### Added
