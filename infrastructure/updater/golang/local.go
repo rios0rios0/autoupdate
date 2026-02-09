@@ -294,7 +294,7 @@ func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
 	var entry string
 	if vCtx.NeedsVersionUpgrade {
 		entry = fmt.Sprintf(
-			"- changed the GoLang version to %s and updated all module dependencies",
+			"- changed the Go version to `%s` and updated all module dependencies",
 			vCtx.LatestVersion,
 		)
 	} else {

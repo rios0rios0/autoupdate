@@ -348,7 +348,7 @@ func TestPrepareChangelog(t *testing.T) {
 		assert.Contains(
 			t,
 			string(content),
-			"- changed the GoLang version to 1.25.7 and updated all module dependencies",
+			"- changed the Go version to `1.25.7` and updated all module dependencies",
 		)
 		os.Remove(path) // cleanup
 	})
