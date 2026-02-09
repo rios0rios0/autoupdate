@@ -298,7 +298,7 @@ func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the GoLang module dependencies to their latest versions"
+		entry = "- changed the Go module dependencies to their latest versions"
 	}
 
 	modified := domain.InsertChangelogEntry(string(content), []string{entry})
