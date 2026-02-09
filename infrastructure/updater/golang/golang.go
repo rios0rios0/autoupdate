@@ -18,14 +18,15 @@ import (
 )
 
 const (
-	updaterName      = "golang"
-	goVersionTimeout = 15 * time.Second
-	scriptFileMode   = 0o700
+	updaterName       = "golang"
+	goVersionTimeout  = 15 * time.Second
+	scriptFileMode    = 0o700
+	goDirectiveFields = 2 // expected number of fields in "go <version>"
 
-	// Branch name patterns — mirroring the Terraform updater's dual-branch
-	// approach.  One format is used when the Go version itself is being
-	// bumped (version upgrade); the other when the go directive is already
-	// at the latest and only module dependencies are being refreshed.
+	// Branch name patterns for Go updates. One format is used when the Go
+	// version (go directive) itself is being bumped; the other is used when
+	// the go directive is already at the desired version and only module
+	// dependencies are being refreshed.
 	branchGoVersionFmt = "chore/upgrade-go-%s"
 	branchGoDepsFmt    = "chore/upgrade-deps-%s"
 )
@@ -61,10 +62,13 @@ func (u *Updater) CreateUpdatePRs(
 ) ([]domain.PullRequest, error) {
 	logger.Infof("[golang] Processing %s/%s", repo.Organization, repo.Name)
 
-	vCtx, err := resolveVersionContext(ctx, provider, repo)
+	latestGoVersion, err := fetchLatestGoVersion(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch latest Go version: %w", err)
 	}
+	logger.Infof("[golang] Latest stable Go version: %s", latestGoVersion)
+
+	vCtx := resolveVersionContext(ctx, provider, repo, latestGoVersion)
 
 	// Check if PR already exists
 	exists, prCheckErr := provider.PullRequestExists(ctx, repo, vCtx.BranchName)
@@ -80,10 +84,17 @@ func (u *Updater) CreateUpdatePRs(
 	}
 
 	if opts.DryRun {
-		logger.Infof(
-			"[golang] [DRY RUN] Would upgrade Go to %s and update deps for %s/%s",
-			vCtx.LatestVersion, repo.Organization, repo.Name,
-		)
+		if vCtx.NeedsVersionUpgrade {
+			logger.Infof(
+				"[golang] [DRY RUN] Would upgrade Go to %s and update deps for %s/%s",
+				vCtx.LatestVersion, repo.Organization, repo.Name,
+			)
+		} else {
+			logger.Infof(
+				"[golang] [DRY RUN] Would update Go module deps for %s/%s (already at Go %s)",
+				repo.Organization, repo.Name, vCtx.LatestVersion,
+			)
+		}
 		return []domain.PullRequest{}, nil
 	}
 
@@ -122,13 +133,13 @@ func (u *Updater) CreateUpdatePRs(
 	}
 
 	prTitle := "chore(deps): update Go module dependencies"
-	if vCtx.NeedsVersionUpgrade {
+	if result.GoVersionUpdated {
 		prTitle = fmt.Sprintf(
 			"chore(deps): upgrade Go to %s and update dependencies",
 			vCtx.LatestVersion,
 		)
 	}
-	prDesc := generateGoPRDescription(vCtx.LatestVersion, hasConfigSH, vCtx.NeedsVersionUpgrade)
+	prDesc := generateGoPRDescription(vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated)
 
 	pr, createErr := provider.CreatePullRequest(ctx, repo, domain.PullRequestInput{
 		SourceBranch: "refs/heads/" + vCtx.BranchName,
@@ -157,20 +168,17 @@ type versionContext struct {
 	BranchName          string
 }
 
-// resolveVersionContext fetches the latest stable Go version, reads the
-// remote go.mod to find the current directive, and picks the right
-// branch-name pattern (version-upgrade vs deps-only).
+// resolveVersionContext reads the remote go.mod to find the current go
+// directive and picks the right branch-name pattern (version-upgrade vs
+// deps-only).  The latest Go version must be provided by the caller so
+// that this function stays free of HTTP calls and is fully testable with
+// provider test doubles.
 func resolveVersionContext(
 	ctx context.Context,
 	provider domain.Provider,
 	repo domain.Repository,
-) (*versionContext, error) {
-	latestGoVersion, err := fetchLatestGoVersion(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch latest Go version: %w", err)
-	}
-	logger.Infof("[golang] Latest stable Go version: %s", latestGoVersion)
-
+	latestGoVersion string,
+) *versionContext {
 	// Read the current go.mod from the remote to decide whether this is a
 	// version upgrade or a deps-only refresh — before cloning.
 	needsVersionUpgrade := true // safe default when go.mod cannot be read
@@ -194,7 +202,7 @@ func resolveVersionContext(
 		LatestVersion:       latestGoVersion,
 		NeedsVersionUpgrade: needsVersionUpgrade,
 		BranchName:          branchName,
-	}, nil
+	}
 }
 
 // --- internal types ---
@@ -262,7 +270,10 @@ func parseGoDirective(goModContent string) string {
 	for _, line := range strings.Split(goModContent, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "go ") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "go "))
+			fields := strings.Fields(line)
+			if len(fields) >= goDirectiveFields {
+				return fields[1]
+			}
 		}
 	}
 	return ""
@@ -403,7 +414,7 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 	// Read the current go version from go.mod and compare with the target
 	sb.WriteString("# Read current Go version from go.mod\n")
 	sb.WriteString("CURRENT_GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
-	sb.WriteString("echo \"Current Go version in go.mod: $CURRENT_GO_VERSION\"\n")
+	sb.WriteString("echo \"Current Go version in go.mod: ${CURRENT_GO_VERSION:-<not found>}\"\n")
 	sb.WriteString("GO_VERSION_CHANGED=false\n\n")
 
 	// Only update the go directive if the versions differ.
@@ -414,11 +425,26 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 	// NOTE: we avoid "sed -i" because its syntax is incompatible between
 	// GNU sed (-i'') and BSD/macOS sed (-i ''). The redirect-and-move
 	// pattern works identically on all POSIX systems.
-	sb.WriteString("if [ \"$CURRENT_GO_VERSION\" != \"$GO_VERSION\" ]; then\n")
+	//
+	// Edge cases handled:
+	//   • Missing go directive — warn and let "go mod tidy" insert it later.
+	//   • sed no-op (pattern didn't match) — verify the file was actually
+	//     modified before setting GO_VERSION_CHANGED.
+	sb.WriteString("if [ -z \"$CURRENT_GO_VERSION\" ]; then\n")
+	sb.WriteString("    echo \"WARNING: no go directive found in go.mod, skipping version update\"\n")
+	sb.WriteString("    echo \"GO_VERSION_UPDATED=false\"\n")
+	sb.WriteString("elif [ \"$CURRENT_GO_VERSION\" != \"$GO_VERSION\" ]; then\n")
 	sb.WriteString("    echo \"Updating Go version from $CURRENT_GO_VERSION to $GO_VERSION...\"\n")
 	sb.WriteString("    sed \"s/^go [0-9][0-9.]*$/go ${GO_VERSION}/\" go.mod > go.mod.tmp && mv go.mod.tmp go.mod\n")
-	sb.WriteString("    GO_VERSION_CHANGED=true\n")
-	sb.WriteString("    echo \"GO_VERSION_UPDATED=true\"\n")
+	sb.WriteString("    # Verify the substitution actually took effect\n")
+	sb.WriteString("    UPDATED_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
+	sb.WriteString("    if [ \"$UPDATED_VERSION\" = \"$GO_VERSION\" ]; then\n")
+	sb.WriteString("        GO_VERSION_CHANGED=true\n")
+	sb.WriteString("        echo \"GO_VERSION_UPDATED=true\"\n")
+	sb.WriteString("    else\n")
+	sb.WriteString("        echo \"WARNING: failed to update go directive (sed pattern did not match)\"\n")
+	sb.WriteString("        echo \"GO_VERSION_UPDATED=false\"\n")
+	sb.WriteString("    fi\n")
 	sb.WriteString("else\n")
 	sb.WriteString("    echo \"Go version already at $GO_VERSION, skipping directive update\"\n")
 	sb.WriteString("    echo \"GO_VERSION_UPDATED=false\"\n")
@@ -437,14 +463,12 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 	// Re-apply the Go version after go mod tidy, because older Go binaries
 	// may normalise the three-part version back to two-part during tidy.
 	sb.WriteString("# Re-apply Go version if go mod tidy normalised it\n")
-	sb.WriteString("if [ \"$GO_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString("    AFTER_TIDY_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
-	sb.WriteString("    if [ \"$AFTER_TIDY_VERSION\" != \"$GO_VERSION\" ]; then\n")
-	sb.WriteString("        echo \"Re-applying Go version (go mod tidy changed it to $AFTER_TIDY_VERSION)...\"\n")
+	sb.WriteString("AFTER_TIDY_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
+	sb.WriteString("if [ -n \"$AFTER_TIDY_VERSION\" ] && [ \"$AFTER_TIDY_VERSION\" != \"$GO_VERSION\" ]; then\n")
+	sb.WriteString("    echo \"Re-applying Go version (go mod tidy changed it to $AFTER_TIDY_VERSION)...\"\n")
 	sb.WriteString(
-		"        sed \"s/^go [0-9][0-9.]*$/go ${GO_VERSION}/\" go.mod > go.mod.tmp && mv go.mod.tmp go.mod\n",
+		"    sed \"s/^go [0-9][0-9.]*$/go ${GO_VERSION}/\" go.mod > go.mod.tmp && mv go.mod.tmp go.mod\n",
 	)
-	sb.WriteString("    fi\n")
 	sb.WriteString("fi\n\n")
 
 	sb.WriteString("if [ -d \"vendor\" ]; then\n")
