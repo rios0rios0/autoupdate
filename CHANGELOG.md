@@ -16,6 +16,21 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added standalone local mode (`autoupdate .`) to update a local repository directly, auto-detecting the Git provider from the remote URL
+- added `--token` flag for explicit auth token override in local mode
+- added automatic CHANGELOG.md entry insertion when target repositories contain a changelog following the Keep a Changelog format (both Go and Terraform updaters)
+- added shared `InsertChangelogEntry` domain helper for Keep a Changelog manipulation
+- added dual branch naming patterns for the Go updater (`chore/upgrade-go-X.Y.Z` for version bumps, `chore/upgrade-deps-X.Y.Z` for dependency-only updates)
+
+### Changed
+
+- changed the Go updater to use portable `sed` with redirect-and-move instead of `sed -i` for cross-platform compatibility (GNU/BSD)
+- changed the Go updater to verify `sed` modifications and handle missing `go` directives before setting version-update status flags
+- changed the Go updater to re-apply the Go version after `go mod tidy` in case it normalises three-part versions
+- changed the Terraform updater branch naming to use `chore/upgrade-` prefix format
+
 ## [0.1.3] - 2026-02-09
 
 ### Fixed

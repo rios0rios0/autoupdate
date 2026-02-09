@@ -4,9 +4,11 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 
 ## Features
 
+- **Standalone Local Mode**: Run `autoupdate .` on any local repo — auto-detects the Git provider from the remote URL, upgrades dependencies, and creates a PR
 - **Multi-Provider**: Supports GitHub, GitLab, and Azure DevOps as Git hosting providers
 - **API-Based Discovery**: Automatically discovers all repositories in an organization, group, or user account
 - **Extensible Updaters**: Plugin-based architecture for dependency ecosystems (Terraform modules, Go projects, and more coming)
+- **Changelog Integration**: Automatically updates `CHANGELOG.md` (Keep a Changelog format) when the target repository has one
 - **Cronjob-Ready**: Designed to run unattended on a schedule for daily dependency updates
 - **Dry Run Mode**: Preview all changes before creating any PRs
 - **Flexible Filtering**: Run against a specific provider, organization, or updater
@@ -102,7 +104,35 @@ Tokens support three formats:
 
 ## Usage
 
-### Run the Update Engine
+### Standalone Local Mode
+
+Update a single local repository directly — no config file needed. The provider is auto-detected from the `origin` remote URL:
+
+```bash
+# Update the current directory
+autoupdate .
+
+# Update a specific path
+autoupdate /path/to/repo
+
+# Dry run — preview what would happen
+autoupdate --dry-run .
+
+# Use an explicit token (overrides env var detection)
+autoupdate --token ghp_abc123 .
+```
+
+Auth tokens are read automatically from standard environment variables:
+
+| Provider    | Environment Variables                          |
+|-------------|------------------------------------------------|
+| GitHub      | `GITHUB_TOKEN` or `GH_TOKEN`                  |
+| Azure DevOps| `AZURE_DEVOPS_EXT_PAT` or `SYSTEM_ACCESSTOKEN` |
+| GitLab      | `GITLAB_TOKEN` or `GL_TOKEN`                   |
+
+### Batch Mode (Config-Driven)
+
+Discover and update all repositories across providers using a config file:
 
 ```bash
 # Run all configured providers and updaters
@@ -167,10 +197,12 @@ steps:
 ```
 autoupdate/
 ├── cmd/                             # CLI layer (Cobra commands)
-│   ├── root.go                      # Global flags: --config, --verbose, --dry-run
-│   └── run.go                       # Main "run" command
+│   ├── root.go                      # Global flags + local-mode entry point
+│   ├── local.go                     # Standalone local mode (autoupdate .)
+│   └── run.go                       # Batch "run" command (config-driven)
 ├── domain/                          # Interfaces and models (no dependencies)
 │   ├── models.go                    # Repository, Dependency, PullRequest, etc.
+│   ├── changelog.go                 # CHANGELOG.md manipulation helper
 │   ├── provider.go                  # Provider interface
 │   └── updater.go                   # Updater interface
 ├── infrastructure/                  # Implementations
@@ -182,7 +214,9 @@ autoupdate/
 │   └── updater/
 │       ├── registry.go              # Updater registry
 │       ├── terraform/terraform.go   # Terraform module updater
-│       └── golang/golang.go         # Go dependency updater
+│       └── golang/
+│           ├── golang.go            # Go dependency updater (remote mode)
+│           └── local.go             # Go dependency updater (local mode)
 ├── application/
 │   └── service.go                   # Orchestration service
 ├── config/
@@ -211,15 +245,20 @@ reg.Register(npmUpdater.New())
 
 ### Global Flags
 
-| Flag        | Short | Description                         |
-|-------------|-------|-------------------------------------|
-| `--config`  | `-c`  | Path to config file (auto-detected) |
-| `--dry-run` |       | Preview changes without applying    |
-| `--verbose` | `-v`  | Enable verbose output               |
+| Flag        | Short | Description                                              |
+|-------------|-------|----------------------------------------------------------|
+| `--config`  | `-c`  | Path to config file (auto-detected)                      |
+| `--token`   |       | Auth token for the Git provider (overrides env var)      |
+| `--dry-run` |       | Preview changes without applying                         |
+| `--verbose` | `-v`  | Enable verbose output                                    |
 
-### run
+### `autoupdate [path]`
 
-Run the dependency update engine.
+Standalone local mode — update a single repository in place.
+
+### `autoupdate run`
+
+Batch mode — discover and update repositories using a config file.
 
 | Flag         | Description                                            |
 |--------------|--------------------------------------------------------|
