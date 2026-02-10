@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -666,6 +667,54 @@ func TestBuildUpgradeScriptChangelogSection(t *testing.T) {
 	})
 }
 
+func TestBuildUpgradeScriptDockerfileSection(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should include Dockerfile update step gated on GO_VERSION_CHANGED", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := upgradeParams{
+			ProviderName: "github",
+			HasConfigSH:  false,
+		}
+
+		// when
+		script := buildUpgradeScript(params, "/tmp/repo", "go")
+
+		// then
+		assert.Contains(t, script, "GO_VERSION_CHANGED")
+		assert.Contains(t, script, "golang:${GO_VERSION}")
+		assert.Contains(t, script, "Updated $df")
+
+		// Should use -type f to skip directories and -print0 for safe path handling
+		assert.Contains(t, script, "-type f")
+		assert.Contains(t, script, "-print0")
+		assert.Contains(t, script, "read -r -d ''")
+	})
+
+	t.Run("should place Dockerfile update after go upgrade and before changelog", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := upgradeParams{
+			ProviderName: "github",
+			HasConfigSH:  false,
+		}
+
+		// when
+		script := buildUpgradeScript(params, "/tmp/repo", "go")
+
+		// then — verify ordering: go get → Dockerfile update → CHANGELOG
+		goGetIdx := strings.Index(script, "go get -u ./...")
+		dockerfileIdx := strings.Index(script, "Updating Dockerfile golang image tags")
+		changelogIdx := strings.Index(script, "Updating CHANGELOG.md")
+
+		assert.Greater(t, dockerfileIdx, goGetIdx, "Dockerfile update should come after go get")
+		assert.Greater(t, changelogIdx, dockerfileIdx, "CHANGELOG update should come after Dockerfile update")
+	})
+}
+
 func TestBuildLocalUpgradeScript(t *testing.T) {
 	t.Parallel()
 
@@ -706,6 +755,10 @@ func TestBuildLocalUpgradeScript(t *testing.T) {
 		assert.Contains(t, script, "go mod tidy")
 		assert.Contains(t, script, "GO_VERSION_UPDATED")
 
+		// Should contain Dockerfile update section
+		assert.Contains(t, script, "Updating Dockerfile golang image tags")
+		assert.Contains(t, script, "golang:${GO_VERSION}")
+
 		// Should contain changelog update
 		assert.Contains(t, script, "CHANGELOG_FILE")
 		assert.Contains(t, script, "CHANGELOG.md")
@@ -715,6 +768,27 @@ func TestBuildLocalUpgradeScript(t *testing.T) {
 		assert.Contains(t, script, "git commit")
 		assert.Contains(t, script, "git push origin")
 		assert.Contains(t, script, "CHANGES_PUSHED")
+	})
+
+	t.Run("should place Dockerfile update between go upgrade and changelog in local script", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := localUpgradeParams{
+			BranchName: "chore/upgrade-go-1.25.7",
+			GoVersion:  "1.25.7",
+		}
+
+		// when
+		script := buildLocalUpgradeScript(params)
+
+		// then — verify ordering: go get → Dockerfile update → CHANGELOG
+		goGetIdx := strings.Index(script, "go get -u ./...")
+		dockerfileIdx := strings.Index(script, "Updating Dockerfile golang image tags")
+		changelogIdx := strings.Index(script, "Updating CHANGELOG.md")
+
+		assert.Greater(t, dockerfileIdx, goGetIdx, "Dockerfile update should come after go get")
+		assert.Greater(t, changelogIdx, dockerfileIdx, "CHANGELOG update should come after Dockerfile update")
 	})
 
 	t.Run("should include auth and config.sh when token and config are present", func(t *testing.T) {
