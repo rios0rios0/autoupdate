@@ -466,6 +466,9 @@ func buildUpgradeScript(
 	// Go upgrade commands
 	writeGoUpgradeCommands(&sb)
 
+	// Update Dockerfile golang image tags (only when version was bumped)
+	writeDockerfileUpdate(&sb)
+
 	// Overwrite CHANGELOG.md with the pre-generated content (if provided)
 	writeChangelogUpdate(&sb)
 
@@ -556,6 +559,26 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("if [ -d \"vendor\" ]; then\n")
 	sb.WriteString("    echo \"Running go mod vendor...\"\n")
 	sb.WriteString("    \"$GO_BINARY\" mod vendor 2>&1 || echo \"WARNING: go mod vendor had some errors\"\n")
+	sb.WriteString("fi\n\n")
+}
+
+func writeDockerfileUpdate(sb *strings.Builder) {
+	sb.WriteString("# Update Dockerfile golang image tags when the Go version was bumped.\n")
+	sb.WriteString("# Uses -print0 / read -d '' to handle paths with spaces or special characters.\n")
+	sb.WriteString("if [ \"$GO_VERSION_CHANGED\" = \"true\" ]; then\n")
+	sb.WriteString("    echo \"Updating Dockerfile golang image tags to $GO_VERSION...\"\n")
+	sb.WriteString(
+		"    find . -type f -not -path './.git/*' " +
+			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
+			"-print0 | while IFS= read -r -d '' df; do\n",
+	)
+	sb.WriteString("        if grep -q 'golang:[0-9]' \"$df\"; then\n")
+	sb.WriteString(
+		"            sed \"s|golang:[0-9][0-9.]*|golang:${GO_VERSION}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
+	)
+	sb.WriteString("            echo \"  Updated $df\"\n")
+	sb.WriteString("        fi\n")
+	sb.WriteString("    done\n")
 	sb.WriteString("fi\n\n")
 }
 

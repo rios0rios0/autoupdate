@@ -2,5 +2,5 @@ infrastructure/provider/gitlab/gitlab_test.go:Password in URL:114
 infrastructure/provider/github/github_test.go:Password in URL:124
 infrastructure/provider/github/github.go:Password in URL:366
 infrastructure/provider/gitlab/gitlab.go:Password in URL:386
-infrastructure/updater/golang/golang.go:Password in URL:486
-infrastructure/updater/golang/golang.go:Password in URL:491
+infrastructure/updater/golang/golang.go:Password in URL:489
+infrastructure/updater/golang/golang.go:Password in URL:494
