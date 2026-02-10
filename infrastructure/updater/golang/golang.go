@@ -258,7 +258,7 @@ func prepareChangelog(
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the GoLang module dependencies to their latest versions"
+		entry = "- changed the Go module dependencies to their latest versions"
 	}
 
 	modified := domain.InsertChangelogEntry(content, []string{entry})
@@ -560,10 +560,15 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 }
 
 func writeChangelogUpdate(sb *strings.Builder) {
-	sb.WriteString("# Update CHANGELOG.md if a pre-generated file was provided\n")
+	sb.WriteString("# Update CHANGELOG.md only if the Go upgrade produced actual changes.\n")
+	sb.WriteString("# This prevents creating empty PRs that only touch the changelog.\n")
 	sb.WriteString("if [ -n \"${CHANGELOG_FILE:-}\" ] && [ -f \"$CHANGELOG_FILE\" ]; then\n")
-	sb.WriteString("    echo \"Updating CHANGELOG.md...\"\n")
-	sb.WriteString("    cp \"$CHANGELOG_FILE\" CHANGELOG.md\n")
+	sb.WriteString("    if [ -n \"$(git status --porcelain)\" ]; then\n")
+	sb.WriteString("        echo \"Updating CHANGELOG.md...\"\n")
+	sb.WriteString("        cp \"$CHANGELOG_FILE\" CHANGELOG.md\n")
+	sb.WriteString("    else\n")
+	sb.WriteString("        echo \"No dependency changes detected, skipping CHANGELOG update.\"\n")
+	sb.WriteString("    fi\n")
 	sb.WriteString("fi\n\n")
 }
 

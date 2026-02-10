@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Fixed
+
+- fixed a bug that created empty PRs where only `CHANGELOG.md` changed
+
 ## [0.2.1] - 2026-02-09
 
 ### Changed

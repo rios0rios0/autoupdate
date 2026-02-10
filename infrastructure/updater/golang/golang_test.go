@@ -378,7 +378,7 @@ func TestPrepareChangelog(t *testing.T) {
 		assert.NotEmpty(t, path)
 		content, err := os.ReadFile(path)
 		require.NoError(t, err)
-		assert.Contains(t, string(content), "- changed the GoLang module dependencies to their latest versions")
+		assert.Contains(t, string(content), "- changed the Go module dependencies to their latest versions")
 		os.Remove(path)
 	})
 
