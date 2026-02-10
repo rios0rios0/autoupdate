@@ -46,13 +46,13 @@ func TestInsertChangelogEntry(t *testing.T) {
 
 		// given
 		content := "# Changelog\n\n## [Unreleased]\n\n### Fixed\n\n- fixed a bug\n\n## [1.0.0] - 2026-01-01\n"
-		entries := []string{"- changed the GoLang module dependencies to their latest versions"}
+		entries := []string{"- changed the Go module dependencies to their latest versions"}
 
 		// when
 		result := domain.InsertChangelogEntry(content, entries)
 
 		// then
-		assert.Contains(t, result, "## [Unreleased]\n\n### Changed\n\n- changed the GoLang module")
+		assert.Contains(t, result, "## [Unreleased]\n\n### Changed\n\n- changed the Go module")
 		assert.Contains(t, result, "### Fixed")
 	})
 
