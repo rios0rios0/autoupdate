@@ -13,6 +13,8 @@ import (
 
 	"github.com/rios0rios0/autoupdate/domain"
 	goUpdater "github.com/rios0rios0/autoupdate/infrastructure/updater/golang"
+	jsUpdater "github.com/rios0rios0/autoupdate/infrastructure/updater/javascript"
+	pyUpdater "github.com/rios0rios0/autoupdate/infrastructure/updater/python"
 )
 
 const (
@@ -29,9 +31,28 @@ type remoteInfo struct {
 	RepoName     string
 }
 
+// projectType identifies the detected project ecosystem.
+type projectType string
+
+const (
+	projectGo         projectType = "golang"
+	projectPython     projectType = "python"
+	projectJavaScript projectType = "javascript"
+)
+
+// localPRInfo holds the information needed to create a PR after a local upgrade.
+type localPRInfo struct {
+	BranchName     string
+	LatestVersion  string
+	VersionUpdated bool
+	PackageManager string // JavaScript only
+	ProjectType    projectType
+	HasChanges     bool
+}
+
 // runLocal is the entry point for the standalone local mode.
-// It upgrades Go dependencies in the given directory, pushes a branch,
-// and creates a PR by auto-detecting the Git provider from the remote.
+// It upgrades dependencies in the given directory, pushes a branch,
+// and creates a PR by auto-detecting the Git provider and project type.
 func runLocal(_ *cobra.Command, args []string) error {
 	ctx := context.Background()
 
@@ -40,10 +61,12 @@ func runLocal(_ *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid path: %w", err)
 	}
 
-	// Verify this is a Go project
-	if _, statErr := os.Stat(filepath.Join(repoDir, "go.mod")); statErr != nil {
-		return fmt.Errorf("no go.mod found in %s — only Go projects are supported in local mode", repoDir)
+	// Detect project type
+	projType, detectErr := detectProjectType(repoDir)
+	if detectErr != nil {
+		return detectErr
 	}
+	logger.Infof("Detected project type: %s", projType)
 
 	// Detect Git provider from remote URL
 	remote, parseErr := parseGitRemote(ctx, repoDir)
@@ -72,13 +95,8 @@ func runLocal(_ *cobra.Command, args []string) error {
 	}
 	logger.Infof("Default branch: %s", defaultBranch)
 
-	// Run Go upgrade
-	result, upgradeErr := goUpdater.RunLocalUpgrade(ctx, repoDir, goUpdater.LocalUpgradeOptions{
-		DryRun:       dryRun,
-		Verbose:      verbose,
-		AuthToken:    token,
-		ProviderName: remote.ProviderType,
-	})
+	// Run the appropriate upgrade
+	prInfo, upgradeErr := runLocalUpgrade(ctx, repoDir, projType, remote.ProviderType, token)
 	if upgradeErr != nil {
 		return upgradeErr
 	}
@@ -87,14 +105,12 @@ func runLocal(_ *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if !result.HasChanges {
+	if !prInfo.HasChanges {
 		logger.Info("No dependency changes detected, nothing to do.")
 		return nil
 	}
 
 	// Build repository struct for the provider API.
-	// ID is set to Name because the Azure DevOps API accepts the repo
-	// name in place of the GUID, and in local mode we don't have the GUID.
 	repo := domain.Repository{
 		ID:            remote.RepoName,
 		Name:          remote.RepoName,
@@ -103,16 +119,124 @@ func runLocal(_ *cobra.Command, args []string) error {
 		DefaultBranch: defaultBranch,
 	}
 
-	return createLocalPR(ctx, remote.ProviderType, token, repo, result)
+	return createLocalPRForProject(ctx, remote.ProviderType, token, repo, prInfo)
 }
 
-// createLocalPR creates a pull request using the provider API after a
-// successful local upgrade.
-func createLocalPR(
+// detectProjectType determines what kind of project is in the given directory.
+func detectProjectType(repoDir string) (projectType, error) {
+	// Check in order of specificity
+	if _, err := os.Stat(filepath.Join(repoDir, "go.mod")); err == nil {
+		return projectGo, nil
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "package.json")); err == nil {
+		return projectJavaScript, nil
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "requirements.txt")); err == nil {
+		return projectPython, nil
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "pyproject.toml")); err == nil {
+		return projectPython, nil
+	}
+	return "", fmt.Errorf(
+		"no supported project found in %s — expected go.mod, package.json, requirements.txt, or pyproject.toml",
+		repoDir,
+	)
+}
+
+// runLocalUpgrade dispatches to the appropriate updater based on project type.
+func runLocalUpgrade(
+	ctx context.Context,
+	repoDir string,
+	projType projectType,
+	providerType, token string,
+) (*localPRInfo, error) {
+	switch projType {
+	case projectGo:
+		return runGoLocalUpgrade(ctx, repoDir, providerType, token)
+	case projectPython:
+		return runPythonLocalUpgrade(ctx, repoDir, providerType, token)
+	case projectJavaScript:
+		return runJSLocalUpgrade(ctx, repoDir, providerType, token)
+	default:
+		return nil, fmt.Errorf("unsupported project type: %s", projType)
+	}
+}
+
+func runGoLocalUpgrade(
+	ctx context.Context,
+	repoDir, providerType, token string,
+) (*localPRInfo, error) {
+	result, err := goUpdater.RunLocalUpgrade(ctx, repoDir, goUpdater.LocalUpgradeOptions{
+		DryRun:       dryRun,
+		Verbose:      verbose,
+		AuthToken:    token,
+		ProviderName: providerType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &localPRInfo{
+		BranchName:     result.BranchName,
+		LatestVersion:  result.LatestVersion,
+		VersionUpdated: result.GoVersionUpdated,
+		ProjectType:    projectGo,
+		HasChanges:     result.HasChanges,
+	}, nil
+}
+
+func runPythonLocalUpgrade(
+	ctx context.Context,
+	repoDir, providerType, token string,
+) (*localPRInfo, error) {
+	result, err := pyUpdater.RunLocalUpgrade(ctx, repoDir, pyUpdater.LocalUpgradeOptions{
+		DryRun:       dryRun,
+		Verbose:      verbose,
+		AuthToken:    token,
+		ProviderName: providerType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &localPRInfo{
+		BranchName:     result.BranchName,
+		LatestVersion:  result.LatestVersion,
+		VersionUpdated: result.PythonVersionUpdated,
+		ProjectType:    projectPython,
+		HasChanges:     result.HasChanges,
+	}, nil
+}
+
+func runJSLocalUpgrade(
+	ctx context.Context,
+	repoDir, providerType, token string,
+) (*localPRInfo, error) {
+	result, err := jsUpdater.RunLocalUpgrade(ctx, repoDir, jsUpdater.LocalUpgradeOptions{
+		DryRun:       dryRun,
+		Verbose:      verbose,
+		AuthToken:    token,
+		ProviderName: providerType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &localPRInfo{
+		BranchName:     result.BranchName,
+		LatestVersion:  result.LatestVersion,
+		VersionUpdated: result.NodeVersionUpdated,
+		PackageManager: result.PackageManager,
+		ProjectType:    projectJavaScript,
+		HasChanges:     result.HasChanges,
+	}, nil
+}
+
+// createLocalPRForProject creates a pull request using the provider API after
+// a successful local upgrade, adapting the title and description based on
+// the project type.
+func createLocalPRForProject(
 	ctx context.Context,
 	providerType, token string,
 	repo domain.Repository,
-	result *goUpdater.LocalResult,
+	info *localPRInfo,
 ) error {
 	provRegistry := buildProviderRegistry()
 	provider, err := provRegistry.Get(providerType, token)
@@ -120,16 +244,7 @@ func createLocalPR(
 		return fmt.Errorf("failed to create provider: %w", err)
 	}
 
-	prTitle := "chore(deps): update Go module dependencies"
-	if result.GoVersionUpdated {
-		prTitle = fmt.Sprintf(
-			"chore(deps): upgraded Go version to `%s` and updated all dependencies",
-			result.LatestVersion,
-		)
-	}
-	prDesc := goUpdater.GenerateGoPRDescription(
-		result.LatestVersion, false, result.GoVersionUpdated,
-	)
+	prTitle, prDesc := generatePRContent(info)
 
 	targetBranch := repo.DefaultBranch
 	if !strings.HasPrefix(targetBranch, "refs/heads/") {
@@ -137,7 +252,7 @@ func createLocalPR(
 	}
 
 	pr, createErr := provider.CreatePullRequest(ctx, repo, domain.PullRequestInput{
-		SourceBranch: "refs/heads/" + result.BranchName,
+		SourceBranch: "refs/heads/" + info.BranchName,
 		TargetBranch: targetBranch,
 		Title:        prTitle,
 		Description:  prDesc,
@@ -148,6 +263,54 @@ func createLocalPR(
 
 	logger.Infof("Created PR #%d: %s", pr.ID, pr.URL)
 	return nil
+}
+
+// generatePRContent returns the title and description for a PR based on
+// the project type and upgrade result.
+func generatePRContent(info *localPRInfo) (string, string) {
+	switch info.ProjectType {
+	case projectGo:
+		title := "chore(deps): update Go module dependencies"
+		if info.VersionUpdated {
+			title = fmt.Sprintf(
+				"chore(deps): upgraded Go version to `%s` and updated all dependencies",
+				info.LatestVersion,
+			)
+		}
+		desc := goUpdater.GenerateGoPRDescription(
+			info.LatestVersion, false, info.VersionUpdated,
+		)
+		return title, desc
+
+	case projectPython:
+		title := "chore(deps): updated Python dependencies"
+		if info.VersionUpdated {
+			title = fmt.Sprintf(
+				"chore(deps): upgraded Python to `%s` and updated all dependencies",
+				info.LatestVersion,
+			)
+		}
+		desc := pyUpdater.GeneratePRDescription(
+			info.LatestVersion, info.VersionUpdated,
+		)
+		return title, desc
+
+	case projectJavaScript:
+		title := "chore(deps): updated JavaScript dependencies"
+		if info.VersionUpdated {
+			title = fmt.Sprintf(
+				"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
+				info.LatestVersion,
+			)
+		}
+		desc := jsUpdater.GeneratePRDescription(
+			info.LatestVersion, info.PackageManager, info.VersionUpdated,
+		)
+		return title, desc
+
+	default:
+		return "chore(deps): updated dependencies", "Automated dependency update."
+	}
 }
 
 // ---------------------------------------------------------------------------

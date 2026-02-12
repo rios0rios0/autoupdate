@@ -16,6 +16,16 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added Python updater supporting `requirements.txt` and `pyproject.toml` projects, with automatic `.python-version` and Dockerfile `python:` image tag updates
+- added JavaScript updater supporting npm, yarn, and pnpm projects (auto-detected via `lockfiles`), with automatic `.nvmrc`/`.node-version` and Dockerfile `node:` image tag updates
+- added Python and JavaScript support to the standalone local mode (`autoupdate .`), with automatic project type detection
+
+### Changed
+
+- changed the local mode to auto-detect Go, Python, and JavaScript projects instead of requiring `go.mod`
+
 ## [0.3.0] - 2026-02-12
 
 ### Added
