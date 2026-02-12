@@ -71,7 +71,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		assert.Contains(t, desc, "## Summary")
 		assert.Contains(t, desc, "upgrades the Go version to **1.25.7**")
 		assert.Contains(t, desc, "go.mod")
-		assert.Contains(t, desc, "go get -u ./...")
+		assert.Contains(t, desc, "go get -u all")
 		assert.Contains(t, desc, "go mod tidy")
 		assert.NotContains(t, desc, "config.sh")
 	})
@@ -92,7 +92,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		assert.Contains(t, desc, "updates all Go module dependencies")
 		assert.Contains(t, desc, "already at **1.25.7**")
 		assert.NotContains(t, desc, "Updated `go.mod` Go directive")
-		assert.Contains(t, desc, "go get -u ./...")
+		assert.Contains(t, desc, "go get -u all")
 		assert.Contains(t, desc, "go mod tidy")
 	})
 
@@ -474,7 +474,7 @@ func TestBuildUpgradeScript(t *testing.T) {
 		assert.Contains(t, script, "failed to update go directive")
 
 		// Should still run dependency updates
-		assert.Contains(t, script, "go get -u ./...")
+		assert.Contains(t, script, "go get -u all")
 		assert.Contains(t, script, "go mod tidy")
 
 		// Should re-apply version after go mod tidy
@@ -706,7 +706,7 @@ func TestBuildUpgradeScriptDockerfileSection(t *testing.T) {
 		script := buildUpgradeScript(params, "/tmp/repo", "go")
 
 		// then — verify ordering: go get → Dockerfile update → CHANGELOG
-		goGetIdx := strings.Index(script, "go get -u ./...")
+		goGetIdx := strings.Index(script, "go get -u all")
 		dockerfileIdx := strings.Index(script, "Updating Dockerfile golang image tags")
 		changelogIdx := strings.Index(script, "Updating CHANGELOG.md")
 
@@ -751,7 +751,7 @@ func TestBuildLocalUpgradeScript(t *testing.T) {
 
 		// Should contain Go upgrade commands
 		assert.Contains(t, script, "CURRENT_GO_VERSION")
-		assert.Contains(t, script, "go get -u ./...")
+		assert.Contains(t, script, "go get -u all")
 		assert.Contains(t, script, "go mod tidy")
 		assert.Contains(t, script, "GO_VERSION_UPDATED")
 
@@ -783,7 +783,7 @@ func TestBuildLocalUpgradeScript(t *testing.T) {
 		script := buildLocalUpgradeScript(params)
 
 		// then — verify ordering: go get → Dockerfile update → CHANGELOG
-		goGetIdx := strings.Index(script, "go get -u ./...")
+		goGetIdx := strings.Index(script, "go get -u all")
 		dockerfileIdx := strings.Index(script, "Updating Dockerfile golang image tags")
 		changelogIdx := strings.Index(script, "Updating CHANGELOG.md")
 

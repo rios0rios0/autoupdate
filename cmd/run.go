@@ -15,6 +15,8 @@ import (
 	glProv "github.com/rios0rios0/autoupdate/infrastructure/provider/gitlab"
 	updaterPkg "github.com/rios0rios0/autoupdate/infrastructure/updater"
 	goUpdater "github.com/rios0rios0/autoupdate/infrastructure/updater/golang"
+	jsUpdater "github.com/rios0rios0/autoupdate/infrastructure/updater/javascript"
+	pyUpdater "github.com/rios0rios0/autoupdate/infrastructure/updater/python"
 	tfUpdater "github.com/rios0rios0/autoupdate/infrastructure/updater/terraform"
 )
 
@@ -51,7 +53,7 @@ func init() {
 	)
 	runCmd.Flags().StringVar(
 		&updaterFilter, "updater", "",
-		"Only run this updater (terraform, golang)",
+		"Only run this updater (terraform, golang, python, javascript)",
 	)
 	rootCmd.AddCommand(runCmd)
 }
@@ -109,5 +111,7 @@ func buildUpdaterRegistry() *updaterPkg.Registry {
 	reg := updaterPkg.NewRegistry()
 	reg.Register(tfUpdater.New())
 	reg.Register(goUpdater.New())
+	reg.Register(pyUpdater.New())
+	reg.Register(jsUpdater.New())
 	return reg
 }

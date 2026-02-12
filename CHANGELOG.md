@@ -16,6 +16,18 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added Python updater supporting `requirements.txt` and `pyproject.toml` projects, with automatic `.python-version` and Dockerfile `python:` image tag updates
+- added JavaScript updater supporting npm, yarn, and pnpm projects (auto-detected via lockfiles), with automatic `.nvmrc`/`.node-version` and Dockerfile `node:` image tag updates
+- added Python and JavaScript support to the standalone local mode (`autoupdate .`), with automatic project type detection
+- added container image reference scanning in `.hcl` (Terragrunt) files, detecting patterns like `relayer_http_image = "relayer-http:0.7.0"` and upgrading them to the latest Git tag from the same organisation
+
+### Changed
+
+- changed the local mode to auto-detect Go, Python, and JavaScript projects instead of requiring `go.mod`
+- changed the Terraform updater to scan both `.tf` and `.hcl` files, supporting mixed Terraform module and container image dependency upgrades in a single PR
+
 ## [0.3.0] - 2026-02-12
 
 ### Added

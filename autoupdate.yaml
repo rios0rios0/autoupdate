@@ -26,3 +26,9 @@ updaters:
   golang:
     enabled: true
     target_branch: "main"
+  python:
+    enabled: true
+    target_branch: "main"
+  javascript:
+    enabled: true
+    target_branch: "main"

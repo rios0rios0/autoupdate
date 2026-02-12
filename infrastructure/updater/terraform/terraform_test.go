@@ -540,7 +540,7 @@ func TestGenerateBranchName(t *testing.T) {
 		name := generateBranchName(tasks)
 
 		// then
-		assert.Equal(t, "chore/upgrade-3-modules", name)
+		assert.Equal(t, "chore/upgrade-3-dependencies", name)
 	})
 }
 
@@ -583,7 +583,7 @@ func TestGenerateCommitMessage(t *testing.T) {
 		// then
 		assert.Equal(
 			t,
-			"chore(deps): upgraded 2 Terraform module dependencies",
+			"chore(deps): upgraded 2 Terraform dependencies",
 			msg,
 		)
 	})
@@ -626,7 +626,7 @@ func TestGeneratePRTitle(t *testing.T) {
 		// then
 		assert.Equal(
 			t,
-			"chore(deps): upgraded 3 Terraform module dependencies",
+			"chore(deps): upgraded 3 Terraform dependencies",
 			title,
 		)
 	})
@@ -663,8 +663,8 @@ func TestGeneratePRDescription(t *testing.T) {
 
 		// then
 		assert.Contains(t, desc, "## Summary")
-		assert.Contains(t, desc, "| mod-a | v1.0.0 | v2.0.0 | /a.tf |")
-		assert.Contains(t, desc, "| mod-b | v0.5.0 | v1.0.0 | /b.tf |")
+		assert.Contains(t, desc, "| mod-a | module | v1.0.0 | v2.0.0 | /a.tf |")
+		assert.Contains(t, desc, "| mod-b | module | v0.5.0 | v1.0.0 | /b.tf |")
 		assert.Contains(t, desc, "autoupdate")
 	})
 }
@@ -787,5 +787,268 @@ func TestAppendChangelogEntry(t *testing.T) {
 		// then
 		require.Len(t, result, 1)
 		assert.Equal(t, "main.tf", result[0].Path)
+	})
+
+	t.Run("should generate image-specific changelog entries for image deps", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ctx := context.Background()
+		provider := &testdoubles.SpyProvider{
+			ExistingFiles: map[string]bool{"CHANGELOG.md": true},
+			FileContents: map[string]string{
+				"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n",
+			},
+		}
+		repo := domain.Repository{Organization: "org", Name: "repo"}
+		upgrades := []upgradeTask{
+			{
+				dep:        domain.Dependency{Source: "relayer-http", CurrentVer: "0.7.0"},
+				newVersion: "0.8.0",
+				kind:       depKindImage,
+			},
+		}
+
+		// when
+		result := appendChangelogEntry(ctx, provider, repo, upgrades, nil)
+
+		// then
+		require.Len(t, result, 1)
+		assert.Contains(t, result[0].Content, "- changed the container image relayer-http from 0.7.0 to 0.8.0")
+	})
+}
+
+func TestScanHCLFile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should parse container image references from Terragrunt HCL", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `
+inputs = {
+  relayer_http_image = "relayer-http:0.7.0"
+  tracker_http_image = "tracker-http:2.2.1"
+}
+`
+		// when
+		deps := scanHCLFile(content, "terragrunt.hcl")
+
+		// then
+		require.Len(t, deps, 2)
+		assert.Equal(t, "relayer_http_image", deps[0].Name)
+		assert.Equal(t, "relayer-http", deps[0].Source)
+		assert.Equal(t, "0.7.0", deps[0].CurrentVer)
+		assert.Equal(t, "terragrunt.hcl", deps[0].FilePath)
+		assert.Equal(t, "tracker_http_image", deps[1].Name)
+		assert.Equal(t, "tracker-http", deps[1].Source)
+		assert.Equal(t, "2.2.1", deps[1].CurrentVer)
+	})
+
+	t.Run("should skip images with latest tag", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `
+inputs = {
+  tracker_http_image = "tracker-http:latest"
+  sight_http_image   = "sight-http:0.9.1"
+}
+`
+		// when
+		deps := scanHCLFile(content, "terragrunt.hcl")
+
+		// then
+		require.Len(t, deps, 1)
+		assert.Equal(t, "sight_http_image", deps[0].Name)
+		assert.Equal(t, "sight-http", deps[0].Source)
+		assert.Equal(t, "0.9.1", deps[0].CurrentVer)
+	})
+
+	t.Run("should handle multiple image references in real-world Terragrunt file", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `
+include "root" {
+  path = find_in_parent_folders("root.hcl")
+}
+
+inputs = {
+  container_registry_url = dependency.shared_common.outputs.container_registry_server
+
+  sight_http_image      = "sight-http:0.9.1"
+  sight_detector_image  = "sight-detector:0.4.2"
+  sight_validator_image = "sight-validator:0.7.1"
+}
+`
+		// when
+		deps := scanHCLFile(content, "environments/09_security_alerts/prod/terragrunt.hcl")
+
+		// then
+		require.Len(t, deps, 3)
+		assert.Equal(t, "sight-http", deps[0].Source)
+		assert.Equal(t, "0.9.1", deps[0].CurrentVer)
+		assert.Equal(t, "sight-detector", deps[1].Source)
+		assert.Equal(t, "0.4.2", deps[1].CurrentVer)
+		assert.Equal(t, "sight-validator", deps[2].Source)
+		assert.Equal(t, "0.7.1", deps[2].CurrentVer)
+	})
+
+	t.Run("should return empty for HCL file with no image references", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `
+terraform {
+  source = "${get_path_to_repo_root()}//stacks/01_shared"
+}
+
+inputs = {
+  environment = "dev"
+  location    = "eastus"
+}
+`
+		// when
+		deps := scanHCLFile(content, "root.hcl")
+
+		// then
+		assert.Empty(t, deps)
+	})
+
+	t.Run("should skip non-semver image tags", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `
+inputs = {
+  app_image = "my-app:dev-build-123"
+}
+`
+		// when
+		deps := scanHCLFile(content, "terragrunt.hcl")
+
+		// then
+		assert.Empty(t, deps)
+	})
+}
+
+func TestIsSemverLike(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		version  string
+		expected bool
+	}{
+		{name: "should accept standard semver", version: "1.2.3", expected: true},
+		{name: "should accept semver with v prefix", version: "v1.2.3", expected: true},
+		{name: "should accept major-only version", version: "1", expected: true},
+		{name: "should reject latest", version: "latest", expected: false},
+		{name: "should reject build tag", version: "dev-build-123", expected: false},
+		{name: "should accept zero version", version: "0.0.1", expected: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			version := tt.version
+
+			// when
+			result := isSemverLike(version)
+
+			// then
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestApplyImageVersionUpgrade(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should replace image version using string match", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `inputs = {
+  relayer_http_image = "relayer-http:0.7.0"
+}`
+		dep := domain.Dependency{
+			Name:       "relayer_http_image",
+			Source:     "relayer-http",
+			CurrentVer: "0.7.0",
+		}
+
+		// when
+		result := applyImageVersionUpgrade(content, dep, "0.8.0")
+
+		// then
+		assert.Contains(t, result, "relayer-http:0.8.0")
+		assert.NotContains(t, result, "relayer-http:0.7.0")
+	})
+
+	t.Run("should only replace the correct image when multiple exist", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `inputs = {
+  sight_http_image      = "sight-http:0.9.1"
+  sight_detector_image  = "sight-detector:0.4.2"
+  sight_validator_image = "sight-validator:0.7.1"
+}`
+		dep := domain.Dependency{
+			Name:       "sight_detector_image",
+			Source:     "sight-detector",
+			CurrentVer: "0.4.2",
+		}
+
+		// when
+		result := applyImageVersionUpgrade(content, dep, "0.5.0")
+
+		// then
+		assert.Contains(t, result, "sight-detector:0.5.0")
+		assert.NotContains(t, result, "sight-detector:0.4.2")
+		assert.Contains(t, result, "sight-http:0.9.1")      // unchanged
+		assert.Contains(t, result, "sight-validator:0.7.1") // unchanged
+	})
+}
+
+func TestGeneratePRDescriptionWithMixedDeps(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should include Type column distinguishing modules and images", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []upgradeTask{
+			{
+				dep: domain.Dependency{
+					Source:     "git::https://example.com/mod-net",
+					CurrentVer: "v1.0.0",
+					FilePath:   "main.tf",
+				},
+				newVersion: "v2.0.0",
+				kind:       depKindModule,
+			},
+			{
+				dep: domain.Dependency{
+					Source:     "relayer-http",
+					CurrentVer: "0.7.0",
+					FilePath:   "environments/prod/terragrunt.hcl",
+				},
+				newVersion: "0.8.0",
+				kind:       depKindImage,
+			},
+		}
+
+		// when
+		desc := generatePRDescription(tasks)
+
+		// then
+		assert.Contains(t, desc, "| Name | Type |")
+		assert.Contains(t, desc, "| mod-net | module | v1.0.0 | v2.0.0 | main.tf |")
+		assert.Contains(t, desc, "| relayer-http | image | 0.7.0 | 0.8.0 | environments/prod/terragrunt.hcl |")
 	})
 }
