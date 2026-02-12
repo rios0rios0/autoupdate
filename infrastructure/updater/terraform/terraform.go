@@ -18,8 +18,17 @@ import (
 const (
 	updaterName     = "terraform"
 	minMatchLen     = 6
-	branchBatchFmt  = "chore/upgrade-%d-modules"
+	branchBatchFmt  = "chore/upgrade-%d-dependencies"
 	branchSingleFmt = "chore/upgrade-%s-%s"
+)
+
+// depKind distinguishes Terraform module references (in .tf files) from
+// container image references (in .hcl / Terragrunt files).
+type depKind int
+
+const (
+	depKindModule depKind = iota
+	depKindImage
 )
 
 // Updater implements domain.Updater for Terraform module dependencies.
@@ -34,17 +43,21 @@ func New() domain.Updater {
 
 func (u *Updater) Name() string { return updaterName }
 
-// Detect returns true if the repository contains .tf files.
+// Detect returns true if the repository contains .tf or .hcl files.
 func (u *Updater) Detect(
 	ctx context.Context,
 	provider domain.Provider,
 	repo domain.Repository,
 ) bool {
-	files, err := provider.ListFiles(ctx, repo, ".tf")
-	if err != nil {
-		return false
+	tfFiles, err := provider.ListFiles(ctx, repo, ".tf")
+	if err == nil && len(tfFiles) > 0 {
+		return true
 	}
-	return len(files) > 0
+	hclFiles, hclErr := provider.ListFiles(ctx, repo, ".hcl")
+	if hclErr == nil && len(hclFiles) > 0 {
+		return true
+	}
+	return false
 }
 
 // CreateUpdatePRs scans for outdated Terraform module dependencies,
@@ -60,10 +73,7 @@ func (u *Updater) CreateUpdatePRs(
 		repo.Organization, repo.Name,
 	)
 
-	allDeps, err := u.scanAllDependencies(ctx, provider, repo)
-	if err != nil {
-		return nil, err
-	}
+	allDeps := u.scanAllDependencies(ctx, provider, repo)
 	if len(allDeps) == 0 {
 		return []domain.PullRequest{}, nil
 	}
@@ -95,18 +105,21 @@ func (u *Updater) CreateUpdatePRs(
 	return u.createUpgradePR(ctx, provider, repo, opts, upgrades)
 }
 
-// scanAllDependencies lists .tf files and parses them for module deps.
+// scanAllDependencies lists .tf and .hcl files and parses them for
+// module dependencies (from .tf) and container image references (from .hcl).
 func (u *Updater) scanAllDependencies(
 	ctx context.Context,
 	provider domain.Provider,
 	repo domain.Repository,
-) ([]depWithContent, error) {
+) []depWithContent {
+	var allDeps []depWithContent
+
+	// Scan .tf files for Terraform module references
 	tfFiles, err := provider.ListFiles(ctx, repo, ".tf")
 	if err != nil {
-		return nil, fmt.Errorf("failed to list .tf files: %w", err)
+		logger.Warnf("[terraform] Failed to list .tf files: %v", err)
 	}
 
-	var allDeps []depWithContent
 	for _, f := range tfFiles {
 		if f.IsDir {
 			continue
@@ -122,11 +135,38 @@ func (u *Updater) scanAllDependencies(
 			allDeps = append(allDeps, depWithContent{
 				Dependency:  dep,
 				FileContent: content,
+				Kind:        depKindModule,
 			})
 		}
 	}
 
-	return allDeps, nil
+	// Scan .hcl files for container image references (Terragrunt)
+	hclFiles, hclErr := provider.ListFiles(ctx, repo, ".hcl")
+	if hclErr != nil {
+		logger.Warnf("[terraform] Failed to list .hcl files: %v", hclErr)
+	}
+
+	for _, f := range hclFiles {
+		if f.IsDir {
+			continue
+		}
+		content, contentErr := provider.GetFileContent(ctx, repo, f.Path)
+		if contentErr != nil {
+			logger.Warnf("[terraform] Failed to read %s: %v", f.Path, contentErr)
+			continue
+		}
+
+		deps := scanHCLFile(content, f.Path)
+		for _, dep := range deps {
+			allDeps = append(allDeps, depWithContent{
+				Dependency:  dep,
+				FileContent: content,
+				Kind:        depKindImage,
+			})
+		}
+	}
+
+	return allDeps
 }
 
 // determineUpgrades resolves tags and determines which deps need upgrading.
@@ -163,6 +203,7 @@ func (u *Updater) determineUpgrades(
 			dep:         dc.Dependency,
 			newVersion:  latestVersion,
 			fileContent: dc.FileContent,
+			kind:        dc.Kind,
 		})
 	}
 
@@ -233,12 +274,14 @@ func (u *Updater) createUpgradePR(
 type depWithContent struct {
 	Dependency  domain.Dependency
 	FileContent string
+	Kind        depKind
 }
 
 type upgradeTask struct {
 	dep         domain.Dependency
 	newVersion  string
 	fileContent string
+	kind        depKind
 }
 
 // --- scanning ---
@@ -350,6 +393,49 @@ func scanWithRegex(content, filePath string) []domain.Dependency {
 	return deps
 }
 
+// scanHCLFile parses a Terragrunt .hcl file for container image references.
+// It detects patterns like: relayer_http_image = "relayer-http:0.7.0"
+// where the image name corresponds to a repository in the same organisation
+// and the tag after the colon is a Git tag / semver version.
+func scanHCLFile(content, filePath string) []domain.Dependency {
+	var deps []domain.Dependency
+
+	imagePattern := regexp.MustCompile(
+		`(\w+_image)\s*=\s*"([a-zA-Z0-9][a-zA-Z0-9._-]*):([^"]+)"`,
+	)
+	matches := imagePattern.FindAllStringSubmatch(content, -1)
+	matchIndices := imagePattern.FindAllStringIndex(content, -1)
+
+	for i, match := range matches {
+		varName := match[1]
+		imageName := match[2]
+		version := match[3]
+
+		// Skip non-semver tags like "latest"
+		if !isSemverLike(version) {
+			continue
+		}
+
+		lineNum := strings.Count(content[:matchIndices[i][0]], "\n") + 1
+
+		deps = append(deps, domain.Dependency{
+			Name:       varName,
+			Source:     imageName,
+			CurrentVer: version,
+			FilePath:   filePath,
+			Line:       lineNum,
+		})
+	}
+
+	return deps
+}
+
+// isSemverLike returns true if the version string looks like a semantic
+// version (e.g. "1.2.3", "v0.7.0"). It rejects tags like "latest".
+func isSemverLike(version string) bool {
+	return semver.IsValid(normalizeVersion(version))
+}
+
 // --- source helpers ---
 
 func isGitModule(source string) bool {
@@ -417,10 +503,14 @@ func applyUpgrades(tasks []upgradeTask) []domain.FileChange {
 		}
 	}
 
-	// Apply each upgrade to the file content
+	// Apply each upgrade to the file content, dispatching by dependency kind
 	for _, t := range tasks {
 		content := fileContent[t.dep.FilePath]
-		content = applyVersionUpgrade(content, t.dep, t.newVersion)
+		if t.kind == depKindImage {
+			content = applyImageVersionUpgrade(content, t.dep, t.newVersion)
+		} else {
+			content = applyVersionUpgrade(content, t.dep, t.newVersion)
+		}
 		fileContent[t.dep.FilePath] = content
 	}
 
@@ -462,6 +552,29 @@ func applyVersionUpgrade(
 	return refPattern.ReplaceAllStringFunc(content, func(match string) string {
 		return strings.Replace(match, dep.CurrentVer, newVersion, 1)
 	})
+}
+
+// applyImageVersionUpgrade replaces a container image version reference
+// in a Terragrunt .hcl file. The format is "image-name:oldVersion" →
+// "image-name:newVersion".
+func applyImageVersionUpgrade(
+	content string,
+	dep domain.Dependency,
+	newVersion string,
+) string {
+	old := dep.Source + ":" + dep.CurrentVer
+	replacement := dep.Source + ":" + newVersion
+	if strings.Contains(content, old) {
+		return strings.Replace(content, old, replacement, 1)
+	}
+
+	// Regex fallback: match the variable assignment pattern
+	pattern := regexp.MustCompile(
+		`(` + regexp.QuoteMeta(dep.Name) + `\s*=\s*"` +
+			regexp.QuoteMeta(dep.Source) + `:)` +
+			regexp.QuoteMeta(dep.CurrentVer) + `(")`,
+	)
+	return pattern.ReplaceAllString(content, "${1}"+newVersion+"${2}")
 }
 
 func buildSourceWithVersion(source, version string) string {
@@ -531,7 +644,7 @@ func generateCommitMessage(tasks []upgradeTask) string {
 		)
 	}
 	return fmt.Sprintf(
-		"chore(deps): upgraded %d Terraform module dependencies",
+		"chore(deps): upgraded %d Terraform dependencies",
 		len(tasks),
 	)
 }
@@ -545,7 +658,7 @@ func generatePRTitle(tasks []upgradeTask) string {
 		)
 	}
 	return fmt.Sprintf(
-		"chore(deps): upgraded %d Terraform module dependencies",
+		"chore(deps): upgraded %d Terraform dependencies",
 		len(tasks),
 	)
 }
@@ -572,9 +685,13 @@ func appendChangelogEntry(
 
 	entries := make([]string, 0, len(upgrades))
 	for _, up := range upgrades {
+		label := "Terraform module"
+		if up.kind == depKindImage {
+			label = "container image"
+		}
 		entries = append(entries, fmt.Sprintf(
-			"- changed the Terraform module %s from %s to %s",
-			extractRepoName(up.dep.Source), up.dep.CurrentVer, up.newVersion,
+			"- changed the %s %s from %s to %s",
+			label, extractRepoName(up.dep.Source), up.dep.CurrentVer, up.newVersion,
 		))
 	}
 
@@ -593,13 +710,18 @@ func appendChangelogEntry(
 func generatePRDescription(tasks []upgradeTask) string {
 	var sb strings.Builder
 	sb.WriteString("## Summary\n\n")
-	sb.WriteString("This PR upgrades the following Terraform module dependencies:\n\n")
-	sb.WriteString("| Module | Current Version | New Version | File |\n")
-	sb.WriteString("|--------|-----------------|-------------|------|\n")
+	sb.WriteString("This PR upgrades the following Terraform dependencies:\n\n")
+	sb.WriteString("| Name | Type | Current Version | New Version | File |\n")
+	sb.WriteString("|------|------|-----------------|-------------|------|\n")
 	for _, t := range tasks {
+		kindLabel := "module"
+		if t.kind == depKindImage {
+			kindLabel = "image"
+		}
 		sb.WriteString(fmt.Sprintf(
-			"| %s | %s | %s | %s |\n",
+			"| %s | %s | %s | %s | %s |\n",
 			extractRepoName(t.dep.Source),
+			kindLabel,
 			t.dep.CurrentVer,
 			t.newVersion,
 			t.dep.FilePath,
