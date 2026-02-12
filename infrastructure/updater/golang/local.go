@@ -227,6 +227,9 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	// Go upgrade commands (reuse existing)
 	writeGoUpgradeCommands(&sb)
 
+	// Update Dockerfile golang image tags (only when version was bumped)
+	writeDockerfileUpdate(&sb)
+
 	// Changelog update (reuse existing)
 	writeChangelogUpdate(&sb)
 
