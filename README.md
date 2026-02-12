@@ -18,7 +18,7 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 | Ecosystem | What it does                                                               |
 |-----------|----------------------------------------------------------------------------|
 | Terraform | Detects Git-based module sources with `?ref=` tags, upgrades to latest tag |
-| Go        | Upgrades Go version in `go.mod`, runs `go get -u ./...` and `go mod tidy`  |
+| Go        | Upgrades Go version in `go.mod`, runs `go get -u all` and `go mod tidy`    |
 
 ## Installation
 

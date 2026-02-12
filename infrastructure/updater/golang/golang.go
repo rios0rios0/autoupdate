@@ -535,9 +535,9 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("    echo \"GO_VERSION_UPDATED=false\"\n")
 	sb.WriteString("fi\n\n")
 
-	sb.WriteString("echo \"Running go get -u ./...\"\n")
+	sb.WriteString("echo \"Running go get -u all\"\n")
 	sb.WriteString(
-		"\"$GO_BINARY\" get -u ./... 2>&1 || echo \"WARNING: go get -u had some errors (continuing anyway)\"\n\n",
+		"\"$GO_BINARY\" get -u all 2>&1 || echo \"WARNING: go get -u had some errors (continuing anyway)\"\n\n",
 	)
 
 	sb.WriteString("echo \"Running go mod tidy...\"\n")
@@ -703,7 +703,7 @@ func GenerateGoPRDescription(goVersion string, hasConfigSH, goVersionUpdated boo
 	if goVersionUpdated {
 		sb.WriteString("- Updated `go.mod` Go directive to `" + goVersion + "`\n")
 	}
-	sb.WriteString("- Ran `go get -u ./...` to update all dependencies\n")
+	sb.WriteString("- Ran `go get -u all` to update all dependencies\n")
 	sb.WriteString("- Ran `go mod tidy` to clean up\n")
 	if hasConfigSH {
 		sb.WriteString("- `config.sh` was sourced before running Go commands (private package settings)\n")

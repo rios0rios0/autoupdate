@@ -4,3 +4,11 @@ infrastructure/provider/github/github.go:Password in URL:366
 infrastructure/provider/gitlab/gitlab.go:Password in URL:386
 infrastructure/updater/golang/golang.go:Password in URL:489
 infrastructure/updater/golang/golang.go:Password in URL:494
+infrastructure/updater/python/local.go:Password in URL:257
+infrastructure/updater/python/local.go:Password in URL:261
+infrastructure/updater/javascript/local.go:Password in URL:272
+infrastructure/updater/javascript/local.go:Password in URL:276
+infrastructure/updater/javascript/javascript.go:Password in URL:519
+infrastructure/updater/javascript/javascript.go:Password in URL:523
+infrastructure/updater/python/python.go:Password in URL:487
+infrastructure/updater/python/python.go:Password in URL:491
