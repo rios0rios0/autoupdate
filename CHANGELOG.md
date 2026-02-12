@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-12
+
 ### Added
 
 - added automatic `Dockerfile` image tag update when the Go version is upgraded, searching all `Dockerfiles` in the project tree (`Dockerfile`, `Dockerfile.*`, `*.Dockerfile`)
