@@ -1,6 +1,6 @@
 module github.com/rios0rios0/autoupdate
 
-go 1.25.6
+go 1.26.0
 
 require (
 	github.com/google/go-github/v66 v66.0.0
@@ -9,7 +9,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/zclconf/go-cty v1.17.0
-	gitlab.com/gitlab-org/api/client-go v1.29.0
+	gitlab.com/gitlab-org/api/client-go v1.31.0
 	golang.org/x/mod v0.33.0
 	gopkg.in/yaml.v3 v3.0.1
 )
