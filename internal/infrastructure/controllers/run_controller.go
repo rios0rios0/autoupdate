@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"fmt"
 
 	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -87,6 +86,6 @@ func (it *RunController) AddFlags(cmd *cobra.Command) {
 	cmd.Flags().String("provider", "", "Only process this provider (github, gitlab, azuredevops)")
 	cmd.Flags().String("org", "", "Only process this organization/group")
 	cmd.Flags().String("updater", "",
-		fmt.Sprintf("Only run this updater (terraform, golang, python, javascript)"),
+		"Only run this updater (terraform, golang, python, javascript)",
 	)
 }

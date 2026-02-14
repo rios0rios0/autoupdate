@@ -33,20 +33,20 @@ const (
 	depKindImage
 )
 
-// Updater implements repositories.UpdaterRepository for Terraform module dependencies.
+// UpdaterRepository implements repositories.UpdaterRepository for Terraform module dependencies.
 // It reads files via the provider API, detects version refs, and creates PRs
 // with updated version strings — no local clone required.
-type TerraformUpdaterRepository struct{}
+type UpdaterRepository struct{}
 
-// New creates a new Terraform updater.
-func NewTerraformUpdaterRepository() repositories.UpdaterRepository {
-	return &TerraformUpdaterRepository{}
+// NewUpdaterRepository creates a new Terraform updater.
+func NewUpdaterRepository() repositories.UpdaterRepository {
+	return &UpdaterRepository{}
 }
 
-func (u *TerraformUpdaterRepository) Name() string { return updaterName }
+func (u *UpdaterRepository) Name() string { return updaterName }
 
 // Detect returns true if the repository contains .tf or .hcl files.
-func (u *TerraformUpdaterRepository) Detect(
+func (u *UpdaterRepository) Detect(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
@@ -64,7 +64,7 @@ func (u *TerraformUpdaterRepository) Detect(
 
 // CreateUpdatePRs scans for outdated Terraform module dependencies,
 // groups upgrades by repository, and creates PRs with the changes.
-func (u *TerraformUpdaterRepository) CreateUpdatePRs(
+func (u *UpdaterRepository) CreateUpdatePRs(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
@@ -109,7 +109,7 @@ func (u *TerraformUpdaterRepository) CreateUpdatePRs(
 
 // scanAllDependencies lists .tf and .hcl files and parses them for
 // module dependencies (from .tf) and container image references (from .hcl).
-func (u *TerraformUpdaterRepository) scanAllDependencies(
+func (u *UpdaterRepository) scanAllDependencies(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
@@ -172,7 +172,7 @@ func (u *TerraformUpdaterRepository) scanAllDependencies(
 }
 
 // determineUpgrades resolves tags and determines which deps need upgrading.
-func (u *TerraformUpdaterRepository) determineUpgrades(
+func (u *UpdaterRepository) determineUpgrades(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
@@ -213,7 +213,7 @@ func (u *TerraformUpdaterRepository) determineUpgrades(
 }
 
 // createUpgradePR creates a branch with changes and opens a PR.
-func (u *TerraformUpdaterRepository) createUpgradePR(
+func (u *UpdaterRepository) createUpgradePR(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,

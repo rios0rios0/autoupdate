@@ -30,10 +30,10 @@ type Local interface {
 
 // LocalOptions holds runtime options for the local mode.
 type LocalOptions struct {
-	RepoDir  string
-	DryRun   bool
-	Verbose  bool
-	Token    string
+	RepoDir string
+	DryRun  bool
+	Verbose bool
+	Token   string
 }
 
 // remoteInfo holds the parsed components of a Git remote URL.
