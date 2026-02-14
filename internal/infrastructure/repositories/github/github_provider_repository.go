@@ -21,31 +21,31 @@ const (
 	blobType     = "blob"
 )
 
-// GitHubProviderRepository implements repositories.ProviderRepository for GitHub.
-type GitHubProviderRepository struct {
+// ProviderRepository implements repositories.ProviderRepository for GitHub.
+type ProviderRepository struct {
 	token  string
 	client *gh.Client
 }
 
-// NewGitHubProviderRepository creates a new GitHub provider with the given token.
-func NewGitHubProviderRepository(token string) repositories.ProviderRepository {
+// NewProviderRepository creates a new GitHub provider with the given token.
+func NewProviderRepository(token string) repositories.ProviderRepository {
 	client := gh.NewClient(nil).WithAuthToken(token)
-	return &GitHubProviderRepository{
+	return &ProviderRepository{
 		token:  token,
 		client: client,
 	}
 }
 
-func (p *GitHubProviderRepository) Name() string      { return providerName }
-func (p *GitHubProviderRepository) AuthToken() string { return p.token }
+func (p *ProviderRepository) Name() string      { return providerName }
+func (p *ProviderRepository) AuthToken() string { return p.token }
 
-func (p *GitHubProviderRepository) MatchesURL(rawURL string) bool {
+func (p *ProviderRepository) MatchesURL(rawURL string) bool {
 	return strings.Contains(rawURL, "github.com")
 }
 
 // DiscoverRepositories lists all repositories in a GitHub
 // organization or user account.
-func (p *GitHubProviderRepository) DiscoverRepositories(
+func (p *ProviderRepository) DiscoverRepositories(
 	ctx context.Context,
 	org string,
 ) ([]entities.Repository, error) {
@@ -86,7 +86,7 @@ func (p *GitHubProviderRepository) DiscoverRepositories(
 	return allRepos, nil
 }
 
-func (p *GitHubProviderRepository) discoverUserRepos(
+func (p *ProviderRepository) discoverUserRepos(
 	ctx context.Context,
 	user string,
 ) ([]entities.Repository, error) {
@@ -127,7 +127,7 @@ func (p *GitHubProviderRepository) discoverUserRepos(
 	return allRepos, nil
 }
 
-func (p *GitHubProviderRepository) GetFileContent(
+func (p *ProviderRepository) GetFileContent(
 	ctx context.Context,
 	repo entities.Repository,
 	path string,
@@ -151,7 +151,7 @@ func (p *GitHubProviderRepository) GetFileContent(
 	return content, nil
 }
 
-func (p *GitHubProviderRepository) ListFiles(
+func (p *ProviderRepository) ListFiles(
 	ctx context.Context,
 	repo entities.Repository,
 	pattern string,
@@ -180,7 +180,7 @@ func (p *GitHubProviderRepository) ListFiles(
 	return files, nil
 }
 
-func (p *GitHubProviderRepository) GetTags(
+func (p *ProviderRepository) GetTags(
 	ctx context.Context,
 	repo entities.Repository,
 ) ([]string, error) {
@@ -209,7 +209,7 @@ func (p *GitHubProviderRepository) GetTags(
 	return allTags, nil
 }
 
-func (p *GitHubProviderRepository) HasFile(
+func (p *ProviderRepository) HasFile(
 	ctx context.Context,
 	repo entities.Repository,
 	path string,
@@ -218,7 +218,7 @@ func (p *GitHubProviderRepository) HasFile(
 	return err == nil
 }
 
-func (p *GitHubProviderRepository) CreateBranchWithChanges(
+func (p *ProviderRepository) CreateBranchWithChanges(
 	ctx context.Context,
 	repo entities.Repository,
 	input entities.BranchInput,
@@ -297,7 +297,7 @@ func (p *GitHubProviderRepository) CreateBranchWithChanges(
 	return nil
 }
 
-func (p *GitHubProviderRepository) CreatePullRequest(
+func (p *ProviderRepository) CreatePullRequest(
 	ctx context.Context,
 	repo entities.Repository,
 	input entities.PullRequestInput,
@@ -331,7 +331,7 @@ func (p *GitHubProviderRepository) CreatePullRequest(
 	}, nil
 }
 
-func (p *GitHubProviderRepository) PullRequestExists(
+func (p *ProviderRepository) PullRequestExists(
 	ctx context.Context,
 	repo entities.Repository,
 	sourceBranch string,
@@ -353,7 +353,7 @@ func (p *GitHubProviderRepository) PullRequestExists(
 	return len(prs) > 0, nil
 }
 
-func (p *GitHubProviderRepository) CloneURL(repo entities.Repository) string {
+func (p *ProviderRepository) CloneURL(repo entities.Repository) string {
 	remoteURL := repo.RemoteURL
 	if remoteURL == "" {
 		remoteURL = fmt.Sprintf(

@@ -30,15 +30,15 @@ const (
 	allZeroObjectID  = "0000000000000000000000000000000000000000"
 )
 
-// Provider implements repositories.ProviderRepository for Azure DevOps.
-type AzureDevOpsProviderRepository struct {
+// ProviderRepository implements repositories.ProviderRepository for Azure DevOps.
+type ProviderRepository struct {
 	token      string
 	httpClient *http.Client
 }
 
-// New creates a new Azure DevOps provider with the given PAT.
-func NewAzureDevOpsProviderRepository(token string) repositories.ProviderRepository {
-	return &AzureDevOpsProviderRepository{
+// NewProviderRepository creates a new Azure DevOps provider with the given PAT.
+func NewProviderRepository(token string) repositories.ProviderRepository {
+	return &ProviderRepository{
 		token: token,
 		httpClient: &http.Client{
 			Timeout: httpTimeout,
@@ -46,17 +46,17 @@ func NewAzureDevOpsProviderRepository(token string) repositories.ProviderReposit
 	}
 }
 
-func (p *AzureDevOpsProviderRepository) Name() string      { return providerName }
-func (p *AzureDevOpsProviderRepository) AuthToken() string { return p.token }
+func (p *ProviderRepository) Name() string      { return providerName }
+func (p *ProviderRepository) AuthToken() string { return p.token }
 
-func (p *AzureDevOpsProviderRepository) MatchesURL(rawURL string) bool {
+func (p *ProviderRepository) MatchesURL(rawURL string) bool {
 	return strings.Contains(rawURL, "dev.azure.com")
 }
 
 // DiscoverRepositories lists all repositories in all projects
 // of an Azure DevOps organization. The org parameter should be
 // the organization URL or just the org name.
-func (p *AzureDevOpsProviderRepository) DiscoverRepositories(
+func (p *ProviderRepository) DiscoverRepositories(
 	ctx context.Context,
 	org string,
 ) ([]entities.Repository, error) {
@@ -90,7 +90,7 @@ func (p *AzureDevOpsProviderRepository) DiscoverRepositories(
 	return repos, nil
 }
 
-func (p *AzureDevOpsProviderRepository) GetFileContent(
+func (p *ProviderRepository) GetFileContent(
 	ctx context.Context,
 	repo entities.Repository,
 	path string,
@@ -109,7 +109,7 @@ func (p *AzureDevOpsProviderRepository) GetFileContent(
 	return string(resp), nil
 }
 
-func (p *AzureDevOpsProviderRepository) ListFiles(
+func (p *ProviderRepository) ListFiles(
 	ctx context.Context,
 	repo entities.Repository,
 	pattern string,
@@ -152,7 +152,7 @@ func (p *AzureDevOpsProviderRepository) ListFiles(
 	return files, nil
 }
 
-func (p *AzureDevOpsProviderRepository) GetTags(
+func (p *ProviderRepository) GetTags(
 	ctx context.Context,
 	repo entities.Repository,
 ) ([]string, error) {
@@ -185,7 +185,7 @@ func (p *AzureDevOpsProviderRepository) GetTags(
 	return tags, nil
 }
 
-func (p *AzureDevOpsProviderRepository) HasFile(
+func (p *ProviderRepository) HasFile(
 	ctx context.Context,
 	repo entities.Repository,
 	path string,
@@ -194,7 +194,7 @@ func (p *AzureDevOpsProviderRepository) HasFile(
 	return err == nil
 }
 
-func (p *AzureDevOpsProviderRepository) CreateBranchWithChanges(
+func (p *ProviderRepository) CreateBranchWithChanges(
 	ctx context.Context,
 	repo entities.Repository,
 	input entities.BranchInput,
@@ -251,7 +251,7 @@ func (p *AzureDevOpsProviderRepository) CreateBranchWithChanges(
 	return nil
 }
 
-func (p *AzureDevOpsProviderRepository) CreatePullRequest(
+func (p *ProviderRepository) CreatePullRequest(
 	ctx context.Context,
 	repo entities.Repository,
 	input entities.PullRequestInput,
@@ -306,7 +306,7 @@ func (p *AzureDevOpsProviderRepository) CreatePullRequest(
 	return pr, nil
 }
 
-func (p *AzureDevOpsProviderRepository) PullRequestExists(
+func (p *ProviderRepository) PullRequestExists(
 	ctx context.Context,
 	repo entities.Repository,
 	sourceBranch string,
@@ -335,7 +335,7 @@ func (p *AzureDevOpsProviderRepository) PullRequestExists(
 	return result.Count > 0, nil
 }
 
-func (p *AzureDevOpsProviderRepository) CloneURL(repo entities.Repository) string {
+func (p *ProviderRepository) CloneURL(repo entities.Repository) string {
 	remoteURL := repo.RemoteURL
 	if remoteURL == "" {
 		remoteURL = fmt.Sprintf(
@@ -371,7 +371,7 @@ type repository struct {
 	DefaultBranch string `json:"defaultBranch"`
 }
 
-func (p *AzureDevOpsProviderRepository) getProjects(
+func (p *ProviderRepository) getProjects(
 	ctx context.Context,
 	baseURL string,
 ) ([]project, error) {
@@ -408,7 +408,7 @@ func (p *AzureDevOpsProviderRepository) getProjects(
 	return all, nil
 }
 
-func (p *AzureDevOpsProviderRepository) getRepositories(
+func (p *ProviderRepository) getRepositories(
 	ctx context.Context,
 	baseURL, projectID string,
 ) ([]repository, error) {
@@ -432,7 +432,7 @@ func (p *AzureDevOpsProviderRepository) getRepositories(
 	return result.Value, nil
 }
 
-func (p *AzureDevOpsProviderRepository) getCommitID(
+func (p *ProviderRepository) getCommitID(
 	ctx context.Context,
 	baseURL string,
 	repo entities.Repository,
@@ -482,7 +482,7 @@ func (p *AzureDevOpsProviderRepository) getCommitID(
 	return branchResult.Value[0].ObjectID, nil
 }
 
-func (p *AzureDevOpsProviderRepository) doRequest(
+func (p *ProviderRepository) doRequest(
 	ctx context.Context,
 	baseURL, method, endpoint string,
 	body interface{},
@@ -491,7 +491,7 @@ func (p *AzureDevOpsProviderRepository) doRequest(
 	return resp, err
 }
 
-func (p *AzureDevOpsProviderRepository) doRequestWithHeaders(
+func (p *ProviderRepository) doRequestWithHeaders(
 	ctx context.Context,
 	baseURL, method, endpoint string,
 	body interface{},

@@ -33,21 +33,21 @@ const (
 	branchJSDepsFmt      = "chore/upgrade-js-deps"
 )
 
-// Updater implements repositories.UpdaterRepository for JavaScript/Node.js dependencies.
+// UpdaterRepository implements repositories.UpdaterRepository for JavaScript/Node.js dependencies.
 // It clones the repository locally, runs the appropriate package manager
 // to update dependencies, pushes the changes, and creates a PR via the
 // provider API.
-type JavaScriptUpdaterRepository struct{}
+type UpdaterRepository struct{}
 
-// New creates a new JavaScript updater.
-func NewJavaScriptUpdaterRepository() repositories.UpdaterRepository {
-	return &JavaScriptUpdaterRepository{}
+// NewUpdaterRepository creates a new JavaScript updater.
+func NewUpdaterRepository() repositories.UpdaterRepository {
+	return &UpdaterRepository{}
 }
 
-func (u *JavaScriptUpdaterRepository) Name() string { return updaterName }
+func (u *UpdaterRepository) Name() string { return updaterName }
 
 // Detect returns true if the repository has a package.json file.
-func (u *JavaScriptUpdaterRepository) Detect(
+func (u *UpdaterRepository) Detect(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
@@ -57,7 +57,7 @@ func (u *JavaScriptUpdaterRepository) Detect(
 
 // CreateUpdatePRs clones the repo, upgrades Node.js dependencies,
 // and creates a PR.
-func (u *JavaScriptUpdaterRepository) CreateUpdatePRs(
+func (u *UpdaterRepository) CreateUpdatePRs(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
