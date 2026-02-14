@@ -9,7 +9,7 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
 	github.com/zclconf/go-cty v1.17.0
-	gitlab.com/gitlab-org/api/client-go v1.31.0
+	gitlab.com/gitlab-org/api/client-go v1.34.0
 	go.uber.org/dig v1.19.0
 	golang.org/x/mod v0.33.0
 	gopkg.in/yaml.v3 v3.0.1
