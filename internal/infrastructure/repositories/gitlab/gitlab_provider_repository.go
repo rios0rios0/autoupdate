@@ -22,34 +22,34 @@ const (
 
 var errClientNotInitialized = errors.New("gitlab client not initialized")
 
-// GitLabProviderRepository implements repositories.ProviderRepository for GitLab.
-type GitLabProviderRepository struct {
+// ProviderRepository implements repositories.ProviderRepository for GitLab.
+type ProviderRepository struct {
 	token  string
 	client *gl.Client
 }
 
-// NewGitLabProviderRepository creates a new GitLab provider with the given token.
-func NewGitLabProviderRepository(token string) repositories.ProviderRepository {
+// NewProviderRepository creates a new GitLab provider with the given token.
+func NewProviderRepository(token string) repositories.ProviderRepository {
 	client, err := gl.NewClient(token)
 	if err != nil {
 		// Return a provider that will fail on use rather than panicking at construction
-		return &GitLabProviderRepository{token: token, client: nil}
+		return &ProviderRepository{token: token, client: nil}
 	}
-	return &GitLabProviderRepository{
+	return &ProviderRepository{
 		token:  token,
 		client: client,
 	}
 }
 
-func (p *GitLabProviderRepository) Name() string      { return providerName }
-func (p *GitLabProviderRepository) AuthToken() string { return p.token }
+func (p *ProviderRepository) Name() string      { return providerName }
+func (p *ProviderRepository) AuthToken() string { return p.token }
 
-func (p *GitLabProviderRepository) MatchesURL(rawURL string) bool {
+func (p *ProviderRepository) MatchesURL(rawURL string) bool {
 	return strings.Contains(rawURL, "gitlab.com")
 }
 
 // DiscoverRepositories lists all projects in a GitLab group.
-func (p *GitLabProviderRepository) DiscoverRepositories(
+func (p *ProviderRepository) DiscoverRepositories(
 	ctx context.Context,
 	group string,
 ) ([]entities.Repository, error) {
@@ -97,7 +97,7 @@ func (p *GitLabProviderRepository) DiscoverRepositories(
 	return allRepos, nil
 }
 
-func (p *GitLabProviderRepository) discoverUserProjects(
+func (p *ProviderRepository) discoverUserProjects(
 	ctx context.Context,
 	user string,
 ) ([]entities.Repository, error) {
@@ -140,7 +140,7 @@ func (p *GitLabProviderRepository) discoverUserProjects(
 	return allRepos, nil
 }
 
-func (p *GitLabProviderRepository) GetFileContent(
+func (p *ProviderRepository) GetFileContent(
 	ctx context.Context,
 	repo entities.Repository,
 	path string,
@@ -162,7 +162,7 @@ func (p *GitLabProviderRepository) GetFileContent(
 	return string(raw), nil
 }
 
-func (p *GitLabProviderRepository) ListFiles(
+func (p *ProviderRepository) ListFiles(
 	ctx context.Context,
 	repo entities.Repository,
 	pattern string,
@@ -210,7 +210,7 @@ func (p *GitLabProviderRepository) ListFiles(
 	return allFiles, nil
 }
 
-func (p *GitLabProviderRepository) GetTags(
+func (p *ProviderRepository) GetTags(
 	ctx context.Context,
 	repo entities.Repository,
 ) ([]string, error) {
@@ -246,7 +246,7 @@ func (p *GitLabProviderRepository) GetTags(
 	return allTags, nil
 }
 
-func (p *GitLabProviderRepository) HasFile(
+func (p *ProviderRepository) HasFile(
 	ctx context.Context,
 	repo entities.Repository,
 	path string,
@@ -255,7 +255,7 @@ func (p *GitLabProviderRepository) HasFile(
 	return err == nil
 }
 
-func (p *GitLabProviderRepository) CreateBranchWithChanges(
+func (p *ProviderRepository) CreateBranchWithChanges(
 	ctx context.Context,
 	repo entities.Repository,
 	input entities.BranchInput,
@@ -311,7 +311,7 @@ func (p *GitLabProviderRepository) CreateBranchWithChanges(
 	return nil
 }
 
-func (p *GitLabProviderRepository) CreatePullRequest(
+func (p *ProviderRepository) CreatePullRequest(
 	ctx context.Context,
 	repo entities.Repository,
 	input entities.PullRequestInput,
@@ -347,7 +347,7 @@ func (p *GitLabProviderRepository) CreatePullRequest(
 	}, nil
 }
 
-func (p *GitLabProviderRepository) PullRequestExists(
+func (p *ProviderRepository) PullRequestExists(
 	ctx context.Context,
 	repo entities.Repository,
 	sourceBranch string,
@@ -373,7 +373,7 @@ func (p *GitLabProviderRepository) PullRequestExists(
 	return len(mrs) > 0, nil
 }
 
-func (p *GitLabProviderRepository) CloneURL(repo entities.Repository) string {
+func (p *ProviderRepository) CloneURL(repo entities.Repository) string {
 	remoteURL := repo.RemoteURL
 	if remoteURL == "" {
 		remoteURL = fmt.Sprintf(

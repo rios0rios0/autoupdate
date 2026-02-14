@@ -30,20 +30,20 @@ const (
 	branchPyDepsFmt    = "chore/upgrade-python-deps"
 )
 
-// Updater implements repositories.UpdaterRepository for Python dependencies.
+// UpdaterRepository implements repositories.UpdaterRepository for Python dependencies.
 // It clones the repository locally, runs pip commands to update
 // dependencies, pushes the changes, and creates a PR via the provider API.
-type PythonUpdaterRepository struct{}
+type UpdaterRepository struct{}
 
-// New creates a new Python updater.
-func NewPythonUpdaterRepository() repositories.UpdaterRepository {
-	return &PythonUpdaterRepository{}
+// NewUpdaterRepository creates a new Python updater.
+func NewUpdaterRepository() repositories.UpdaterRepository {
+	return &UpdaterRepository{}
 }
 
-func (u *PythonUpdaterRepository) Name() string { return updaterName }
+func (u *UpdaterRepository) Name() string { return updaterName }
 
 // Detect returns true if the repository has a requirements.txt or pyproject.toml file.
-func (u *PythonUpdaterRepository) Detect(
+func (u *UpdaterRepository) Detect(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
@@ -54,7 +54,7 @@ func (u *PythonUpdaterRepository) Detect(
 
 // CreateUpdatePRs clones the repo, upgrades Python dependencies,
 // and creates a PR.
-func (u *PythonUpdaterRepository) CreateUpdatePRs(
+func (u *UpdaterRepository) CreateUpdatePRs(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
