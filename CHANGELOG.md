@@ -19,6 +19,25 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Changed
 
 - changed the Terraform updater PR description to show a compact summary instead of a full table when there are more than 5 dependency upgrades
+- refactored entire project to follow DDD/Clean Architecture patterns matching the terra project structure
+- moved all code under `internal/` package for proper Go encapsulation
+- restructured domain layer into `entities/`, `commands/`, and `repositories/` packages
+- restructured infrastructure layer into `controllers/` and `repositories/` packages
+- replaced manual registry-based dependency injection with `go.uber.org/dig` container
+- introduced `Controller` interface with `GetBind()` and `Execute()` following terra's pattern
+- introduced `AppInternal` to aggregate all controllers via DIG injection
+- moved entry point from `main.go` to `cmd/autoupdate/main.go` with separate `dig.go` for DI bootstrap
+- refactored config loading from `config/` package into `internal/domain/entities/settings.go`
+- split `domain/models.go` into per-entity files under `internal/domain/entities/`
+- extracted `RunCommand` from `application/service.go` and `LocalCommand` from `cmd/local.go` into `internal/domain/commands/`
+- created `RunController` and `LocalController` as cobra CLI adapters in `internal/infrastructure/controllers/`
+
+### Added
+
+- added `github.com/rios0rios0/testkit` dependency for test builders
+- added entity builders (`RepositoryBuilder`, `DependencyBuilder`) following testkit `BaseBuilder` pattern in `test/domain/entitybuilders/`
+- added organized test doubles in `test/domain/commanddoubles/` and `test/infrastructure/repositorydoubles/`
+- added build tags (`//go:build unit`) to all test double files
 
 ### Fixed
 
