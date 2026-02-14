@@ -2,6 +2,7 @@ package terraform //nolint:testpackage // tests unexported functions
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -635,7 +636,7 @@ func TestGeneratePRTitle(t *testing.T) {
 func TestGeneratePRDescription(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should include markdown table with all upgrades", func(t *testing.T) {
+	t.Run("should include markdown table with all upgrades when at threshold", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -666,6 +667,54 @@ func TestGeneratePRDescription(t *testing.T) {
 		assert.Contains(t, desc, "| mod-a | module | v1.0.0 | v2.0.0 | /a.tf |")
 		assert.Contains(t, desc, "| mod-b | module | v0.5.0 | v1.0.0 | /b.tf |")
 		assert.Contains(t, desc, "autoupdate")
+	})
+
+	t.Run("should summarize when more than 5 upgrades", func(t *testing.T) {
+		t.Parallel()
+
+		// given — 7 tasks: 4 modules + 3 images
+		tasks := []upgradeTask{
+			{dep: domain.Dependency{Source: "mod-a", CurrentVer: "v1.0.0"}, newVersion: "v2.0.0", kind: depKindModule},
+			{dep: domain.Dependency{Source: "mod-b", CurrentVer: "v1.0.0"}, newVersion: "v2.0.0", kind: depKindModule},
+			{dep: domain.Dependency{Source: "mod-c", CurrentVer: "v1.0.0"}, newVersion: "v2.0.0", kind: depKindModule},
+			{dep: domain.Dependency{Source: "mod-d", CurrentVer: "v1.0.0"}, newVersion: "v2.0.0", kind: depKindModule},
+			{dep: domain.Dependency{Source: "img-a", CurrentVer: "0.1.0"}, newVersion: "0.2.0", kind: depKindImage},
+			{dep: domain.Dependency{Source: "img-b", CurrentVer: "0.1.0"}, newVersion: "0.2.0", kind: depKindImage},
+			{dep: domain.Dependency{Source: "img-c", CurrentVer: "0.1.0"}, newVersion: "0.2.0", kind: depKindImage},
+		}
+
+		// when
+		desc := generatePRDescription(tasks)
+
+		// then
+		assert.Contains(t, desc, "## Summary")
+		assert.Contains(t, desc, "**7** Terraform dependencies")
+		assert.Contains(t, desc, "**4** module upgrades")
+		assert.Contains(t, desc, "**3** container image upgrades")
+		assert.NotContains(t, desc, "| Name |")
+		assert.Contains(t, desc, "autoupdate")
+	})
+
+	t.Run("should summarize with only modules when no images present", func(t *testing.T) {
+		t.Parallel()
+
+		// given — 6 module-only tasks
+		tasks := make([]upgradeTask, 6)
+		for i := range tasks {
+			tasks[i] = upgradeTask{
+				dep:        domain.Dependency{Source: fmt.Sprintf("mod-%d", i), CurrentVer: "v1.0.0"},
+				newVersion: "v2.0.0",
+				kind:       depKindModule,
+			}
+		}
+
+		// when
+		desc := generatePRDescription(tasks)
+
+		// then
+		assert.Contains(t, desc, "**6** Terraform dependencies")
+		assert.Contains(t, desc, "**6** module upgrades")
+		assert.NotContains(t, desc, "container image")
 	})
 }
 
@@ -1012,6 +1061,79 @@ func TestApplyImageVersionUpgrade(t *testing.T) {
 		assert.NotContains(t, result, "sight-detector:0.4.2")
 		assert.Contains(t, result, "sight-http:0.9.1")      // unchanged
 		assert.Contains(t, result, "sight-validator:0.7.1") // unchanged
+	})
+}
+
+func TestCountByKind(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return correct counts for mixed modules and images", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []upgradeTask{
+			{kind: depKindModule},
+			{kind: depKindModule},
+			{kind: depKindImage},
+			{kind: depKindModule},
+			{kind: depKindImage},
+		}
+
+		// when
+		moduleCount, imageCount := countByKind(tasks)
+
+		// then
+		assert.Equal(t, 3, moduleCount)
+		assert.Equal(t, 2, imageCount)
+	})
+
+	t.Run("should return zero image count when all modules", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []upgradeTask{
+			{kind: depKindModule},
+			{kind: depKindModule},
+		}
+
+		// when
+		moduleCount, imageCount := countByKind(tasks)
+
+		// then
+		assert.Equal(t, 2, moduleCount)
+		assert.Equal(t, 0, imageCount)
+	})
+
+	t.Run("should return zero module count when all images", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []upgradeTask{
+			{kind: depKindImage},
+			{kind: depKindImage},
+			{kind: depKindImage},
+		}
+
+		// when
+		moduleCount, imageCount := countByKind(tasks)
+
+		// then
+		assert.Equal(t, 0, moduleCount)
+		assert.Equal(t, 3, imageCount)
+	})
+
+	t.Run("should return zeros for empty slice", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []upgradeTask{}
+
+		// when
+		moduleCount, imageCount := countByKind(tasks)
+
+		// then
+		assert.Equal(t, 0, moduleCount)
+		assert.Equal(t, 0, imageCount)
 	})
 }
 

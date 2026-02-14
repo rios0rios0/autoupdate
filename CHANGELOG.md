@@ -16,6 +16,14 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- changed the Terraform updater PR description to show a compact summary instead of a full table when there are more than 5 dependency upgrades
+
+### Fixed
+
+- fixed a potential nil pointer dereference in the Terraform HCL parser when `ParseHCL` returned a nil file without diagnostics errors
+
 ## [0.4.0] - 2026-02-12
 
 ### Added

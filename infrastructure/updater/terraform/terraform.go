@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	updaterName     = "terraform"
-	minMatchLen     = 6
-	branchBatchFmt  = "chore/upgrade-%d-dependencies"
-	branchSingleFmt = "chore/upgrade-%s-%s"
+	updaterName         = "terraform"
+	minMatchLen         = 6
+	maxDetailedUpgrades = 5
+	branchBatchFmt      = "chore/upgrade-%d-dependencies"
+	branchSingleFmt     = "chore/upgrade-%s-%s"
 )
 
 // depKind distinguishes Terraform module references (in .tf files) from
@@ -290,7 +291,7 @@ func scanTerraformFile(content, filePath string) []domain.Dependency {
 	parser := hclparse.NewParser()
 
 	file, diags := parser.ParseHCL([]byte(content), filePath)
-	if diags.HasErrors() {
+	if diags.HasErrors() || file == nil {
 		return scanWithRegex(content, filePath)
 	}
 
@@ -710,24 +711,54 @@ func appendChangelogEntry(
 func generatePRDescription(tasks []upgradeTask) string {
 	var sb strings.Builder
 	sb.WriteString("## Summary\n\n")
-	sb.WriteString("This PR upgrades the following Terraform dependencies:\n\n")
-	sb.WriteString("| Name | Type | Current Version | New Version | File |\n")
-	sb.WriteString("|------|------|-----------------|-------------|------|\n")
-	for _, t := range tasks {
-		kindLabel := "module"
-		if t.kind == depKindImage {
-			kindLabel = "image"
+
+	if len(tasks) <= maxDetailedUpgrades {
+		sb.WriteString("This PR upgrades the following Terraform dependencies:\n\n")
+		sb.WriteString("| Name | Type | Current Version | New Version | File |\n")
+		sb.WriteString("|------|------|-----------------|-------------|------|\n")
+		for _, t := range tasks {
+			kindLabel := "module"
+			if t.kind == depKindImage {
+				kindLabel = "image"
+			}
+			sb.WriteString(fmt.Sprintf(
+				"| %s | %s | %s | %s | %s |\n",
+				extractRepoName(t.dep.Source),
+				kindLabel,
+				t.dep.CurrentVer,
+				t.newVersion,
+				t.dep.FilePath,
+			))
 		}
+	} else {
+		moduleCount, imageCount := countByKind(tasks)
 		sb.WriteString(fmt.Sprintf(
-			"| %s | %s | %s | %s | %s |\n",
-			extractRepoName(t.dep.Source),
-			kindLabel,
-			t.dep.CurrentVer,
-			t.newVersion,
-			t.dep.FilePath,
+			"This PR upgrades **%d** Terraform dependencies:\n\n",
+			len(tasks),
 		))
+		if moduleCount > 0 {
+			sb.WriteString(fmt.Sprintf("- **%d** module upgrades\n", moduleCount))
+		}
+		if imageCount > 0 {
+			sb.WriteString(fmt.Sprintf("- **%d** container image upgrades\n", imageCount))
+		}
 	}
+
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()
+}
+
+// countByKind counts how many tasks belong to each depKind.
+// Returns (moduleCount, imageCount).
+func countByKind(tasks []upgradeTask) (int, int) {
+	var moduleCount, imageCount int
+	for _, t := range tasks {
+		if t.kind == depKindImage {
+			imageCount++
+		} else {
+			moduleCount++
+		}
+	}
+	return moduleCount, imageCount
 }
