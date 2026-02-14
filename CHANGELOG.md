@@ -31,11 +31,11 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - created `RunController` and `LocalController` as cobra CLI adapters in `internal/infrastructure/controllers/`
 - extracted `RunCommand` from `application/service.go` and `LocalCommand` from `cmd/local.go` into `internal/domain/commands/`
 - introduced `AppInternal` to aggregate all controllers via DIG injection
-- introduced `Controller` interface with `GetBind()` and `Execute()` following terra's pattern
+- introduced `Controller` interface with `GetBind()` and `Execute()` following separation of concerns principles
 - moved all code under `internal/` package for proper Go encapsulation
 - moved entry point from `main.go` to `cmd/autoupdate/main.go` with separate `dig.go` for DI bootstrap
 - refactored config loading from `config/` package into `internal/domain/entities/settings.go`
-- refactored entire project to follow DDD/Clean Architecture patterns matching the terra project structure
+- refactored entire project to follow DDD/Clean Architecture patterns
 - replaced manual registry-based dependency injection with `go.uber.org/dig` container
 - restructured domain layer into `entities/`, `commands/`, and `repositories/` packages
 - restructured infrastructure layer into `controllers/` and `repositories/` packages
