@@ -25,23 +25,6 @@ func injectAppContext() *internal.AppInternal {
 	return appInternal
 }
 
-func injectRunController() *controllers.RunController {
-	container := dig.New()
-
-	if err := internal.RegisterProviders(container); err != nil {
-		panic(err)
-	}
-
-	var runController *controllers.RunController
-	if err := container.Invoke(func(rc *controllers.RunController) {
-		runController = rc
-	}); err != nil {
-		panic(err)
-	}
-
-	return runController
-}
-
 func injectLocalController() *controllers.LocalController {
 	container := dig.New()
 

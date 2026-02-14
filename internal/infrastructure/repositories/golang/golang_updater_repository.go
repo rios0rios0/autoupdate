@@ -32,20 +32,20 @@ const (
 	branchGoDepsFmt    = "chore/upgrade-deps-%s"
 )
 
-// Updater implements repositories.UpdaterRepository for Go module dependencies.
+// UpdaterRepository implements repositories.UpdaterRepository for Go module dependencies.
 // It clones the repository locally, runs go commands to update
 // dependencies, pushes the changes, and creates a PR via the provider API.
-type GolangUpdaterRepository struct{}
+type UpdaterRepository struct{}
 
-// New creates a new Go updater.
-func NewGolangUpdaterRepository() repositories.UpdaterRepository {
-	return &GolangUpdaterRepository{}
+// NewUpdaterRepository creates a new Go updater.
+func NewUpdaterRepository() repositories.UpdaterRepository {
+	return &UpdaterRepository{}
 }
 
-func (u *GolangUpdaterRepository) Name() string { return updaterName }
+func (u *UpdaterRepository) Name() string { return updaterName }
 
 // Detect returns true if the repository has a go.mod file.
-func (u *GolangUpdaterRepository) Detect(
+func (u *UpdaterRepository) Detect(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
@@ -55,7 +55,7 @@ func (u *GolangUpdaterRepository) Detect(
 
 // CreateUpdatePRs clones the repo, upgrades Go version and
 // dependencies, and creates a PR.
-func (u *GolangUpdaterRepository) CreateUpdatePRs(
+func (u *UpdaterRepository) CreateUpdatePRs(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
