@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 
-	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/commands"
@@ -31,7 +30,7 @@ Detects the project type, upgrades dependencies, and creates a pull request.`,
 }
 
 // Execute runs the local update mode.
-func (it *LocalController) Execute(cmd *cobra.Command, args []string) {
+func (it *LocalController) Execute(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -43,12 +42,10 @@ func (it *LocalController) Execute(cmd *cobra.Command, args []string) {
 		repoDir = args[0]
 	}
 
-	if err := it.command.Execute(ctx, commands.LocalOptions{
+	return it.command.Execute(ctx, commands.LocalOptions{
 		RepoDir: repoDir,
 		DryRun:  dryRun,
 		Verbose: verbose,
 		Token:   token,
-	}); err != nil {
-		logger.Errorf("Local update failed: %v", err)
-	}
+	})
 }

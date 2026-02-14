@@ -16,6 +16,18 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- extracted shared entities, providers, configuration, changelog, and registry into `github.com/rios0rios0/gitforge` shared library
+- replaced local `Repository`, `File`, `FileChange`, `PullRequest`, `PullRequestInput`, `BranchInput`, `ProviderConfig`, `Controller`, `ControllerBind` types with aliases from `gitforge`
+- replaced local `ResolveToken`, `FindConfigFile`, `ValidateProviders`, `InsertChangelogEntry` with delegates to `gitforge`
+- replaced local `ProviderRepository` interface with alias to `gitforge`'s `FileAccessProvider`
+- replaced local GitHub, GitLab, and Azure DevOps provider implementations with thin wrappers around `gitforge` providers
+
+### Fixed
+
+- fixed the exit code to return non-zero when repository update errors occur, so CI/CD pipelines correctly detect failures instead of always reporting success
+
 ## [0.5.0] - 2026-02-14
 
 ### Added

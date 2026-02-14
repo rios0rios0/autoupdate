@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"fmt"
 
 	logger "github.com/sirupsen/logrus"
 
@@ -101,6 +102,11 @@ func (it *RunCommand) Execute(
 		"Run complete: %d repos processed, %d PRs created, %d errors",
 		totalRepos, totalPRs, totalErrors,
 	)
+
+	if totalErrors > 0 {
+		return fmt.Errorf("run completed with %d error(s) across %d repositories", totalErrors, totalRepos)
+	}
+
 	return nil
 }
 

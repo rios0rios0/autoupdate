@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
 	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -36,7 +37,7 @@ enabled updaters against each repository.`,
 }
 
 // Execute runs the batch update mode.
-func (it *RunController) Execute(cmd *cobra.Command, _ []string) {
+func (it *RunController) Execute(cmd *cobra.Command, _ []string) error {
 	ctx := context.Background()
 
 	configPath, _ := cmd.Flags().GetString("config")
@@ -52,11 +53,10 @@ func (it *RunController) Execute(cmd *cobra.Command, _ []string) {
 		var err error
 		cfgPath, err = entities.FindConfigFile()
 		if err != nil {
-			logger.Errorf(
-				"no config file found: %v\nSpecify one with --config or create autoupdate.yaml",
+			return fmt.Errorf(
+				"no config file found: %w\nSpecify one with --config or create autoupdate.yaml",
 				err,
 			)
-			return
 		}
 	}
 
@@ -64,21 +64,18 @@ func (it *RunController) Execute(cmd *cobra.Command, _ []string) {
 
 	settings, err := entities.NewSettings(cfgPath)
 	if err != nil {
-		logger.Errorf("failed to load config: %v", err)
-		return
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	logger.Info("Starting autoupdate run...")
 
-	if runErr := it.command.Execute(ctx, settings, commands.RunOptions{
+	return it.command.Execute(ctx, settings, commands.RunOptions{
 		DryRun:       dryRun,
 		Verbose:      verbose,
 		ProviderName: providerFilter,
 		OrgOverride:  orgOverride,
 		UpdaterName:  updaterFilter,
-	}); runErr != nil {
-		logger.Errorf("Run failed: %v", runErr)
-	}
+	})
 }
 
 // AddFlags adds the run-specific flags to the given Cobra command.

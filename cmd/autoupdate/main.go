@@ -31,8 +31,7 @@ Usage modes:
 			if len(args) == 0 {
 				return command.Help()
 			}
-			localController.Execute(command, args)
-			return nil
+			return localController.Execute(command, args)
 		},
 	}
 
@@ -59,8 +58,8 @@ func addSubcommands(rootCmd *cobra.Command, appContext *internal.AppInternal) {
 			Use:   bind.Use,
 			Short: bind.Short,
 			Long:  bind.Long,
-			Run: func(command *cobra.Command, arguments []string) {
-				ctrl.Execute(command, arguments)
+			RunE: func(command *cobra.Command, arguments []string) error {
+				return ctrl.Execute(command, arguments)
 			},
 		}
 
