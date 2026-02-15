@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/google/go-github/v66 v66.0.0
 	github.com/hashicorp/hcl/v2 v2.24.0
-	github.com/rios0rios0/testkit v0.0.0-20250922212826-148e40b2fe14
+	github.com/rios0rios0/testkit v0.0.0-20260214183626-8263c467c4cd
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
 	github.com/zclconf/go-cty v1.17.0

@@ -36,8 +36,8 @@ github.com/mitchellh/go-wordwrap v1.0.1 h1:TLuKupo69TCn6TQSyGxwI1EblZZEsQ0vMlAFQ
 github.com/mitchellh/go-wordwrap v1.0.1/go.mod h1:R62XHJLzvMFRBbcrT7m7WgmE1eOyTSsCt+hzestvNj0=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/rios0rios0/testkit v0.0.0-20250922212826-148e40b2fe14 h1:Xkfz4MJ3qCL4+yBOWMjBwjQctERaPA9oFRTDVPlYkMI=
-github.com/rios0rios0/testkit v0.0.0-20250922212826-148e40b2fe14/go.mod h1:YbGVoW49sZknE9Lq6/WT8THQdGu+b2ctwM5Taj/JmLY=
+github.com/rios0rios0/testkit v0.0.0-20260214183626-8263c467c4cd h1:NKKJW2VrNP6YSrBJJNnsV4K95ezo70Ui6eo7hciUfuY=
+github.com/rios0rios0/testkit v0.0.0-20260214183626-8263c467c4cd/go.mod h1:SjKwWIkAIBDgiy8W/An6cDj9qmTqgZkge8wUD0O6hq0=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/sirupsen/logrus v1.9.4 h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=
 github.com/sirupsen/logrus v1.9.4/go.mod h1:ftWc9WdOfJ0a92nsE2jF5u5ZwH8Bv2zdeOC42RjbV2g=
