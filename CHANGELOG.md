@@ -18,16 +18,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Changed
 
-- changed the Go module dependencies to their latest versions
-- changed the Go module dependencies to their latest versions
-- changed the Go module dependencies to their latest versions
-- changed the Go module dependencies to their latest versions
-- changed the Go module dependencies to their latest versions
-- changed the Go module dependencies to their latest versions
-- changed the Go module dependencies to their latest versions
-- changed the Go module dependencies to their latest versions
-- changed the Go module dependencies to their latest versions
-- changed the Go module dependencies to their latest versions
+- changed all gitforge import paths to the new DDD `pkg/` structure (e.g. `domain/entities` → `pkg/global/domain/entities`, `infrastructure/providers/github` → `pkg/providers/infrastructure/github`)
 
 ## [0.5.0] - 2026-02-14
 
