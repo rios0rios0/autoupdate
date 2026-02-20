@@ -722,26 +722,22 @@ func generatePRDescription(tasks []upgradeTask) string {
 			if t.kind == depKindImage {
 				kindLabel = "image"
 			}
-			sb.WriteString(fmt.Sprintf(
-				"| %s | %s | %s | %s | %s |\n",
+			fmt.Fprintf(&sb, "| %s | %s | %s | %s | %s |\n",
 				extractRepoName(t.dep.Source),
 				kindLabel,
 				t.dep.CurrentVer,
 				t.newVersion,
-				t.dep.FilePath,
-			))
+				t.dep.FilePath)
 		}
 	} else {
 		moduleCount, imageCount := countByKind(tasks)
-		sb.WriteString(fmt.Sprintf(
-			"This PR upgrades **%d** Terraform dependencies:\n\n",
-			len(tasks),
-		))
+		fmt.Fprintf(&sb, "This PR upgrades **%d** Terraform dependencies:\n\n",
+			len(tasks))
 		if moduleCount > 0 {
-			sb.WriteString(fmt.Sprintf("- **%d** module upgrades\n", moduleCount))
+			fmt.Fprintf(&sb, "- **%d** module upgrades\n", moduleCount)
 		}
 		if imageCount > 0 {
-			sb.WriteString(fmt.Sprintf("- **%d** container image upgrades\n", imageCount))
+			fmt.Fprintf(&sb, "- **%d** container image upgrades\n", imageCount)
 		}
 	}
 

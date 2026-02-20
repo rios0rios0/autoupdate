@@ -212,7 +212,7 @@ type upgradeParams struct {
 	DefaultBranch  string
 	BranchName     string
 	NodeVersion    string
-	AuthToken      string
+	AuthToken      string //nolint:gosec // internal struct field, not exposed externally
 	ProviderName   string
 	ChangelogFile  string
 	PackageManager string // "npm", "yarn", or "pnpm"
@@ -241,7 +241,7 @@ func fetchLatestNodeVersion(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // URL is hardcoded to nodejs.org
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch Node.js versions: %w", err)
 	}
@@ -282,7 +282,7 @@ func isLTSRelease(release nodeRelease) bool {
 // parseNodeVersionFile extracts the Node.js version from a .nvmrc or
 // .node-version file content.
 func parseNodeVersionFile(content string) string {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" && !strings.HasPrefix(line, "#") {
 			// Strip leading "v" if present
@@ -408,7 +408,7 @@ func prepareChangelog(
 
 	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name()) //nolint:gosec // tmpFile.Name() is not user-controlled
 		logger.Warnf("[javascript] Failed to write temp changelog: %v", writeErr)
 		return ""
 	}

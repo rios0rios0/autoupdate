@@ -17,7 +17,7 @@ import (
 type LocalUpgradeOptions struct {
 	DryRun       bool
 	Verbose      bool
-	AuthToken    string // auth token for private package access
+	AuthToken    string //nolint:gosec // auth token for private package access
 	ProviderName string // git provider name (e.g. "azuredevops", "github", "gitlab")
 }
 
@@ -208,7 +208,7 @@ type localUpgradeParams struct {
 	BranchName     string
 	NodeVersion    string
 	ChangelogFile  string
-	AuthToken      string
+	AuthToken      string //nolint:gosec // internal struct field, not exposed externally
 	ProviderName   string
 	PackageManager string
 }
@@ -333,7 +333,7 @@ func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
 
 	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name()) //nolint:gosec // tmpFile.Name() is not user-controlled
 		logger.Warnf("[javascript] Failed to write temp changelog: %v", writeErr)
 		return ""
 	}

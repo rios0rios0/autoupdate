@@ -17,7 +17,7 @@ import (
 type LocalUpgradeOptions struct {
 	DryRun       bool
 	Verbose      bool
-	AuthToken    string // auth token for private module access (passed to config.sh)
+	AuthToken    string //nolint:gosec // auth token for private module access (passed to config.sh)
 	ProviderName string // git provider name (e.g. "azuredevops", "github", "gitlab")
 }
 
@@ -185,7 +185,7 @@ type localUpgradeParams struct {
 	BranchName    string
 	GoVersion     string
 	ChangelogFile string
-	AuthToken     string // auth token for private module access
+	AuthToken     string //nolint:gosec // auth token for private module access
 	ProviderName  string // git provider name (for credential setup)
 	HasConfigSH   bool   // whether the repo contains config.sh
 }
@@ -317,7 +317,7 @@ func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
 
 	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name()) //nolint:gosec // tmpFile.Name() is not user-controlled
 		logger.Warnf("[golang] Failed to write temp changelog: %v", writeErr)
 		return ""
 	}
