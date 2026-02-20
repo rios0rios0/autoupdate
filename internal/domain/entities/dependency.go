@@ -1,5 +1,9 @@
 package entities
 
+import (
+	gitforgeEntities "github.com/rios0rios0/gitforge/domain/entities"
+)
+
 // Dependency represents a versioned dependency found in a repository.
 type Dependency struct {
 	Name       string // Dependency name or module label
@@ -10,9 +14,5 @@ type Dependency struct {
 	Line       int    // Line number in the file
 }
 
-// FileChange represents a file modification to be included in a commit.
-type FileChange struct {
-	Path       string
-	Content    string
-	ChangeType string // "add", "edit", "delete"
-}
+// FileChange is re-exported from gitforge.
+type FileChange = gitforgeEntities.FileChange
