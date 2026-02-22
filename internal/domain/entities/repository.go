@@ -1,20 +1,11 @@
 package entities
 
-// Repository represents a Git repository on any hosting provider.
-type Repository struct {
-	ID            string
-	Name          string
-	Organization  string
-	Project       string // Used by Azure DevOps; empty for GitHub/GitLab
-	DefaultBranch string
-	RemoteURL     string
-	SSHURL        string
-	ProviderName  string
-}
+import (
+	gitforgeEntities "github.com/rios0rios0/gitforge/domain/entities"
+)
 
-// File represents a file entry within a repository.
-type File struct {
-	Path     string
-	ObjectID string
-	IsDir    bool
-}
+// Repository is re-exported from gitforge.
+type Repository = gitforgeEntities.Repository
+
+// File is re-exported from gitforge.
+type File = gitforgeEntities.File

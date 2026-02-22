@@ -289,7 +289,7 @@ func isActiveRelease(release pythonRelease) bool {
 // parsePythonVersionFile extracts the Python version from a .python-version
 // file content. The file typically contains just a version string like "3.12.8".
 func parsePythonVersionFile(content string) string {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" && !strings.HasPrefix(line, "#") {
 			return line

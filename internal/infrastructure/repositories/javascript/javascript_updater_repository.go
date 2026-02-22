@@ -282,7 +282,7 @@ func isLTSRelease(release nodeRelease) bool {
 // parseNodeVersionFile extracts the Node.js version from a .nvmrc or
 // .node-version file content.
 func parseNodeVersionFile(content string) string {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" && !strings.HasPrefix(line, "#") {
 			// Strip leading "v" if present

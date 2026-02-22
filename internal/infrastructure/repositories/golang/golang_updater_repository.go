@@ -347,7 +347,7 @@ func fetchLatestGoVersion(ctx context.Context) (string, error) {
 // parseGoDirective extracts the version from a go.mod's "go" directive.
 // For example, given content containing "go 1.25.7", it returns "1.25.7".
 func parseGoDirective(goModContent string) string {
-	for _, line := range strings.Split(goModContent, "\n") {
+	for line := range strings.SplitSeq(goModContent, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "go ") {
 			fields := strings.Fields(line)
