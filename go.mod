@@ -8,7 +8,7 @@ require (
 	github.com/rios0rios0/testkit v0.0.0-20260214183626-8263c467c4cd
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
-	github.com/zclconf/go-cty v1.17.0
+	github.com/zclconf/go-cty v1.18.0
 	gitlab.com/gitlab-org/api/client-go v1.41.0
 	go.uber.org/dig v1.19.0
 	golang.org/x/mod v0.33.0
