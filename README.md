@@ -10,6 +10,8 @@
         <img src="https://img.shields.io/sonar/coverage/rios0rios0_autoupdate?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarqubecloud" alt="Coverage"/></a>
     <a href="https://sonarcloud.io/summary/overall?id=rios0rios0_autoupdate">
         <img src="https://img.shields.io/sonar/quality_gate/rios0rios0_autoupdate?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarqubecloud" alt="Quality Gate"/></a>
+    <a href="https://www.bestpractices.dev/projects/12021">
+        <img src="https://img.shields.io/cii/level/12021?style=for-the-badge&logo=opensourceinitiative" alt="OpenSSF Best Practices"/></a>
 </p>
 
 A self-hosted Dependabot alternative that automatically discovers repositories, detects outdated dependencies across multiple ecosystems, and creates Pull Requests to upgrade them.
