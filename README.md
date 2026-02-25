@@ -4,6 +4,12 @@
         <img src="https://img.shields.io/github/release/rios0rios0/autoupdate.svg?style=for-the-badge&logo=github" alt="Latest Release"/></a>
     <a href="https://github.com/rios0rios0/autoupdate/blob/main/LICENSE">
         <img src="https://img.shields.io/github/license/rios0rios0/autoupdate.svg?style=for-the-badge&logo=github" alt="License"/></a>
+    <a href="https://github.com/rios0rios0/autoupdate/actions/workflows/default.yaml">
+        <img src="https://img.shields.io/github/actions/workflow/status/rios0rios0/autoupdate/default.yaml?branch=main&style=for-the-badge&logo=github" alt="Build Status"/></a>
+    <a href="https://sonarcloud.io/summary/overall?id=rios0rios0_autoupdate">
+        <img src="https://img.shields.io/sonar/coverage/rios0rios0_autoupdate?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarqubecloud" alt="Coverage"/></a>
+    <a href="https://sonarcloud.io/summary/overall?id=rios0rios0_autoupdate">
+        <img src="https://img.shields.io/sonar/quality_gate/rios0rios0_autoupdate?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarqubecloud" alt="Quality Gate"/></a>
 </p>
 
 A self-hosted Dependabot alternative that automatically discovers repositories, detects outdated dependencies across multiple ecosystems, and creates Pull Requests to upgrade them.
