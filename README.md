@@ -1,10 +1,16 @@
-# autoupdate
+<h1 align="center">autoupdate</h1>
+<p align="center">
+    <a href="https://github.com/rios0rios0/autoupdate/releases/latest">
+        <img src="https://img.shields.io/github/release/rios0rios0/autoupdate.svg?style=for-the-badge&logo=github" alt="Latest Release"/></a>
+    <a href="https://github.com/rios0rios0/autoupdate/blob/main/LICENSE">
+        <img src="https://img.shields.io/github/license/rios0rios0/autoupdate.svg?style=for-the-badge&logo=github" alt="License"/></a>
+</p>
 
 A self-hosted Dependabot alternative that automatically discovers repositories, detects outdated dependencies across multiple ecosystems, and creates Pull Requests to upgrade them.
 
 ## Features
 
-- **Standalone Local Mode**: Run `autoupdate .` on any local repo — auto-detects the Git provider from the remote URL, upgrades dependencies, and creates a PR
+- **Standalone Local Mode**: Run `autoupdate .` on any local repo -- auto-detects the Git provider from the remote URL, upgrades dependencies, and creates a PR
 - **Multi-Provider**: Supports GitHub, GitLab, and Azure DevOps as Git hosting providers
 - **API-Based Discovery**: Automatically discovers all repositories in an organization, group, or user account
 - **Extensible Updaters**: Plugin-based architecture for dependency ecosystems (Terraform modules, Go projects, and more coming)
@@ -98,6 +104,7 @@ updaters:
 ### Token Resolution
 
 Tokens support three formats:
+
 - **Inline**: `token: "ghp_abc123"`
 - **Environment variable**: `token: "${GITHUB_TOKEN}"` (expanded at runtime)
 - **File path**: `token: "/run/secrets/github_token"` (read from file if path exists)
@@ -106,7 +113,7 @@ Tokens support three formats:
 
 ### Standalone Local Mode
 
-Update a single local repository directly — no config file needed. The provider is auto-detected from the `origin` remote URL:
+Update a single local repository directly -- no config file needed. The provider is auto-detected from the `origin` remote URL:
 
 ```bash
 # Update the current directory
@@ -115,7 +122,7 @@ autoupdate .
 # Update a specific path
 autoupdate /path/to/repo
 
-# Dry run — preview what would happen
+# Dry run -- preview what would happen
 autoupdate --dry-run .
 
 # Use an explicit token (overrides env var detection)
@@ -138,7 +145,7 @@ Discover and update all repositories across providers using a config file:
 # Run all configured providers and updaters
 autoupdate run
 
-# Dry run — preview what would happen
+# Dry run -- preview what would happen
 autoupdate run --dry-run
 
 # Only process GitHub repos
@@ -254,11 +261,11 @@ reg.Register(npmUpdater.New())
 
 ### `autoupdate [path]`
 
-Standalone local mode — update a single repository in place.
+Standalone local mode -- update a single repository in place.
 
 ### `autoupdate run`
 
-Batch mode — discover and update repositories using a config file.
+Batch mode -- discover and update repositories using a config file.
 
 | Flag         | Description                                            |
 |--------------|--------------------------------------------------------|
