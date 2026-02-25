@@ -70,14 +70,6 @@ curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.
 
 Download pre-built binaries from the [releases page](https://github.com/rios0rios0/autoupdate/releases).
 
-### Build from Source
-
-```bash
-git clone https://github.com/rios0rios0/autoupdate.git
-cd autoupdate
-make build
-```
-
 ## Configuration
 
 Create an `autoupdate.yaml` (or `.autoupdate.yaml`) in the current directory, `~/.config/`, or pass it with `--config`.
@@ -207,55 +199,6 @@ steps:
       AZURE_DEVOPS_PAT: $(System.AccessToken)
 ```
 
-## Architecture
-
-```
-autoupdate/
-├── cmd/                             # CLI layer (Cobra commands)
-│   ├── root.go                      # Global flags + local-mode entry point
-│   ├── local.go                     # Standalone local mode (autoupdate .)
-│   └── run.go                       # Batch "run" command (config-driven)
-├── domain/                          # Interfaces and models (no dependencies)
-│   ├── models.go                    # Repository, Dependency, PullRequest, etc.
-│   ├── changelog.go                 # CHANGELOG.md manipulation helper
-│   ├── provider.go                  # Provider interface
-│   └── updater.go                   # Updater interface
-├── infrastructure/                  # Implementations
-│   ├── provider/
-│   │   ├── registry.go              # Provider registry
-│   │   ├── github/github.go         # GitHub provider
-│   │   ├── gitlab/gitlab.go         # GitLab provider
-│   │   └── azuredevops/azuredevops.go # Azure DevOps provider
-│   └── updater/
-│       ├── registry.go              # Updater registry
-│       ├── terraform/terraform.go   # Terraform module updater
-│       └── golang/
-│           ├── golang.go            # Go dependency updater (remote mode)
-│           └── local.go             # Go dependency updater (local mode)
-├── application/
-│   └── service.go                   # Orchestration service
-├── config/
-│   └── config.go                    # YAML config loading
-├── main.go                          # Entry point
-└── autoupdate.yaml                  # Config template
-```
-
-### Adding a New Provider
-
-Implement the `domain.Provider` interface and register it in `cmd/run.go`:
-
-```go
-reg.Register("bitbucket", bitbucket.New)
-```
-
-### Adding a New Updater
-
-Implement the `domain.Updater` interface and register it in `cmd/run.go`:
-
-```go
-reg.Register(npmUpdater.New())
-```
-
 ## Command Reference
 
 ### Global Flags
@@ -283,7 +226,7 @@ Batch mode -- discover and update repositories using a config file.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
