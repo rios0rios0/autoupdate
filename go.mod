@@ -5,11 +5,11 @@ go 1.26.0
 require (
 	github.com/google/go-github/v66 v66.0.0
 	github.com/hashicorp/hcl/v2 v2.24.0
-	github.com/rios0rios0/testkit v0.0.0-20260225040157-ee82f3616fa4
+	github.com/rios0rios0/testkit v0.0.0-20260226133256-05e6293bbf63
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
 	github.com/zclconf/go-cty v1.18.0
-	gitlab.com/gitlab-org/api/client-go v1.43.0
+	gitlab.com/gitlab-org/api/client-go v1.44.0
 	go.uber.org/dig v1.19.0
 	golang.org/x/mod v0.33.0
 	gopkg.in/yaml.v3 v3.0.1
