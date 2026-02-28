@@ -8,7 +8,8 @@ development practices, refer to the **[Development Guide](https://github.com/rio
 ## Prerequisites
 
 - [Go](https://go.dev/dl/) 1.26+
-- [Make](https://www.gnu.org/software/make/)
+- [Make](https://www.gnu.org/software/make/) 4.0+
+- [Git](https://git-scm.com/downloads) 2.30+
 
 ## Development Workflow
 
@@ -18,20 +19,29 @@ development practices, refer to the **[Development Guide](https://github.com/rio
    ```bash
    go mod download
    ```
-4. Build the binary:
+4. Build the project:
    ```bash
    make build
    ```
-5. Make your changes
-6. Validate:
+5. Run the application locally:
    ```bash
-   make lint
-   make test
-   make sast
+   make run
    ```
-7. Update `CHANGELOG.md` under `[Unreleased]`
-8. Commit following the [commit conventions](https://github.com/rios0rios0/guide/wiki/Life-Cycle/Git-Flow)
-9. Open a pull request against `main`
+6. Build a debug binary (with debug symbols):
+   ```bash
+   make debug
+   ```
+7. Run tests:
+   ```bash
+   go test ./...
+   ```
+8. Install the binary to `~/.local/bin`:
+   ```bash
+   make install
+   ```
+9. Update `CHANGELOG.md` under `[Unreleased]`
+10. Commit following the [commit conventions](https://github.com/rios0rios0/guide/wiki/Life-Cycle/Git-Flow)
+11. Open a pull request against `main`
 
 ## Adding a New Provider
 
