@@ -275,7 +275,7 @@ func prepareChangelog(
 
 	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name()) //nolint:gosec // tmpFile.Name() is not user-controlled
 		logger.Warnf("[golang] Failed to write temp changelog: %v", writeErr)
 		return ""
 	}
@@ -291,7 +291,7 @@ type upgradeParams struct {
 	DefaultBranch string
 	BranchName    string
 	GoVersion     string
-	AuthToken     string
+	AuthToken     string //nolint:gosec // internal struct field, not exposed externally
 	HasConfigSH   bool
 	ProviderName  string
 	ChangelogFile string // path to a temp file with updated CHANGELOG.md content (empty = no changelog)
@@ -320,7 +320,7 @@ func fetchLatestGoVersion(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // URL is hardcoded to go.dev
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch Go versions: %w", err)
 	}
@@ -347,7 +347,7 @@ func fetchLatestGoVersion(ctx context.Context) (string, error) {
 // parseGoDirective extracts the version from a go.mod's "go" directive.
 // For example, given content containing "go 1.25.7", it returns "1.25.7".
 func parseGoDirective(goModContent string) string {
-	for _, line := range strings.Split(goModContent, "\n") {
+	for line := range strings.SplitSeq(goModContent, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "go ") {
 			fields := strings.Fields(line)

@@ -212,7 +212,7 @@ type upgradeParams struct {
 	DefaultBranch   string
 	BranchName      string
 	PythonVersion   string
-	AuthToken       string
+	AuthToken       string //nolint:gosec // internal struct field, not exposed externally
 	ProviderName    string
 	ChangelogFile   string
 	HasRequirements bool
@@ -244,7 +244,7 @@ func fetchLatestPythonVersion(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // URL is hardcoded to endoflife.date
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch Python versions: %w", err)
 	}
@@ -289,7 +289,7 @@ func isActiveRelease(release pythonRelease) bool {
 // parsePythonVersionFile extracts the Python version from a .python-version
 // file content. The file typically contains just a version string like "3.12.8".
 func parsePythonVersionFile(content string) string {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" && !strings.HasPrefix(line, "#") {
 			return line
@@ -376,7 +376,7 @@ func prepareChangelog(
 
 	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name()) //nolint:gosec // tmpFile.Name() is not user-controlled
 		logger.Warnf("[python] Failed to write temp changelog: %v", writeErr)
 		return ""
 	}

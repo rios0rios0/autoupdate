@@ -376,8 +376,8 @@ func parseRemoteURL(rawURL string) (*remoteInfo, error) {
 
 func parseAzureDevOpsURL(url string) (*remoteInfo, error) {
 	if strings.HasPrefix(url, "git@") && strings.Contains(url, ":v3/") {
-		colonIdx := strings.Index(url, ":v3/")
-		pathPart := url[colonIdx+len(":v3/"):]
+		_, after, _ := strings.Cut(url, ":v3/")
+		pathPart := after
 		parts := strings.Split(pathPart, "/")
 		if len(parts) >= 3 { //nolint:mnd // org/project/repo
 			return &remoteInfo{
@@ -415,11 +415,11 @@ func parseStandardGitURL(url, hostname string) (string, string, error) {
 		}
 		pathPart = parts[1]
 	} else {
-		idx := strings.Index(url, hostname)
-		if idx < 0 {
+		_, after, ok := strings.Cut(url, hostname)
+		if !ok {
 			return "", "", fmt.Errorf("hostname %s not found in URL: %s", hostname, url)
 		}
-		pathPart = strings.TrimPrefix(url[idx+len(hostname):], "/")
+		pathPart = strings.TrimPrefix(after, "/")
 	}
 
 	segments := strings.Split(pathPart, "/")
