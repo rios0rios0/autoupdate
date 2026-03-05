@@ -35,8 +35,8 @@ func RemoteFileChecker(
 // DetectRemote checks whether the given langforge detector matches a remote
 // repository by building a RemoteFileChecker and delegating to DetectWith.
 func DetectRemote(
-	detector langRepos.LanguageDetector,
 	ctx context.Context,
+	detector langRepos.LanguageDetector,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 ) (bool, error) {

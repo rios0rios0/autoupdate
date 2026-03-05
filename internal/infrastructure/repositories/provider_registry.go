@@ -4,42 +4,42 @@ import (
 	"fmt"
 
 	domainRepos "github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	gitforgeEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
+	registryInfra "github.com/rios0rios0/gitforge/pkg/registry/infrastructure"
 )
 
 // ProviderFactory is a constructor function that creates a ProviderRepository given an auth token.
 type ProviderFactory func(token string) domainRepos.ProviderRepository
 
-// ProviderRegistry manages all registered Git provider implementations.
+// ProviderRegistry wraps gitforge's ProviderRegistry, adapting Get() to return FileAccessProvider.
 type ProviderRegistry struct {
-	providers map[string]ProviderFactory
+	*registryInfra.ProviderRegistry
 }
 
-// NewProviderRegistry creates an empty provider registry.
+// NewProviderRegistry creates a new provider registry backed by gitforge.
 func NewProviderRegistry() *ProviderRegistry {
 	return &ProviderRegistry{
-		providers: make(map[string]ProviderFactory),
+		ProviderRegistry: registryInfra.NewProviderRegistry(),
 	}
 }
 
-// Register adds a provider factory under the given name (e.g. "github").
+// Register adds a FileAccessProvider factory under the given name.
+// This wraps the factory into gitforge's ForgeProvider-based registration.
 func (r *ProviderRegistry) Register(name string, factory ProviderFactory) {
-	r.providers[name] = factory
+	r.RegisterFactory(name, func(token string) gitforgeEntities.ForgeProvider {
+		return factory(token)
+	})
 }
 
-// Get returns a configured provider instance for the given name and token.
+// Get returns a configured FileAccessProvider instance for the given name and token.
 func (r *ProviderRegistry) Get(name, token string) (domainRepos.ProviderRepository, error) {
-	factory, ok := r.providers[name]
+	provider, err := r.ProviderRegistry.Get(name, token)
+	if err != nil {
+		return nil, err
+	}
+	fp, ok := provider.(domainRepos.ProviderRepository)
 	if !ok {
-		return nil, fmt.Errorf("unknown provider type: %q", name)
+		return nil, fmt.Errorf("provider %q does not implement FileAccessProvider", name)
 	}
-	return factory(token), nil
-}
-
-// Names returns the list of registered provider names.
-func (r *ProviderRegistry) Names() []string {
-	names := make([]string, 0, len(r.providers))
-	for name := range r.providers {
-		names = append(names, name)
-	}
-	return names
+	return fp, nil
 }

@@ -50,7 +50,7 @@ func (u *UpdaterRepository) Detect(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 ) bool {
-	found, err := support.DetectRemote(&langPython.Detector{}, ctx, provider, repo)
+	found, err := support.DetectRemote(ctx, &langPython.Detector{}, provider, repo)
 	if err != nil {
 		logger.Warnf("[python] detection error for %s/%s: %v", repo.Organization, repo.Name, err)
 		return false
