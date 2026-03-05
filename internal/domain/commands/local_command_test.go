@@ -3,14 +3,13 @@
 package commands_test
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/commands"
+	langEntities "github.com/rios0rios0/langforge/pkg/domain/entities"
 )
 
 func TestParseRemoteURL(t *testing.T) {
@@ -145,85 +144,6 @@ func TestParseRemoteURL(t *testing.T) {
 	})
 }
 
-func TestDetectProjectType(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should detect Go project", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		tmpDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module test"), 0o644))
-
-		// when
-		result, err := commands.DetectProjectType(tmpDir)
-
-		// then
-		require.NoError(t, err)
-		assert.Equal(t, "golang", string(result))
-	})
-
-	t.Run("should detect JavaScript project", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		tmpDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte("{}"), 0o644))
-
-		// when
-		result, err := commands.DetectProjectType(tmpDir)
-
-		// then
-		require.NoError(t, err)
-		assert.Equal(t, "javascript", string(result))
-	})
-
-	t.Run("should detect Python project with requirements.txt", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		tmpDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "requirements.txt"), []byte("flask"), 0o644))
-
-		// when
-		result, err := commands.DetectProjectType(tmpDir)
-
-		// then
-		require.NoError(t, err)
-		assert.Equal(t, "python", string(result))
-	})
-
-	t.Run("should detect Python project with pyproject.toml", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		tmpDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "pyproject.toml"), []byte("[project]"), 0o644))
-
-		// when
-		result, err := commands.DetectProjectType(tmpDir)
-
-		// then
-		require.NoError(t, err)
-		assert.Equal(t, "python", string(result))
-	})
-
-	t.Run("should return error for unsupported project", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		tmpDir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# test"), 0o644))
-
-		// when
-		_, err := commands.DetectProjectType(tmpDir)
-
-		// then
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no supported project found")
-	})
-}
-
 func TestResolveTokenFromEnv(t *testing.T) {
 	t.Parallel()
 
@@ -296,7 +216,7 @@ func TestGeneratePRContent(t *testing.T) {
 			BranchName:     "chore/deps-update",
 			LatestVersion:  "1.22.0",
 			VersionUpdated: false,
-			ProjectType:    "golang",
+			ProjectType:    langEntities.LanguageGo,
 		}
 
 		// when
@@ -315,7 +235,7 @@ func TestGeneratePRContent(t *testing.T) {
 			BranchName:     "chore/deps-update",
 			LatestVersion:  "1.26.0",
 			VersionUpdated: true,
-			ProjectType:    "golang",
+			ProjectType:    langEntities.LanguageGo,
 		}
 
 		// when
@@ -334,7 +254,7 @@ func TestGeneratePRContent(t *testing.T) {
 			BranchName:     "chore/deps-update",
 			LatestVersion:  "3.12.0",
 			VersionUpdated: true,
-			ProjectType:    "python",
+			ProjectType:    langEntities.LanguagePython,
 		}
 
 		// when
@@ -353,7 +273,7 @@ func TestGeneratePRContent(t *testing.T) {
 			BranchName:     "chore/deps-update",
 			LatestVersion:  "20.0.0",
 			VersionUpdated: true,
-			ProjectType:    "javascript",
+			ProjectType:    langEntities.LanguageNode,
 		}
 
 		// when
@@ -370,7 +290,7 @@ func TestGeneratePRContent(t *testing.T) {
 		// given
 		info := &commands.LocalPRInfoForTest{
 			BranchName:  "chore/deps-update",
-			ProjectType: "unknown",
+			ProjectType: langEntities.LanguageUnknown,
 		}
 
 		// when

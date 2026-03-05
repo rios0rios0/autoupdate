@@ -16,6 +16,8 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	"github.com/rios0rios0/autoupdate/internal/support"
+	langNode "github.com/rios0rios0/langforge/pkg/infrastructure/languages/node"
 )
 
 const (
@@ -46,13 +48,18 @@ func NewUpdaterRepository() repositories.UpdaterRepository {
 
 func (u *UpdaterRepository) Name() string { return updaterName }
 
-// Detect returns true if the repository has a package.json file.
+// Detect returns true if the repository has Node/JS marker files (e.g. package.json, tsconfig.json).
 func (u *UpdaterRepository) Detect(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 ) bool {
-	return provider.HasFile(ctx, repo, "package.json")
+	found, err := support.DetectRemote(&langNode.Detector{}, ctx, provider, repo)
+	if err != nil {
+		logger.Warnf("[javascript] detection error for %s/%s: %v", repo.Organization, repo.Name, err)
+		return false
+	}
+	return found
 }
 
 // CreateUpdatePRs clones the repo, upgrades Node.js dependencies,
