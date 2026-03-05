@@ -141,7 +141,7 @@ func TestParseRemoteURL(t *testing.T) {
 		// then
 		require.Error(t, err)
 		assert.Nil(t, info)
-		assert.Contains(t, err.Error(), "invalid Azure DevOps SSH URL")
+		assert.Contains(t, err.Error(), "unsupported remote URL format")
 	})
 }
 
