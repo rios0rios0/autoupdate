@@ -16,6 +16,8 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	"github.com/rios0rios0/autoupdate/internal/support"
+	langPython "github.com/rios0rios0/langforge/pkg/infrastructure/languages/python"
 )
 
 const (
@@ -42,14 +44,18 @@ func NewUpdaterRepository() repositories.UpdaterRepository {
 
 func (u *UpdaterRepository) Name() string { return updaterName }
 
-// Detect returns true if the repository has a requirements.txt or pyproject.toml file.
+// Detect returns true if the repository has Python marker files (e.g. pyproject.toml, requirements.txt).
 func (u *UpdaterRepository) Detect(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 ) bool {
-	return provider.HasFile(ctx, repo, "requirements.txt") ||
-		provider.HasFile(ctx, repo, "pyproject.toml")
+	found, err := support.DetectRemote(&langPython.Detector{}, ctx, provider, repo)
+	if err != nil {
+		logger.Warnf("[python] detection error for %s/%s: %v", repo.Organization, repo.Name, err)
+		return false
+	}
+	return found
 }
 
 // CreateUpdatePRs clones the repo, upgrades Python dependencies,

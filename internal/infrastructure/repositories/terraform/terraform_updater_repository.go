@@ -14,6 +14,8 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	"github.com/rios0rios0/autoupdate/internal/support"
+	langTerraform "github.com/rios0rios0/langforge/pkg/infrastructure/languages/terraform"
 )
 
 const (
@@ -45,21 +47,18 @@ func NewUpdaterRepository() repositories.UpdaterRepository {
 
 func (u *UpdaterRepository) Name() string { return updaterName }
 
-// Detect returns true if the repository contains .tf or .hcl files.
+// Detect returns true if the repository contains Terraform marker files (e.g. *.tf, *.hcl).
 func (u *UpdaterRepository) Detect(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 ) bool {
-	tfFiles, err := provider.ListFiles(ctx, repo, ".tf")
-	if err == nil && len(tfFiles) > 0 {
-		return true
+	found, err := support.DetectRemote(&langTerraform.Detector{}, ctx, provider, repo)
+	if err != nil {
+		logger.Warnf("[terraform] detection error for %s/%s: %v", repo.Organization, repo.Name, err)
+		return false
 	}
-	hclFiles, hclErr := provider.ListFiles(ctx, repo, ".hcl")
-	if hclErr == nil && len(hclFiles) > 0 {
-		return true
-	}
-	return false
+	return found
 }
 
 // CreateUpdatePRs scans for outdated Terraform module dependencies,
