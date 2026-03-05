@@ -19,6 +19,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Changed
 
 - changed all gitforge import paths to the new DDD `pkg/` structure (e.g. `domain/entities` → `pkg/global/domain/entities`, `infrastructure/providers/github` → `pkg/providers/infrastructure/github`)
+- replaced inline `parseRemoteURL`, `parseAzureDevOpsURL`, and `parseStandardGitURL` with gitforge's `ParseRemoteURL` to consolidate duplicated code
 
 ## [0.5.0] - 2026-02-14
 

@@ -15,6 +15,8 @@ import (
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
+	gitInfra "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
+	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
 )
 
 const (
@@ -42,6 +44,13 @@ type remoteInfo struct {
 	Org          string
 	Project      string // Azure DevOps only
 	RepoName     string
+}
+
+// serviceTypeToProvider maps gitforge ServiceType to the provider name strings used by autoupdate.
+var serviceTypeToProvider = map[globalEntities.ServiceType]string{
+	globalEntities.GITHUB:      providerGitHub,
+	globalEntities.AZUREDEVOPS: providerAzureDevOps,
+	globalEntities.GITLAB:      providerGitLab,
 }
 
 // projectType identifies the detected project ecosystem.
@@ -348,86 +357,24 @@ func parseGitRemote(ctx context.Context, repoDir string) (*remoteInfo, error) {
 }
 
 // parseRemoteURL extracts provider, org, project, and repo name from a Git remote URL.
+// Delegates to gitforge's ParseRemoteURL and converts the result to autoupdate's remoteInfo.
 func parseRemoteURL(rawURL string) (*remoteInfo, error) {
-	cleaned := strings.TrimSuffix(rawURL, ".git")
-
-	if strings.Contains(cleaned, "dev.azure.com") || strings.Contains(cleaned, "ssh.dev.azure.com") {
-		return parseAzureDevOpsURL(cleaned)
+	parsed, err := gitInfra.ParseRemoteURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("unsupported git remote URL: %w", err)
 	}
 
-	if strings.Contains(cleaned, "github.com") {
-		o, r, e := parseStandardGitURL(cleaned, "github.com")
-		if e != nil {
-			return nil, e
-		}
-		return &remoteInfo{ProviderType: providerGitHub, Org: o, RepoName: r}, nil
+	providerName, ok := serviceTypeToProvider[parsed.ServiceType]
+	if !ok {
+		return nil, fmt.Errorf("unsupported provider type for URL: %s", rawURL)
 	}
 
-	if strings.Contains(cleaned, "gitlab.com") {
-		o, r, e := parseStandardGitURL(cleaned, "gitlab.com")
-		if e != nil {
-			return nil, e
-		}
-		return &remoteInfo{ProviderType: providerGitLab, Org: o, RepoName: r}, nil
-	}
-
-	return nil, fmt.Errorf("unsupported git remote URL: %s", rawURL)
-}
-
-func parseAzureDevOpsURL(url string) (*remoteInfo, error) {
-	if strings.HasPrefix(url, "git@") && strings.Contains(url, ":v3/") {
-		_, after, _ := strings.Cut(url, ":v3/")
-		pathPart := after
-		parts := strings.Split(pathPart, "/")
-		if len(parts) >= 3 { //nolint:mnd // org/project/repo
-			return &remoteInfo{
-				ProviderType: providerAzureDevOps,
-				Org:          parts[0],
-				Project:      parts[1],
-				RepoName:     parts[2],
-			}, nil
-		}
-		return nil, fmt.Errorf("invalid Azure DevOps SSH URL: %s", url)
-	}
-
-	parts := strings.Split(url, "/")
-	for i, p := range parts {
-		if p == "_git" && i+1 < len(parts) && i >= 2 {
-			return &remoteInfo{
-				ProviderType: providerAzureDevOps,
-				Org:          parts[i-2],
-				Project:      parts[i-1],
-				RepoName:     parts[i+1],
-			}, nil
-		}
-	}
-
-	return nil, fmt.Errorf("invalid Azure DevOps URL: %s", url)
-}
-
-func parseStandardGitURL(url, hostname string) (string, string, error) {
-	var pathPart string
-
-	if strings.HasPrefix(url, "git@") {
-		parts := strings.SplitN(url, ":", 2) //nolint:mnd // host:path
-		if len(parts) < 2 {                  //nolint:mnd // need both parts
-			return "", "", fmt.Errorf("invalid SSH URL: %s", url)
-		}
-		pathPart = parts[1]
-	} else {
-		_, after, ok := strings.Cut(url, hostname)
-		if !ok {
-			return "", "", fmt.Errorf("hostname %s not found in URL: %s", hostname, url)
-		}
-		pathPart = strings.TrimPrefix(after, "/")
-	}
-
-	segments := strings.Split(pathPart, "/")
-	if len(segments) < 2 { //nolint:mnd // need org + repo
-		return "", "", fmt.Errorf("cannot extract org/repo from URL: %s", url)
-	}
-
-	return segments[0], segments[1], nil
+	return &remoteInfo{
+		ProviderType: providerName,
+		Org:          parsed.Organization,
+		Project:      parsed.Project,
+		RepoName:     parsed.RepoName,
+	}, nil
 }
 
 func resolveTokenFromEnv(providerType string) string {
