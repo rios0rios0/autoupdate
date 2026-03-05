@@ -11,6 +11,7 @@ import (
 	logger "github.com/sirupsen/logrus"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
 )
 
 // LocalUpgradeOptions holds options for the local (standalone) upgrade mode.
@@ -142,8 +143,9 @@ func handleDryRunLocal(vCtx *versionContext, repoDir, pkgMgr string) *LocalResul
 	}
 }
 
-// executeLocalUpgrade performs the actual upgrade by running the
-// generated bash script in the local repository.
+// executeLocalUpgrade performs the actual upgrade using go-git for
+// branch/commit/push operations and a bash script only for the
+// language-specific upgrade commands (npm/yarn/pnpm install, etc.).
 func executeLocalUpgrade(
 	ctx context.Context,
 	repoDir string,
@@ -151,6 +153,62 @@ func executeLocalUpgrade(
 	pkgMgr string,
 	opts LocalUpgradeOptions,
 ) (*LocalResult, error) {
+	// --- Git Setup (go-git) ---
+	gitCtx, err := gitlocal.NewLocalGitContext(repoDir)
+	if err != nil {
+		return nil, err
+	}
+	if err = gitCtx.EnsureClean(); err != nil {
+		return nil, err
+	}
+	if err = gitCtx.CreateBranch(vCtx.BranchName); err != nil {
+		return nil, fmt.Errorf("failed to create branch %s: %w", vCtx.BranchName, err)
+	}
+
+	// --- Language Operations (bash) ---
+	outputStr, runErr := runLanguageUpgradeScript(ctx, repoDir, vCtx, pkgMgr, opts)
+	if runErr != nil {
+		return nil, runErr
+	}
+
+	nodeVersionUpdated := strings.Contains(outputStr, "NODE_VERSION_UPDATED=true")
+
+	// --- Git Finalize (go-git) ---
+	commitMsg := "chore(deps): updated JavaScript dependencies"
+	if nodeVersionUpdated {
+		commitMsg = fmt.Sprintf(
+			"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
+			vCtx.LatestVersion,
+		)
+	}
+
+	pushed, pushErr := gitCtx.StageCommitAndPush(
+		vCtx.BranchName, commitMsg, opts.ProviderName, opts.AuthToken,
+	)
+	if pushErr != nil {
+		return nil, pushErr
+	}
+
+	return &LocalResult{
+		HasChanges:         pushed,
+		NodeVersionUpdated: nodeVersionUpdated,
+		LatestVersion:      vCtx.LatestVersion,
+		BranchName:         vCtx.BranchName,
+		PackageManager:     pkgMgr,
+		Output:             outputStr,
+	}, nil
+}
+
+// runLanguageUpgradeScript builds and executes the bash script that
+// performs JavaScript-specific upgrade operations (npm/yarn/pnpm install,
+// Dockerfile updates, changelog updates).
+func runLanguageUpgradeScript(
+	ctx context.Context,
+	repoDir string,
+	vCtx *versionContext,
+	pkgMgr string,
+	opts LocalUpgradeOptions,
+) (string, error) {
 	changelogFile := prepareLocalChangelog(repoDir, vCtx)
 
 	params := localUpgradeParams{
@@ -166,13 +224,13 @@ func executeLocalUpgrade(
 
 	tmpDir, err := os.MkdirTemp("", "autoupdate-js-local-*")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	scriptPath := filepath.Join(tmpDir, "upgrade.sh")
 	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return nil, fmt.Errorf("failed to write script: %w", writeErr)
+		return "", fmt.Errorf("failed to write script: %w", writeErr)
 	}
 
 	cmd := exec.CommandContext(ctx, "bash", scriptPath)
@@ -187,19 +245,12 @@ func executeLocalUpgrade(
 	}
 
 	if runErr != nil {
-		return nil, fmt.Errorf(
+		return "", fmt.Errorf(
 			"upgrade script failed: %w\nOutput:\n%s", runErr, outputStr,
 		)
 	}
 
-	return &LocalResult{
-		HasChanges:         strings.Contains(outputStr, "CHANGES_PUSHED=true"),
-		NodeVersionUpdated: strings.Contains(outputStr, "NODE_VERSION_UPDATED=true"),
-		LatestVersion:      vCtx.LatestVersion,
-		BranchName:         vCtx.BranchName,
-		PackageManager:     pkgMgr,
-		Output:             outputStr,
-	}, nil
+	return outputStr, nil
 }
 
 // --- local-mode internal types & helpers ---
@@ -213,8 +264,10 @@ type localUpgradeParams struct {
 	PackageManager string
 }
 
-// buildLocalUpgradeScript builds a bash script that upgrades JavaScript
-// dependencies in an already-checked-out repository.
+// buildLocalUpgradeScript builds a bash script that performs only the
+// language-specific upgrade operations (auth, npm/yarn/pnpm install,
+// Dockerfile updates, changelog updates). Git operations (branch
+// creation, staging, committing, pushing) are handled by LocalGitContext.
 func buildLocalUpgradeScript(params localUpgradeParams) string {
 	var sb strings.Builder
 
@@ -223,17 +276,6 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 
 	// Set up git credentials when an auth token is available
 	writeLocalAuth(&sb, params)
-
-	// Verify working tree is clean
-	sb.WriteString("# Verify working tree is clean\n")
-	sb.WriteString("if [ -n \"$(git status --porcelain)\" ]; then\n")
-	sb.WriteString("    echo \"ERROR: working tree has uncommitted changes, please commit or stash first\"\n")
-	sb.WriteString("    exit 1\n")
-	sb.WriteString("fi\n\n")
-
-	// Create branch
-	sb.WriteString("echo \"Creating branch $BRANCH_NAME...\"\n")
-	sb.WriteString("git checkout -b \"$BRANCH_NAME\" 2>&1\n\n")
 
 	// JavaScript upgrade commands (reuse remote-mode helpers)
 	writeJSUpgradeCommands(&sb, upgradeParams{
@@ -245,9 +287,6 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 
 	// Changelog update
 	writeChangelogUpdate(&sb)
-
-	// Commit and push
-	writeCommitAndPush(&sb)
 
 	return sb.String()
 }
