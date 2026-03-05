@@ -5,4 +5,6 @@ import (
 )
 
 // InsertChangelogEntry delegates to gitforge's changelog module.
-var InsertChangelogEntry = changelogEntities.InsertChangelogEntry
+func InsertChangelogEntry(content string, entries []string) string {
+	return changelogEntities.InsertChangelogEntry(content, entries)
+}

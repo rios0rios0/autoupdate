@@ -37,6 +37,18 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - replaced local `InsertChangelogEntry` with re-export of gitforge's `changelogEntities.InsertChangelogEntry`
 - changed the Go module dependencies to their latest versions
 
+### Changed
+
+- replaced custom `ProviderRegistry` with a thin wrapper around gitforge's `ProviderRegistry`, delegating factory registration and provider creation while adding `FileAccessProvider` type assertion
+
+### Fixed
+
+- fixed `exhaustive` findings by adding missing `Language` and `ServiceType` keys to mapper functions in local command
+- fixed `gochecknoglobals` findings by converting global map variables to function returns
+- fixed `revive` `context-as-argument` finding by reordering `DetectRemote` parameters so `context.Context` is first
+- fixed `gochecknoglobals` finding by converting `InsertChangelogEntry` from function variable to regular function
+
+
 ## [0.5.0] - 2026-02-14
 
 ### Added

@@ -52,7 +52,7 @@ func (u *UpdaterRepository) Detect(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 ) bool {
-	found, err := support.DetectRemote(&langGolang.Detector{}, ctx, provider, repo)
+	found, err := support.DetectRemote(ctx, &langGolang.Detector{}, provider, repo)
 	if err != nil {
 		logger.Warnf("[golang] detection error for %s/%s: %v", repo.Organization, repo.Name, err)
 		return false

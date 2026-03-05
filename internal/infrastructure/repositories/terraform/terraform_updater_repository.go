@@ -53,7 +53,7 @@ func (u *UpdaterRepository) Detect(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 ) bool {
-	found, err := support.DetectRemote(&langTerraform.Detector{}, ctx, provider, repo)
+	found, err := support.DetectRemote(ctx, &langTerraform.Detector{}, provider, repo)
 	if err != nil {
 		logger.Warnf("[terraform] detection error for %s/%s: %v", repo.Organization, repo.Name, err)
 		return false

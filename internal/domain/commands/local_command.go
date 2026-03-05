@@ -48,11 +48,16 @@ type remoteInfo struct {
 	RepoName     string
 }
 
-// serviceTypeToProvider maps gitforge ServiceType to the provider name strings used by autoupdate.
-var serviceTypeToProvider = map[globalEntities.ServiceType]string{
-	globalEntities.GITHUB:      providerGitHub,
-	globalEntities.AZUREDEVOPS: providerAzureDevOps,
-	globalEntities.GITLAB:      providerGitLab,
+// serviceTypeToProvider returns a map from gitforge ServiceType to the provider name strings used by autoupdate.
+func serviceTypeToProvider() map[globalEntities.ServiceType]string {
+	return map[globalEntities.ServiceType]string{
+		globalEntities.UNKNOWN:     "",
+		globalEntities.GITHUB:      providerGitHub,
+		globalEntities.GITLAB:      providerGitLab,
+		globalEntities.AZUREDEVOPS: providerAzureDevOps,
+		globalEntities.BITBUCKET:   "",
+		globalEntities.CODECOMMIT:  "",
+	}
 }
 
 // localPRInfo holds the information needed to create a PR after a local upgrade.
@@ -154,11 +159,20 @@ type localUpgradeHandler func(
 	opts LocalOptions,
 ) (*localPRInfo, error)
 
-// localUpgradeHandlers maps langforge Language → local upgrade handler.
-var localUpgradeHandlers = map[langEntities.Language]localUpgradeHandler{
-	langEntities.LanguageGo:     runGoLocalUpgrade,
-	langEntities.LanguageNode:   runJSLocalUpgrade,
-	langEntities.LanguagePython: runPythonLocalUpgrade,
+// localUpgradeHandlers returns a map from langforge Language to local upgrade handler.
+func localUpgradeHandlers() map[langEntities.Language]localUpgradeHandler {
+	return map[langEntities.Language]localUpgradeHandler{
+		langEntities.LanguageGo:         runGoLocalUpgrade,
+		langEntities.LanguageNode:       runJSLocalUpgrade,
+		langEntities.LanguagePython:     runPythonLocalUpgrade,
+		langEntities.LanguageJava:       nil,
+		langEntities.LanguageJavaGradle: nil,
+		langEntities.LanguageJavaMaven:  nil,
+		langEntities.LanguageCSharp:     nil,
+		langEntities.LanguageTerraform:  nil,
+		langEntities.LanguageYAML:       nil,
+		langEntities.LanguageUnknown:    nil,
+	}
 }
 
 // runLocalUpgrade dispatches to the appropriate updater based on project type.
@@ -169,8 +183,8 @@ func runLocalUpgrade(
 	providerType, token string,
 	opts LocalOptions,
 ) (*localPRInfo, error) {
-	handler, ok := localUpgradeHandlers[projType]
-	if !ok {
+	handler, ok := localUpgradeHandlers()[projType]
+	if !ok || handler == nil {
 		return nil, fmt.Errorf("unsupported project type: %s", projType)
 	}
 	return handler(ctx, repoDir, providerType, token, opts)
@@ -282,53 +296,62 @@ func (it *LocalCommand) createLocalPRForProject(
 // prContentGenerator produces PR title and description from localPRInfo.
 type prContentGenerator func(info *localPRInfo) (string, string)
 
-// prContentGenerators maps langforge Language → PR content generator.
-var prContentGenerators = map[langEntities.Language]prContentGenerator{
-	langEntities.LanguageGo: func(info *localPRInfo) (string, string) {
-		title := "chore(deps): update Go module dependencies"
-		if info.VersionUpdated {
-			title = fmt.Sprintf(
-				"chore(deps): upgraded Go version to `%s` and updated all dependencies",
-				info.LatestVersion,
+// prContentGenerators returns a map from langforge Language to PR content generator.
+func prContentGenerators() map[langEntities.Language]prContentGenerator {
+	return map[langEntities.Language]prContentGenerator{
+		langEntities.LanguageGo: func(info *localPRInfo) (string, string) {
+			title := "chore(deps): update Go module dependencies"
+			if info.VersionUpdated {
+				title = fmt.Sprintf(
+					"chore(deps): upgraded Go version to `%s` and updated all dependencies",
+					info.LatestVersion,
+				)
+			}
+			desc := goRepo.GenerateGoPRDescription(
+				info.LatestVersion, false, info.VersionUpdated,
 			)
-		}
-		desc := goRepo.GenerateGoPRDescription(
-			info.LatestVersion, false, info.VersionUpdated,
-		)
-		return title, desc
-	},
-	langEntities.LanguagePython: func(info *localPRInfo) (string, string) {
-		title := "chore(deps): updated Python dependencies"
-		if info.VersionUpdated {
-			title = fmt.Sprintf(
-				"chore(deps): upgraded Python to `%s` and updated all dependencies",
-				info.LatestVersion,
+			return title, desc
+		},
+		langEntities.LanguagePython: func(info *localPRInfo) (string, string) {
+			title := "chore(deps): updated Python dependencies"
+			if info.VersionUpdated {
+				title = fmt.Sprintf(
+					"chore(deps): upgraded Python to `%s` and updated all dependencies",
+					info.LatestVersion,
+				)
+			}
+			desc := pyRepo.GeneratePRDescription(
+				info.LatestVersion, info.VersionUpdated,
 			)
-		}
-		desc := pyRepo.GeneratePRDescription(
-			info.LatestVersion, info.VersionUpdated,
-		)
-		return title, desc
-	},
-	langEntities.LanguageNode: func(info *localPRInfo) (string, string) {
-		title := "chore(deps): updated JavaScript dependencies"
-		if info.VersionUpdated {
-			title = fmt.Sprintf(
-				"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
-				info.LatestVersion,
+			return title, desc
+		},
+		langEntities.LanguageNode: func(info *localPRInfo) (string, string) {
+			title := "chore(deps): updated JavaScript dependencies"
+			if info.VersionUpdated {
+				title = fmt.Sprintf(
+					"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
+					info.LatestVersion,
+				)
+			}
+			desc := jsRepo.GeneratePRDescription(
+				info.LatestVersion, info.PackageManager, info.VersionUpdated,
 			)
-		}
-		desc := jsRepo.GeneratePRDescription(
-			info.LatestVersion, info.PackageManager, info.VersionUpdated,
-		)
-		return title, desc
-	},
+			return title, desc
+		},
+		langEntities.LanguageJava:       nil,
+		langEntities.LanguageJavaGradle: nil,
+		langEntities.LanguageJavaMaven:  nil,
+		langEntities.LanguageCSharp:     nil,
+		langEntities.LanguageTerraform:  nil,
+		langEntities.LanguageYAML:       nil,
+		langEntities.LanguageUnknown:    nil,
+	}
 }
 
 // generatePRContent returns the title and description for a PR.
 func generatePRContent(info *localPRInfo) (string, string) {
-	generator, ok := prContentGenerators[info.ProjectType]
-	if !ok {
+	generator, ok := prContentGenerators()[info.ProjectType]
+	if !ok || generator == nil {
 		return "chore(deps): updated dependencies", "Automated dependency update."
 	}
 	return generator(info)
@@ -355,7 +378,7 @@ func parseRemoteURL(rawURL string) (*remoteInfo, error) {
 		return nil, fmt.Errorf("unsupported git remote URL: %w", err)
 	}
 
-	providerName, ok := serviceTypeToProvider[parsed.ServiceType]
+	providerName, ok := serviceTypeToProvider()[parsed.ServiceType]
 	if !ok {
 		return nil, fmt.Errorf("unsupported provider type for URL: %s", rawURL)
 	}
