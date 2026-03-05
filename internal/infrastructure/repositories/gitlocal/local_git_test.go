@@ -224,6 +224,15 @@ func createTestRepoWithCommit(t *testing.T) string {
 	repo, err := git.PlainInit(repoDir, false)
 	require.NoError(t, err)
 
+	// Configure user identity so that commits via empty CommitOptions
+	// (like the ones gitforge's CommitChanges creates) succeed even
+	// when no global git config exists (e.g. in CI runners).
+	cfg, err := repo.Config()
+	require.NoError(t, err)
+	cfg.User.Name = "test"
+	cfg.User.Email = "test@test.com"
+	require.NoError(t, repo.SetConfig(cfg))
+
 	wt, err := repo.Worktree()
 	require.NoError(t, err)
 
