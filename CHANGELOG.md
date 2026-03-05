@@ -27,6 +27,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - changed Go, Python, and JavaScript local-mode updaters to use `LocalGitContext` (go-git) for git operations instead of generating bash scripts for branch creation, clean check, commit, and push
 - changed local-mode bash scripts to contain only language-specific operations (auth setup, dependency upgrades, Dockerfile updates, changelog updates)
 - replaced inline `parseRemoteURL`, `parseAzureDevOpsURL`, and `parseStandardGitURL` with gitforge's `ParseRemoteURL` to consolidate duplicated code
+- changed the Go module dependencies to their latest versions
 
 ## [0.5.0] - 2026-02-14
 
