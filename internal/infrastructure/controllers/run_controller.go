@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 
+	configHelpers "github.com/rios0rios0/gitforge/pkg/config/domain/helpers"
 	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -50,7 +51,7 @@ func (it *RunController) Execute(cmd *cobra.Command, _ []string) {
 	cfgPath := configPath
 	if cfgPath == "" {
 		var err error
-		cfgPath, err = entities.FindConfigFile()
+		cfgPath, err = configHelpers.FindConfigFile("autoupdate")
 		if err != nil {
 			logger.Errorf(
 				"no config file found: %v\nSpecify one with --config or create autoupdate.yaml",
