@@ -14,6 +14,7 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	infraRepos "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
+	entitybuilders "github.com/rios0rios0/autoupdate/test/domain/entitybuilders"
 	doubles "github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
 )
 
@@ -22,10 +23,10 @@ func TestRunCommandExecute(t *testing.T) {
 
 	t.Run("should skip provider when ProviderName filter does not match", func(t *testing.T) {
 		// given
-		spy := &doubles.SpyProviderRepository{
-			ProviderName: "github",
-			Token:        "test-token",
-		}
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithProviderName("github").
+			WithToken("test-token").
+			BuildSpy()
 
 		providerRegistry := infraRepos.NewProviderRegistry()
 		providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
@@ -36,11 +37,15 @@ func TestRunCommandExecute(t *testing.T) {
 
 		cmd := commands.NewRunCommand(providerRegistry, updaterRegistry)
 
-		settings := &entities.Settings{
-			Providers: []entities.ProviderConfig{
-				{Type: "github", Token: "test-token", Organizations: []string{"test-org"}},
-			},
-		}
+		settings := entitybuilders.NewSettingsBuilder().
+			WithProviders([]entities.ProviderConfig{
+				entitybuilders.NewProviderConfigBuilder().
+					WithType("github").
+					WithToken("test-token").
+					WithOrganizations([]string{"test-org"}).
+					BuildProviderConfig(),
+			}).
+			BuildSettings()
 		opts := commands.RunOptions{ProviderName: "gitlab"} // filter does not match
 
 		// when
@@ -53,11 +58,11 @@ func TestRunCommandExecute(t *testing.T) {
 
 	t.Run("should call DiscoverRepositories for matching provider", func(t *testing.T) {
 		// given
-		spy := &doubles.SpyProviderRepository{
-			ProviderName: "github",
-			Token:        "test-token",
-			Repositories: []entities.Repository{},
-		}
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithProviderName("github").
+			WithToken("test-token").
+			WithRepositories([]entities.Repository{}).
+			BuildSpy()
 
 		providerRegistry := infraRepos.NewProviderRegistry()
 		providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
@@ -68,11 +73,15 @@ func TestRunCommandExecute(t *testing.T) {
 
 		cmd := commands.NewRunCommand(providerRegistry, updaterRegistry)
 
-		settings := &entities.Settings{
-			Providers: []entities.ProviderConfig{
-				{Type: "github", Token: "test-token", Organizations: []string{"test-org"}},
-			},
-		}
+		settings := entitybuilders.NewSettingsBuilder().
+			WithProviders([]entities.ProviderConfig{
+				entitybuilders.NewProviderConfigBuilder().
+					WithType("github").
+					WithToken("test-token").
+					WithOrganizations([]string{"test-org"}).
+					BuildProviderConfig(),
+			}).
+			BuildSettings()
 		opts := commands.RunOptions{}
 
 		// when
@@ -85,11 +94,11 @@ func TestRunCommandExecute(t *testing.T) {
 
 	t.Run("should continue when DiscoverRepositories returns error", func(t *testing.T) {
 		// given
-		spy := &doubles.SpyProviderRepository{
-			ProviderName: "github",
-			Token:        "test-token",
-			DiscoverErr:  errors.New("network error"),
-		}
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithProviderName("github").
+			WithToken("test-token").
+			WithDiscoverErr(errors.New("network error")).
+			BuildSpy()
 
 		providerRegistry := infraRepos.NewProviderRegistry()
 		providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
@@ -100,11 +109,15 @@ func TestRunCommandExecute(t *testing.T) {
 
 		cmd := commands.NewRunCommand(providerRegistry, updaterRegistry)
 
-		settings := &entities.Settings{
-			Providers: []entities.ProviderConfig{
-				{Type: "github", Token: "test-token", Organizations: []string{"org1", "org2"}},
-			},
-		}
+		settings := entitybuilders.NewSettingsBuilder().
+			WithProviders([]entities.ProviderConfig{
+				entitybuilders.NewProviderConfigBuilder().
+					WithType("github").
+					WithToken("test-token").
+					WithOrganizations([]string{"org1", "org2"}).
+					BuildProviderConfig(),
+			}).
+			BuildSettings()
 		opts := commands.RunOptions{}
 
 		// when
@@ -117,24 +130,24 @@ func TestRunCommandExecute(t *testing.T) {
 
 	t.Run("should call updater Detect and CreateUpdatePRs for discovered repos", func(t *testing.T) {
 		// given
-		repo := entities.Repository{
-			ID:            "repo-1",
-			Name:          "test-repo",
-			Organization:  "test-org",
-			DefaultBranch: "refs/heads/main",
-		}
+		repo := entitybuilders.NewRepositoryBuilder().
+			WithID("repo-1").
+			WithName("test-repo").
+			WithOrganization("test-org").
+			WithDefaultBranch("refs/heads/main").
+			BuildRepository()
 
-		spy := &doubles.SpyProviderRepository{
-			ProviderName: "github",
-			Token:        "test-token",
-			Repositories: []entities.Repository{repo},
-		}
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithProviderName("github").
+			WithToken("test-token").
+			WithRepositories([]entities.Repository{repo}).
+			BuildSpy()
 
-		updaterSpy := &doubles.SpyUpdaterRepository{
-			UpdaterName:  "terraform",
-			DetectResult: true,
-			PRs:          []entities.PullRequest{{ID: 42, Title: "Update dep", URL: "https://example.com/pr/42"}},
-		}
+		updaterSpy := doubles.NewSpyUpdaterRepositoryBuilder().
+			WithUpdaterName("terraform").
+			WithDetectResult(true).
+			WithPRs([]entities.PullRequest{{ID: 42, Title: "Update dep", URL: "https://example.com/pr/42"}}).
+			BuildSpy()
 
 		providerRegistry := infraRepos.NewProviderRegistry()
 		providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
@@ -146,11 +159,15 @@ func TestRunCommandExecute(t *testing.T) {
 
 		cmd := commands.NewRunCommand(providerRegistry, updaterRegistry)
 
-		settings := &entities.Settings{
-			Providers: []entities.ProviderConfig{
-				{Type: "github", Token: "test-token", Organizations: []string{"test-org"}},
-			},
-		}
+		settings := entitybuilders.NewSettingsBuilder().
+			WithProviders([]entities.ProviderConfig{
+				entitybuilders.NewProviderConfigBuilder().
+					WithType("github").
+					WithToken("test-token").
+					WithOrganizations([]string{"test-org"}).
+					BuildProviderConfig(),
+			}).
+			BuildSettings()
 		opts := commands.RunOptions{}
 
 		// when
@@ -166,23 +183,23 @@ func TestRunCommandExecute(t *testing.T) {
 
 	t.Run("should skip disabled updaters", func(t *testing.T) {
 		// given
-		repo := entities.Repository{
-			ID:            "repo-1",
-			Name:          "test-repo",
-			Organization:  "test-org",
-			DefaultBranch: "refs/heads/main",
-		}
+		repo := entitybuilders.NewRepositoryBuilder().
+			WithID("repo-1").
+			WithName("test-repo").
+			WithOrganization("test-org").
+			WithDefaultBranch("refs/heads/main").
+			BuildRepository()
 
-		spy := &doubles.SpyProviderRepository{
-			ProviderName: "github",
-			Token:        "test-token",
-			Repositories: []entities.Repository{repo},
-		}
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithProviderName("github").
+			WithToken("test-token").
+			WithRepositories([]entities.Repository{repo}).
+			BuildSpy()
 
-		updaterSpy := &doubles.SpyUpdaterRepository{
-			UpdaterName:  "terraform",
-			DetectResult: true,
-		}
+		updaterSpy := doubles.NewSpyUpdaterRepositoryBuilder().
+			WithUpdaterName("terraform").
+			WithDetectResult(true).
+			BuildSpy()
 
 		providerRegistry := infraRepos.NewProviderRegistry()
 		providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
@@ -194,14 +211,20 @@ func TestRunCommandExecute(t *testing.T) {
 
 		cmd := commands.NewRunCommand(providerRegistry, updaterRegistry)
 
-		settings := &entities.Settings{
-			Providers: []entities.ProviderConfig{
-				{Type: "github", Token: "test-token", Organizations: []string{"test-org"}},
-			},
-			Updaters: map[string]entities.UpdaterConfig{
-				"terraform": {Enabled: false},
-			},
-		}
+		settings := entitybuilders.NewSettingsBuilder().
+			WithProviders([]entities.ProviderConfig{
+				entitybuilders.NewProviderConfigBuilder().
+					WithType("github").
+					WithToken("test-token").
+					WithOrganizations([]string{"test-org"}).
+					BuildProviderConfig(),
+			}).
+			WithUpdaters(map[string]entities.UpdaterConfig{
+				"terraform": entitybuilders.NewUpdaterConfigBuilder().
+					WithEnabled(false).
+					BuildUpdaterConfig(),
+			}).
+			BuildSettings()
 		opts := commands.RunOptions{}
 
 		// when
@@ -214,27 +237,27 @@ func TestRunCommandExecute(t *testing.T) {
 
 	t.Run("should respect UpdaterName filter", func(t *testing.T) {
 		// given
-		repo := entities.Repository{
-			ID:            "repo-1",
-			Name:          "test-repo",
-			Organization:  "test-org",
-			DefaultBranch: "refs/heads/main",
-		}
+		repo := entitybuilders.NewRepositoryBuilder().
+			WithID("repo-1").
+			WithName("test-repo").
+			WithOrganization("test-org").
+			WithDefaultBranch("refs/heads/main").
+			BuildRepository()
 
-		spy := &doubles.SpyProviderRepository{
-			ProviderName: "github",
-			Token:        "test-token",
-			Repositories: []entities.Repository{repo},
-		}
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithProviderName("github").
+			WithToken("test-token").
+			WithRepositories([]entities.Repository{repo}).
+			BuildSpy()
 
-		terraformSpy := &doubles.SpyUpdaterRepository{
-			UpdaterName:  "terraform",
-			DetectResult: true,
-		}
-		golangSpy := &doubles.SpyUpdaterRepository{
-			UpdaterName:  "golang",
-			DetectResult: true,
-		}
+		terraformSpy := doubles.NewSpyUpdaterRepositoryBuilder().
+			WithUpdaterName("terraform").
+			WithDetectResult(true).
+			BuildSpy()
+		golangSpy := doubles.NewSpyUpdaterRepositoryBuilder().
+			WithUpdaterName("golang").
+			WithDetectResult(true).
+			BuildSpy()
 
 		providerRegistry := infraRepos.NewProviderRegistry()
 		providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
@@ -247,11 +270,15 @@ func TestRunCommandExecute(t *testing.T) {
 
 		cmd := commands.NewRunCommand(providerRegistry, updaterRegistry)
 
-		settings := &entities.Settings{
-			Providers: []entities.ProviderConfig{
-				{Type: "github", Token: "test-token", Organizations: []string{"test-org"}},
-			},
-		}
+		settings := entitybuilders.NewSettingsBuilder().
+			WithProviders([]entities.ProviderConfig{
+				entitybuilders.NewProviderConfigBuilder().
+					WithType("github").
+					WithToken("test-token").
+					WithOrganizations([]string{"test-org"}).
+					BuildProviderConfig(),
+			}).
+			BuildSettings()
 		opts := commands.RunOptions{UpdaterName: "golang"} // only run golang updater
 
 		// when
