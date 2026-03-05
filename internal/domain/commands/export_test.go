@@ -3,9 +3,6 @@ package commands
 // ParseRemoteURL exports parseRemoteURL for testing.
 var ParseRemoteURL = parseRemoteURL //nolint:gochecknoglobals // test export
 
-// DetectProjectType exports detectProjectType for testing.
-var DetectProjectType = detectProjectType //nolint:gochecknoglobals // test export
-
 // ResolveTokenFromEnv exports resolveTokenFromEnv for testing.
 var ResolveTokenFromEnv = resolveTokenFromEnv //nolint:gochecknoglobals // test export
 

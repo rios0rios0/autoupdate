@@ -17,6 +17,8 @@ import (
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
 	gitInfra "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
 	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
+	langEntities "github.com/rios0rios0/langforge/pkg/domain/entities"
+	langRegistry "github.com/rios0rios0/langforge/pkg/infrastructure/registry"
 )
 
 const (
@@ -53,22 +55,13 @@ var serviceTypeToProvider = map[globalEntities.ServiceType]string{
 	globalEntities.GITLAB:      providerGitLab,
 }
 
-// projectType identifies the detected project ecosystem.
-type projectType string
-
-const (
-	projectGo         projectType = "golang"
-	projectPython     projectType = "python"
-	projectJavaScript projectType = "javascript"
-)
-
 // localPRInfo holds the information needed to create a PR after a local upgrade.
 type localPRInfo struct {
 	BranchName     string
 	LatestVersion  string
 	VersionUpdated bool
 	PackageManager string // JavaScript only
-	ProjectType    projectType
+	ProjectType    langEntities.Language
 	HasChanges     bool
 }
 
@@ -92,11 +85,12 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 		return fmt.Errorf("invalid path: %w", err)
 	}
 
-	// Detect project type
-	projType, detectErr := detectProjectType(repoDir)
+	// Detect project type using langforge's registry
+	langProvider, detectErr := langRegistry.NewDefaultRegistry().Detect(repoDir)
 	if detectErr != nil {
 		return detectErr
 	}
+	projType := langProvider.Language()
 	logger.Infof("Detected project type: %s", projType)
 
 	// Detect Git provider from remote URL
@@ -153,44 +147,33 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 	return it.createLocalPRForProject(ctx, remote.ProviderType, token, repo, prInfo)
 }
 
-// detectProjectType determines what kind of project is in the given directory.
-func detectProjectType(repoDir string) (projectType, error) {
-	if _, err := os.Stat(filepath.Join(repoDir, "go.mod")); err == nil {
-		return projectGo, nil
-	}
-	if _, err := os.Stat(filepath.Join(repoDir, "package.json")); err == nil {
-		return projectJavaScript, nil
-	}
-	if _, err := os.Stat(filepath.Join(repoDir, "requirements.txt")); err == nil {
-		return projectPython, nil
-	}
-	if _, err := os.Stat(filepath.Join(repoDir, "pyproject.toml")); err == nil {
-		return projectPython, nil
-	}
-	return "", fmt.Errorf(
-		"no supported project found in %s — expected go.mod, package.json, requirements.txt, or pyproject.toml",
-		repoDir,
-	)
+// localUpgradeHandler runs the local upgrade for a specific language and returns PR info.
+type localUpgradeHandler func(
+	ctx context.Context,
+	repoDir, providerType, token string,
+	opts LocalOptions,
+) (*localPRInfo, error)
+
+// localUpgradeHandlers maps langforge Language → local upgrade handler.
+var localUpgradeHandlers = map[langEntities.Language]localUpgradeHandler{
+	langEntities.LanguageGo:     runGoLocalUpgrade,
+	langEntities.LanguageNode:   runJSLocalUpgrade,
+	langEntities.LanguagePython: runPythonLocalUpgrade,
 }
 
 // runLocalUpgrade dispatches to the appropriate updater based on project type.
 func runLocalUpgrade(
 	ctx context.Context,
 	repoDir string,
-	projType projectType,
+	projType langEntities.Language,
 	providerType, token string,
 	opts LocalOptions,
 ) (*localPRInfo, error) {
-	switch projType {
-	case projectGo:
-		return runGoLocalUpgrade(ctx, repoDir, providerType, token, opts)
-	case projectPython:
-		return runPythonLocalUpgrade(ctx, repoDir, providerType, token, opts)
-	case projectJavaScript:
-		return runJSLocalUpgrade(ctx, repoDir, providerType, token, opts)
-	default:
+	handler, ok := localUpgradeHandlers[projType]
+	if !ok {
 		return nil, fmt.Errorf("unsupported project type: %s", projType)
 	}
+	return handler(ctx, repoDir, providerType, token, opts)
 }
 
 func runGoLocalUpgrade(
@@ -211,7 +194,7 @@ func runGoLocalUpgrade(
 		BranchName:     result.BranchName,
 		LatestVersion:  result.LatestVersion,
 		VersionUpdated: result.GoVersionUpdated,
-		ProjectType:    projectGo,
+		ProjectType:    langEntities.LanguageGo,
 		HasChanges:     result.HasChanges,
 	}, nil
 }
@@ -234,7 +217,7 @@ func runPythonLocalUpgrade(
 		BranchName:     result.BranchName,
 		LatestVersion:  result.LatestVersion,
 		VersionUpdated: result.PythonVersionUpdated,
-		ProjectType:    projectPython,
+		ProjectType:    langEntities.LanguagePython,
 		HasChanges:     result.HasChanges,
 	}, nil
 }
@@ -258,7 +241,7 @@ func runJSLocalUpgrade(
 		LatestVersion:  result.LatestVersion,
 		VersionUpdated: result.NodeVersionUpdated,
 		PackageManager: result.PackageManager,
-		ProjectType:    projectJavaScript,
+		ProjectType:    langEntities.LanguageNode,
 		HasChanges:     result.HasChanges,
 	}, nil
 }
@@ -296,10 +279,12 @@ func (it *LocalCommand) createLocalPRForProject(
 	return nil
 }
 
-// generatePRContent returns the title and description for a PR.
-func generatePRContent(info *localPRInfo) (string, string) {
-	switch info.ProjectType {
-	case projectGo:
+// prContentGenerator produces PR title and description from localPRInfo.
+type prContentGenerator func(info *localPRInfo) (string, string)
+
+// prContentGenerators maps langforge Language → PR content generator.
+var prContentGenerators = map[langEntities.Language]prContentGenerator{
+	langEntities.LanguageGo: func(info *localPRInfo) (string, string) {
 		title := "chore(deps): update Go module dependencies"
 		if info.VersionUpdated {
 			title = fmt.Sprintf(
@@ -311,8 +296,8 @@ func generatePRContent(info *localPRInfo) (string, string) {
 			info.LatestVersion, false, info.VersionUpdated,
 		)
 		return title, desc
-
-	case projectPython:
+	},
+	langEntities.LanguagePython: func(info *localPRInfo) (string, string) {
 		title := "chore(deps): updated Python dependencies"
 		if info.VersionUpdated {
 			title = fmt.Sprintf(
@@ -324,8 +309,8 @@ func generatePRContent(info *localPRInfo) (string, string) {
 			info.LatestVersion, info.VersionUpdated,
 		)
 		return title, desc
-
-	case projectJavaScript:
+	},
+	langEntities.LanguageNode: func(info *localPRInfo) (string, string) {
 		title := "chore(deps): updated JavaScript dependencies"
 		if info.VersionUpdated {
 			title = fmt.Sprintf(
@@ -337,10 +322,16 @@ func generatePRContent(info *localPRInfo) (string, string) {
 			info.LatestVersion, info.PackageManager, info.VersionUpdated,
 		)
 		return title, desc
+	},
+}
 
-	default:
+// generatePRContent returns the title and description for a PR.
+func generatePRContent(info *localPRInfo) (string, string) {
+	generator, ok := prContentGenerators[info.ProjectType]
+	if !ok {
 		return "chore(deps): updated dependencies", "Automated dependency update."
 	}
+	return generator(info)
 }
 
 // parseGitRemote runs `git remote get-url origin` and parses the result.
