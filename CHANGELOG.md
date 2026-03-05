@@ -16,9 +16,16 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added `LocalGitContext` wrapper in `internal/infrastructure/repositories/gitlocal/` using go-git for branch creation, clean check, staging, committing, and pushing (replacing bash-generated git commands in local mode)
+- added unit tests for `LocalGitContext` covering all public methods with BDD pattern
+
 ### Changed
 
 - changed all gitforge import paths to the new DDD `pkg/` structure (e.g. `domain/entities` → `pkg/global/domain/entities`, `infrastructure/providers/github` → `pkg/providers/infrastructure/github`)
+- changed Go, Python, and JavaScript local-mode updaters to use `LocalGitContext` (go-git) for git operations instead of generating bash scripts for branch creation, clean check, commit, and push
+- changed local-mode bash scripts to contain only language-specific operations (auth setup, dependency upgrades, Dockerfile updates, changelog updates)
 - replaced inline `parseRemoteURL`, `parseAzureDevOpsURL`, and `parseStandardGitURL` with gitforge's `ParseRemoteURL` to consolidate duplicated code
 
 ## [0.5.0] - 2026-02-14

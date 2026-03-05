@@ -3,8 +3,9 @@ module github.com/rios0rios0/autoupdate
 go 1.26.0
 
 require (
+	github.com/go-git/go-git/v5 v5.17.0
 	github.com/hashicorp/hcl/v2 v2.24.0
-	github.com/rios0rios0/gitforge v0.0.0-00010101000000-000000000000
+	github.com/rios0rios0/gitforge v0.0.0-20260305004005-e7bce32d9731
 	github.com/rios0rios0/testkit v0.0.0-20260226133256-05e6293bbf63
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
@@ -28,7 +29,6 @@ require (
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.8.0 // indirect
-	github.com/go-git/go-git/v5 v5.17.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/go-github/v66 v66.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
@@ -56,5 +56,3 @@ require (
 	golang.org/x/tools v0.42.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
-
-replace github.com/rios0rios0/gitforge => ../gitforge
