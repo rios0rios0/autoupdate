@@ -18,11 +18,16 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Added
 
+- added `RemoteFileChecker` and `DetectRemote` utilities in `internal/support/` bridging langforge's `FileChecker` abstraction with gitforge's remote provider API
+- added `github.com/rios0rios0/langforge` dependency for centralized language detection
 - added `LocalGitContext` wrapper in `internal/infrastructure/repositories/gitlocal/` using go-git for branch creation, clean check, staging, committing, and pushing (replacing bash-generated git commands in local mode)
 - added unit tests for `LocalGitContext` covering all public methods with BDD pattern
 
 ### Changed
 
+- replaced duplicated per-updater `Detect()` logic with langforge's `DetectWith` + `RemoteFileChecker` abstraction across all 4 updaters (Go, Python, JavaScript, Terraform)
+- replaced hardcoded `detectProjectType()` in local mode with langforge's `LanguageRegistry.Detect()` for centralized language detection
+- replaced `projectType` enum and `switch`/`case` dispatch in `runLocalUpgrade` and `generatePRContent` with mapper pattern using langforge's `Language` constants
 - replaced raw struct literals in tests with testkit builders for consistent test data construction
 - changed all gitforge import paths to the new DDD `pkg/` structure (e.g. `domain/entities` → `pkg/global/domain/entities`, `infrastructure/providers/github` → `pkg/providers/infrastructure/github`)
 - changed Go, Python, and JavaScript local-mode updaters to use `LocalGitContext` (go-git) for git operations instead of generating bash scripts for branch creation, clean check, commit, and push
