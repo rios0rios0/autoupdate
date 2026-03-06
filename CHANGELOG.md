@@ -36,6 +36,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - replaced local `ProviderConfig` struct, `ResolveToken()`, and `FindConfigFile()` with gitforge's shared implementations
 - replaced local `InsertChangelogEntry` with re-export of gitforge's `changelogEntities.InsertChangelogEntry`
 - changed the Go module dependencies to their latest versions
+- changed the Go version to `1.26.1` and updated all module dependencies
 
 ### Changed
 
