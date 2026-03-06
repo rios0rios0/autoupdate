@@ -18,7 +18,7 @@ import (
 type LocalUpgradeOptions struct {
 	DryRun       bool
 	Verbose      bool
-	AuthToken    string //nolint:gosec // auth token for private package access
+	AuthToken    string
 	ProviderName string // git provider name (e.g. "azuredevops", "github", "gitlab")
 }
 
@@ -240,7 +240,7 @@ type localUpgradeParams struct {
 	BranchName      string
 	PythonVersion   string
 	ChangelogFile   string
-	AuthToken       string //nolint:gosec // internal struct field, not exposed externally
+	AuthToken       string
 	ProviderName    string
 	HasRequirements bool
 	HasPyproject    bool
@@ -357,7 +357,7 @@ func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
 
 	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name()) //nolint:gosec // tmpFile.Name() is not user-controlled
+		_ = os.Remove(tmpFile.Name())
 		logger.Warnf("[python] Failed to write temp changelog: %v", writeErr)
 		return ""
 	}

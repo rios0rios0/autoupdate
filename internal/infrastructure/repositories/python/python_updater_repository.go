@@ -218,7 +218,7 @@ type upgradeParams struct {
 	DefaultBranch   string
 	BranchName      string
 	PythonVersion   string
-	AuthToken       string //nolint:gosec // internal struct field, not exposed externally
+	AuthToken       string
 	ProviderName    string
 	ChangelogFile   string
 	HasRequirements bool
@@ -250,7 +250,7 @@ func fetchLatestPythonVersion(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := client.Do(req) //nolint:gosec // URL is hardcoded to endoflife.date
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch Python versions: %w", err)
 	}
@@ -382,7 +382,7 @@ func prepareChangelog(
 
 	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name()) //nolint:gosec // tmpFile.Name() is not user-controlled
+		_ = os.Remove(tmpFile.Name())
 		logger.Warnf("[python] Failed to write temp changelog: %v", writeErr)
 		return ""
 	}
