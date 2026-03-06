@@ -18,44 +18,40 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Added
 
-- added `RemoteFileChecker` and `DetectRemote` utilities in `internal/support/` bridging langforge's `FileChecker` abstraction with gitforge's remote provider API
-- added `github.com/rios0rios0/langforge` dependency for centralized language detection
 - added `LocalGitContext` wrapper in `internal/infrastructure/repositories/gitlocal/` using go-git for branch creation, clean check, staging, committing, and pushing (replacing bash-generated git commands in local mode)
+- added `RemoteFileChecker` and `DetectRemote` utilities in `internal/support/` bridging `langforge`'s `FileChecker` abstraction with `gitforge`'s's remote provider API
+- added `github.com/rios0rios0/langforge` dependency for centralized language detection
 - added unit tests for `LocalGitContext` covering all public methods with BDD pattern
 
 ### Changed
 
-- replaced duplicated per-updater `Detect()` logic with langforge's `DetectWith` + `RemoteFileChecker` abstraction across all 4 updaters (Go, Python, JavaScript, Terraform)
-- replaced hardcoded `detectProjectType()` in local mode with langforge's `LanguageRegistry.Detect()` for centralized language detection
-- replaced `projectType` enum and `switch`/`case` dispatch in `runLocalUpgrade` and `generatePRContent` with mapper pattern using langforge's `Language` constants
-- replaced raw struct literals in tests with testkit builders for consistent test data construction
-- changed all gitforge import paths to the new DDD `pkg/` structure (e.g. `domain/entities` → `pkg/global/domain/entities`, `infrastructure/providers/github` → `pkg/providers/infrastructure/github`)
 - changed Go, Python, and JavaScript local-mode updaters to use `LocalGitContext` (go-git) for git operations instead of generating bash scripts for branch creation, clean check, commit, and push
+- changed all `gitforge`'s import paths to the new DDD `pkg/` structure (e.g. `domain/entities` → `pkg/global/domain/entities`, `infrastructure/providers/github` → `pkg/providers/infrastructure/github`)
 - changed local-mode bash scripts to contain only language-specific operations (auth setup, dependency upgrades, Dockerfile updates, changelog updates)
-- replaced inline `parseRemoteURL`, `parseAzureDevOpsURL`, and `parseStandardGitURL` with gitforge's `ParseRemoteURL` to consolidate duplicated code
-- replaced local `ProviderConfig` struct, `ResolveToken()`, and `FindConfigFile()` with gitforge's shared implementations
-- replaced local `InsertChangelogEntry` with re-export of gitforge's `changelogEntities.InsertChangelogEntry`
 - changed the Go module dependencies to their latest versions
-
-### Changed
-
-- replaced custom `ProviderRegistry` with a thin wrapper around gitforge's `ProviderRegistry`, delegating factory registration and provider creation while adding `FileAccessProvider` type assertion
+- replaced `projectType` enum and `switch`/`case` dispatch in `runLocalUpgrade` and `generatePRContent` with mapper pattern using `langforge`'s `Language` constants
+- replaced custom `ProviderRegistry` with a thin wrapper around `gitforge`'s's `ProviderRegistry`, delegating factory registration and provider creation while adding `FileAccessProvider` type assertion
+- replaced duplicated per-updater `Detect()` logic with `langforge`'s `DetectWith` + `RemoteFileChecker` abstraction across all 4 updaters (Go, Python, JavaScript, Terraform)
+- replaced hardcoded `detectProjectType()` in local mode with `langforge`'s `LanguageRegistry.Detect()` for centralized language detection
+- replaced inline `parseRemoteURL`, `parseAzureDevOpsURL`, and `parseStandardGitURL` with `gitforge`'s's `ParseRemoteURL` to consolidate duplicated code
+- replaced local `InsertChangelogEntry` with re-export of `gitforge`'s's `changelogEntities.InsertChangelogEntry`
+- replaced local `ProviderConfig` struct, `ResolveToken()`, and `FindConfigFile()` with `gitforge`'s's shared implementations
+- replaced raw struct literals in tests with `testkit`'s builders for consistent test data construction
 
 ### Fixed
 
 - fixed `exhaustive` findings by adding missing `Language` and `ServiceType` keys to mapper functions in local command
+- fixed `gochecknoglobals` finding by converting `InsertChangelogEntry` from function variable to regular function
 - fixed `gochecknoglobals` findings by converting global map variables to function returns
 - fixed `revive` `context-as-argument` finding by reordering `DetectRemote` parameters so `context.Context` is first
-- fixed `gochecknoglobals` finding by converting `InsertChangelogEntry` from function variable to regular function
-
 
 ## [0.5.0] - 2026-02-14
 
 ### Added
 
-- added `github.com/rios0rios0/testkit` dependency for test builders
+- added `github.com/rios0rios0/testkit`'s dependency for test builders
 - added build tags (`//go:build unit`) to all test double files
-- added entity builders (`RepositoryBuilder`, `DependencyBuilder`) following testkit `BaseBuilder` pattern in `test/domain/entitybuilders/`
+- added entity builders (`RepositoryBuilder`, `DependencyBuilder`) following `testkit`'s `BaseBuilder` pattern in `test/domain/entitybuilders/`
 - added organized test doubles in `test/domain/commanddoubles/` and `test/infrastructure/repositorydoubles/`
 
 ### Changed
@@ -85,7 +81,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - added JavaScript updater supporting npm, yarn, and pnpm projects (auto-detected via `lockfiles`), with automatic `.nvmrc`/`.node-version` and Dockerfile `node:` image tag updates
 - added Python and JavaScript support to the standalone local mode (`autoupdate .`), with automatic project type detection
 - added Python updater supporting `requirements.txt` and `pyproject.toml` projects, with automatic `.python-version` and Dockerfile `python:` image tag updates
-- added container image reference scanning in `.hcl` (Terragrunt) files, detecting patterns like `relayer_http_image = "relayer-http:0.7.0"` and upgrading them to the latest Git tag from the same organisation
+- added container image reference scanning in `.hcl` (Terragrunt) files, detecting patterns like `relayer_http_image = "relayer-http:0.7.0"` and upgrading them to the latest Git tag from the same organization
 
 ### Changed
 
@@ -122,7 +118,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Changed
 
-- changed the Go updater to re-apply the Go version after `go mod tidy` in case it normalises three-part versions
+- changed the Go updater to re-apply the Go version after `go mod tidy` in case it normalizes three-part versions
 - changed the Go updater to use portable `sed` with redirect-and-move instead of `sed -i` for cross-platform compatibility (GNU/BSD)
 - changed the Go updater to verify `sed` modifications and handle missing `go` directives before setting version-update status flags
 - changed the Terraform updater branch naming to use `chore/upgrade-` prefix format
