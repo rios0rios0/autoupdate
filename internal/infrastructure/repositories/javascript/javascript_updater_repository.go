@@ -219,7 +219,7 @@ type upgradeParams struct {
 	DefaultBranch  string
 	BranchName     string
 	NodeVersion    string
-	AuthToken      string //nolint:gosec // internal struct field, not exposed externally
+	AuthToken      string
 	ProviderName   string
 	ChangelogFile  string
 	PackageManager string // "npm", "yarn", or "pnpm"
@@ -248,7 +248,7 @@ func fetchLatestNodeVersion(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := client.Do(req) //nolint:gosec // URL is hardcoded to nodejs.org
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch Node.js versions: %w", err)
 	}
@@ -415,7 +415,7 @@ func prepareChangelog(
 
 	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name()) //nolint:gosec // tmpFile.Name() is not user-controlled
+		_ = os.Remove(tmpFile.Name())
 		logger.Warnf("[javascript] Failed to write temp changelog: %v", writeErr)
 		return ""
 	}
