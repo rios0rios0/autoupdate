@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-03-06
+
 ### Added
 
 - added `LocalGitContext` wrapper in `internal/infrastructure/repositories/gitlocal/` using go-git for branch creation, clean check, staging, committing, and pushing (replacing bash-generated git commands in local mode)
@@ -34,7 +36,6 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - replaced duplicated per-updater `Detect()` logic with `langforge`'s `DetectWith` + `RemoteFileChecker` abstraction across all 4 updaters (Go, Python, JavaScript, Terraform)
 - replaced hardcoded `detectProjectType()` in local mode with `langforge`'s `LanguageRegistry.Detect()` for centralized language detection
 - replaced inline `parseRemoteURL`, `parseAzureDevOpsURL`, and `parseStandardGitURL` with `gitforge`'s's `ParseRemoteURL` to consolidate duplicated code
-- replaced local `InsertChangelogEntry` with re-export of `gitforge`'s's `changelogEntities.InsertChangelogEntry`
 - replaced local `ProviderConfig` struct, `ResolveToken()`, and `FindConfigFile()` with `gitforge`'s's shared implementations
 - replaced raw struct literals in tests with `testkit`'s builders for consistent test data construction
 

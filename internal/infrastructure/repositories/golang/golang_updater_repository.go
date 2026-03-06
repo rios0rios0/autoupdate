@@ -282,7 +282,7 @@ func prepareChangelog(
 
 	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name()) //nolint:gosec // tmpFile.Name() is not user-controlled
+		_ = os.Remove(tmpFile.Name())
 		logger.Warnf("[golang] Failed to write temp changelog: %v", writeErr)
 		return ""
 	}
@@ -298,7 +298,7 @@ type upgradeParams struct {
 	DefaultBranch string
 	BranchName    string
 	GoVersion     string
-	AuthToken     string //nolint:gosec // internal struct field, not exposed externally
+	AuthToken     string
 	HasConfigSH   bool
 	ProviderName  string
 	ChangelogFile string // path to a temp file with updated CHANGELOG.md content (empty = no changelog)
@@ -327,7 +327,7 @@ func fetchLatestGoVersion(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := client.Do(req) //nolint:gosec // URL is hardcoded to go.dev
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch Go versions: %w", err)
 	}
