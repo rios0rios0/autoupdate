@@ -6,7 +6,7 @@ require (
 	github.com/go-git/go-git/v5 v5.17.0
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/rios0rios0/gitforge v0.2.0
-	github.com/rios0rios0/langforge v0.1.0
+	github.com/rios0rios0/langforge v0.1.1-0.20260309204040-41e427df6e75
 	github.com/rios0rios0/testkit v0.1.0
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
@@ -57,5 +57,3 @@ require (
 	golang.org/x/tools v0.42.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
-
-replace github.com/rios0rios0/langforge => /home/rios0rios0/Development/github.com/rios0rios0/langforge
