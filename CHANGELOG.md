@@ -16,16 +16,18 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
-### Changed
-
-- upgraded `gitforge` dependency from v0.1.1 to v0.2.0, bringing Azure DevOps PR creation fixes and GPG signing improvements
-- upgraded `langforge` dependency to v0.2.0 and removed local `replace` directive
+## [0.7.0] - 2026-03-09
 
 ### Added
 
+- added `Dockerfile` updater for detecting and upgrading base image versions in `FROM` clauses via Docker Hub API
 - added pipeline updater for detecting and upgrading hardcoded language versions in CI/CD configuration files (GitHub Actions and Azure DevOps YAML templates)
-- added Dockerfile updater for detecting and upgrading base image versions in FROM clauses via Docker Hub API
 - added shared version fetcher package for Go, Python, Node.js, Java, and Terraform latest version resolution
+
+### Changed
+
+- upgraded `gitforge` dependency from `v0.1.1` to `v0.2.0`, bringing Azure DevOps PR creation fixes and GPG signing improvements
+- upgraded `langforge` dependency to `v0.2.0` and removed local `replace` directive
 
 ### Fixed
 
