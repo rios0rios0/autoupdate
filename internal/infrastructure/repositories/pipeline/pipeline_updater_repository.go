@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -156,17 +157,7 @@ func scanAndDetermineUpgrades(
 	fileContents := make(map[string]string)
 	var upgrades []upgradeTask
 
-	yamlFiles, err := provider.ListFiles(ctx, repo, ".yaml")
-	if err != nil {
-		logger.Warnf("[pipeline] Failed to list .yaml files: %v", err)
-	}
-
-	ymlFiles, ymlErr := provider.ListFiles(ctx, repo, ".yml")
-	if ymlErr != nil {
-		logger.Warnf("[pipeline] Failed to list .yml files: %v", ymlErr)
-	}
-
-	allFiles := append(yamlFiles, ymlFiles...)
+	allFiles := listPipelineFiles(ctx, provider, repo)
 
 	for _, f := range allFiles {
 		if f.IsDir {
@@ -184,36 +175,68 @@ func scanAndDetermineUpgrades(
 			continue
 		}
 
-		rules := rulesForCI(ci)
-		matches := scanFileForVersions(content, f.Path, rules)
+		fileUpgrades := findUpgradesInFile(content, f.Path, ci, latestVersions)
+		upgrades = append(upgrades, fileUpgrades...)
 
-		for _, match := range matches {
-			if !isExactVersion(match.CurrentVer) {
-				continue
-			}
-
-			latestVer, ok := latestVersions[match.Language]
-			if !ok {
-				continue
-			}
-
-			truncated := truncateToGranularity(latestVer, match.CurrentVer)
-			if truncated == match.CurrentVer {
-				continue
-			}
-
-			upgrades = append(upgrades, upgradeTask{
-				match:      match,
-				newVersion: truncated,
-			})
-		}
-
-		if len(matches) > 0 {
+		if len(fileUpgrades) > 0 {
 			fileContents[f.Path] = content
 		}
 	}
 
 	return upgrades, fileContents
+}
+
+// listPipelineFiles collects all YAML files from the repository.
+func listPipelineFiles(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+) []entities.File {
+	yamlFiles, err := provider.ListFiles(ctx, repo, ".yaml")
+	if err != nil {
+		logger.Warnf("[pipeline] Failed to list .yaml files: %v", err)
+	}
+
+	ymlFiles, ymlErr := provider.ListFiles(ctx, repo, ".yml")
+	if ymlErr != nil {
+		logger.Warnf("[pipeline] Failed to list .yml files: %v", ymlErr)
+	}
+
+	return append(yamlFiles, ymlFiles...)
+}
+
+// findUpgradesInFile scans a single file for version references and returns upgrade tasks.
+func findUpgradesInFile(
+	content, filePath string,
+	ci ciSystem,
+	latestVersions map[string]string,
+) []upgradeTask {
+	rules := rulesForCI(ci)
+	matches := scanFileForVersions(content, filePath, rules)
+
+	var tasks []upgradeTask
+	for _, match := range matches {
+		if !isExactVersion(match.CurrentVer) {
+			continue
+		}
+
+		latestVer, ok := latestVersions[match.Language]
+		if !ok {
+			continue
+		}
+
+		truncated := truncateToGranularity(latestVer, match.CurrentVer)
+		if truncated == match.CurrentVer {
+			continue
+		}
+
+		tasks = append(tasks, upgradeTask{
+			match:      match,
+			newVersion: truncated,
+		})
+	}
+
+	return tasks
 }
 
 // classifyFile determines which CI system a file belongs to based on its path.
@@ -372,10 +395,8 @@ func truncateToGranularity(latest, reference string) string {
 
 // applyUpgrades applies version replacements to file contents.
 func applyUpgrades(upgrades []upgradeTask, fileContents map[string]string) []entities.FileChange {
-	modified := make(map[string]string)
-	for k, v := range fileContents {
-		modified[k] = v
-	}
+	modified := make(map[string]string, len(fileContents))
+	maps.Copy(modified, fileContents)
 
 	for _, up := range upgrades {
 		content, ok := modified[up.match.FilePath]

@@ -22,7 +22,7 @@ const (
 )
 
 // fromPattern matches Docker FROM clauses with pinned version tags.
-// Groups: (1) image name, (2) tag
+// Groups: (1) image name, (2) tag.
 var fromPattern = regexp.MustCompile(
 	`(?m)^FROM\s+` +
 		`(?:--platform=[^\s]+\s+)?` +
@@ -211,7 +211,7 @@ func scanDockerfile(content, filePath string) []imageRef {
 		refs = append(refs, imageRef{
 			dep: entities.Dependency{
 				Name:       imageName,
-				Source:      imageName,
+				Source:     imageName,
 				CurrentVer: tag,
 				FilePath:   filePath,
 				Line:       lineNum,

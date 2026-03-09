@@ -1,7 +1,11 @@
 package pipeline
 
 // TruncateToGranularity is exported for testing.
-var TruncateToGranularity = truncateToGranularity
+func TruncateToGranularity(latest, reference string) string {
+	return truncateToGranularity(latest, reference)
+}
 
 // IsExactVersion is exported for testing.
-var IsExactVersion = isExactVersion
+func IsExactVersion(ver string) bool {
+	return isExactVersion(ver)
+}
