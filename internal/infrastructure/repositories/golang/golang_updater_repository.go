@@ -31,7 +31,7 @@ const (
 	// the go directive is already at the desired version and only module
 	// dependencies are being refreshed.
 	branchGoVersionFmt = "chore/upgrade-go-%s"
-	branchGoDepsFmt    = "chore/upgrade-deps-%s"
+	branchGoDepsFmt    = "chore/upgrade-go-deps"
 )
 
 // UpdaterRepository implements repositories.UpdaterRepository for Go module dependencies.
@@ -227,7 +227,7 @@ func resolveVersionContext(
 
 	// Choose the branch name pattern based on the kind of change, following
 	// the same dual-branch idea used by the Terraform updater.
-	branchName := fmt.Sprintf(branchGoDepsFmt, latestGoVersion)
+	branchName := branchGoDepsFmt
 	if needsVersionUpgrade {
 		branchName = fmt.Sprintf(branchGoVersionFmt, latestGoVersion)
 	}

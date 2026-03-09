@@ -57,3 +57,5 @@ require (
 	golang.org/x/tools v0.42.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
+
+replace github.com/rios0rios0/langforge => /home/rios0rios0/Development/github.com/rios0rios0/langforge
