@@ -16,6 +16,16 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added pipeline updater for detecting and upgrading hardcoded language versions in CI/CD configuration files (GitHub Actions and Azure DevOps YAML templates)
+- added Dockerfile updater for detecting and upgrading base image versions in FROM clauses via Docker Hub API
+- added shared version fetcher package for Go, Python, Node.js, Java, and Terraform latest version resolution
+
+### Fixed
+
+- fixed the Go updater deps-only branch name to use `chore/upgrade-go-deps` instead of embedding the Go version number
+
 ## [0.6.0] - 2026-03-06
 
 ### Added
