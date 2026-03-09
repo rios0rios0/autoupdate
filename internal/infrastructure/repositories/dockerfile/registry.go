@@ -114,23 +114,18 @@ var versionPartPattern = regexp.MustCompile(`^(\d+(?:\.\d+)*)(.*)$`)
 
 // parseTag splits a Docker tag into version and suffix components.
 // For example: "3.13-slim-bullseye" -> ("3.13", "-slim-bullseye", 2, true).
-func parseTag(tag string) (version, suffix string, precision int, ok bool) {
+func parseTag(tag string) (string, string, int, bool) {
 	m := versionPartPattern.FindStringSubmatch(tag)
 	if len(m) < 3 { //nolint:mnd // need full match + 2 capture groups
 		return "", "", 0, false
 	}
 
-	version = m[1]
-	suffix = m[2]
-	precision = len(strings.Split(version, "."))
+	version := m[1]
+	suffix := m[2]
+	precision := len(strings.Split(version, "."))
 
 	// Validate that the version part is semver-like
-	normalized := "v" + version
-	if precision < 3 { //nolint:mnd // pad to 3-part for semver validation
-		for i := precision; i < 3; i++ {
-			normalized += ".0"
-		}
-	}
+	normalized := normalizeToSemver(version)
 
 	if !semver.IsValid(normalized) {
 		return "", "", 0, false
@@ -144,51 +139,15 @@ func parseTag(tag string) (version, suffix string, precision int, ok bool) {
 func findBestUpgrade(current *parsedImageRef, availableTags []string) string {
 	var bestVersion string
 	var bestTag string
+	curNorm := normalizeToSemver(current.Version)
 
 	for _, tag := range availableTags {
-		version, tagSuffix, tagPrecision, ok := parseTag(tag)
+		version, ok := compatibleUpgradeVersion(tag, current, curNorm)
 		if !ok {
 			continue
 		}
 
-		// Must match the same suffix
-		if tagSuffix != current.Suffix {
-			continue
-		}
-
-		// Must match the same precision level
-		if tagPrecision != current.Precision {
-			continue
-		}
-
-		// Compare versions using semver
-		curNorm := normalizeToSemver(current.Version)
 		newNorm := normalizeToSemver(version)
-
-		if !semver.IsValid(curNorm) || !semver.IsValid(newNorm) {
-			continue
-		}
-
-		// Must be newer
-		if semver.Compare(newNorm, curNorm) <= 0 {
-			continue
-		}
-
-		// Must be within the same major version
-		if semver.Major(newNorm) != semver.Major(curNorm) {
-			continue
-		}
-
-		// For patch-pinned versions (3 parts), stay within same minor
-		if current.Precision >= 3 { //nolint:mnd // 3-part = patch-pinned
-			curMinor := semver.Major(curNorm) + "." + extractMinor(curNorm)
-			newMinor := semver.Major(newNorm) + "." + extractMinor(newNorm)
-			if curMinor != newMinor {
-				continue
-			}
-		}
-
-		// Track the highest version found
 		if bestVersion == "" || semver.Compare(newNorm, normalizeToSemver(bestVersion)) > 0 {
 			bestVersion = version
 			bestTag = tag
@@ -196,6 +155,35 @@ func findBestUpgrade(current *parsedImageRef, availableTags []string) string {
 	}
 
 	return bestTag
+}
+
+// compatibleUpgradeVersion checks if a tag is a valid upgrade candidate for the current image.
+// Returns the version string and true if compatible, empty and false otherwise.
+func compatibleUpgradeVersion(tag string, current *parsedImageRef, curNorm string) (string, bool) {
+	version, tagSuffix, tagPrecision, ok := parseTag(tag)
+	if !ok || tagSuffix != current.Suffix || tagPrecision != current.Precision {
+		return "", false
+	}
+
+	newNorm := normalizeToSemver(version)
+	if !semver.IsValid(curNorm) || !semver.IsValid(newNorm) {
+		return "", false
+	}
+
+	if semver.Compare(newNorm, curNorm) <= 0 || semver.Major(newNorm) != semver.Major(curNorm) {
+		return "", false
+	}
+
+	// For patch-pinned versions (3 parts), stay within same minor.
+	if current.Precision >= 3 { //nolint:mnd // 3-part = patch-pinned
+		curMinor := semver.Major(curNorm) + "." + extractMinor(curNorm)
+		newMinor := semver.Major(newNorm) + "." + extractMinor(newNorm)
+		if curMinor != newMinor {
+			return "", false
+		}
+	}
+
+	return version, true
 }
 
 // normalizeToSemver ensures a version string is valid semver by prepending "v"
@@ -207,7 +195,7 @@ func normalizeToSemver(version string) string {
 	}
 
 	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
-	for len(parts) < 3 { //nolint:mnd // semver requires 3 parts
+	for len(parts) < 3 {
 		parts = append(parts, "0")
 	}
 
