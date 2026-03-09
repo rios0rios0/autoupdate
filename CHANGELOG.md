@@ -16,6 +16,11 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- upgraded `gitforge` dependency from v0.1.1 to v0.2.0, bringing Azure DevOps PR creation fixes and GPG signing improvements
+- upgraded `langforge` dependency to v0.2.0 and removed local `replace` directive
+
 ### Added
 
 - added pipeline updater for detecting and upgrading hardcoded language versions in CI/CD configuration files (GitHub Actions and Azure DevOps YAML templates)
