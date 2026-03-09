@@ -1,10 +1,14 @@
 package dockerfile
 
 // ParseTag is exported for testing.
-var ParseTag = parseTag
+func ParseTag(tag string) (string, string, int, bool) {
+	return parseTag(tag)
+}
 
 // FindBestUpgrade is exported for testing.
-var FindBestUpgrade = findBestUpgrade
+func FindBestUpgrade(current *parsedImageRef, availableTags []string) string {
+	return findBestUpgrade(current, availableTags)
+}
 
 // ScanDockerfile is exported for testing. It returns dependencies found in a Dockerfile.
 func ScanDockerfile(content, filePath string) []scanResult {
@@ -30,10 +34,14 @@ type scanResult struct {
 }
 
 // IsDockerfilePath is exported for testing.
-var IsDockerfilePath = isDockerfilePath
+func IsDockerfilePath(path string) bool {
+	return isDockerfilePath(path)
+}
 
 // ParsedImageRef is exported for testing.
 type ParsedImageRef = parsedImageRef
 
 // IsDockerHubImage is exported for testing.
-var IsDockerHubImage = isDockerHubImage
+func IsDockerHubImage(imageName string) bool {
+	return isDockerHubImage(imageName)
+}

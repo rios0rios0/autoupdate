@@ -171,6 +171,8 @@ func localUpgradeHandlers() map[langEntities.Language]localUpgradeHandler {
 		langEntities.LanguageCSharp:     nil,
 		langEntities.LanguageTerraform:  nil,
 		langEntities.LanguageYAML:       nil,
+		langEntities.LanguagePipeline:   nil,
+		langEntities.LanguageDockerfile: nil,
 		langEntities.LanguageUnknown:    nil,
 	}
 }
@@ -344,6 +346,8 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 		langEntities.LanguageCSharp:     nil,
 		langEntities.LanguageTerraform:  nil,
 		langEntities.LanguageYAML:       nil,
+		langEntities.LanguagePipeline:   nil,
+		langEntities.LanguageDockerfile: nil,
 		langEntities.LanguageUnknown:    nil,
 	}
 }
