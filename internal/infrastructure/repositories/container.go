@@ -1,8 +1,10 @@
 package repositories
 
 import (
+	dfRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dockerfile"
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
+	plRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/pipeline"
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
 	tfRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/terraform"
 	"github.com/rios0rios0/gitforge/pkg/providers/infrastructure/azuredevops"
@@ -31,6 +33,8 @@ func RegisterProviders(container *dig.Container) error {
 		reg.Register(goRepo.NewUpdaterRepository())
 		reg.Register(pyRepo.NewUpdaterRepository())
 		reg.Register(jsRepo.NewUpdaterRepository())
+		reg.Register(plRepo.NewUpdaterRepository())
+		reg.Register(dfRepo.NewUpdaterRepository())
 		return reg
 	}); err != nil {
 		return err

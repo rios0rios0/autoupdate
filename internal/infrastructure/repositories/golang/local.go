@@ -77,7 +77,7 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) (*versionCo
 		currentGoVersion, needsVersionUpgrade,
 	)
 
-	branchName := fmt.Sprintf(branchGoDepsFmt, latestGoVersion)
+	branchName := branchGoDepsFmt
 	if needsVersionUpgrade {
 		branchName = fmt.Sprintf(branchGoVersionFmt, latestGoVersion)
 	}
