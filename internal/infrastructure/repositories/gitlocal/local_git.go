@@ -1,8 +1,10 @@
 package gitlocal
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -10,6 +12,10 @@ import (
 	logger "github.com/sirupsen/logrus"
 
 	gitops "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
+	gitHelpers "github.com/rios0rios0/gitforge/pkg/git/infrastructure/helpers"
+	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
+	signingInfra "github.com/rios0rios0/gitforge/pkg/signing/infrastructure"
+	signingHelpers "github.com/rios0rios0/gitforge/pkg/signing/infrastructure/helpers"
 )
 
 // LocalGitContext wraps go-git repository and worktree objects, providing
@@ -88,6 +94,9 @@ func (c *LocalGitContext) HasChanges() (bool, error) {
 // (e.g. "x-access-token" for GitHub, "oauth2" for GitLab, "pat" for
 // Azure DevOps).
 //
+// If the repository's git config has commit.gpgsign=true, the commit
+// will be signed using GPG or SSH depending on gpg.format.
+//
 // Returns true when changes were committed and pushed, false when
 // the worktree was clean (nothing to push).
 func (c *LocalGitContext) StageCommitAndPush(
@@ -109,7 +118,26 @@ func (c *LocalGitContext) StageCommitAndPush(
 		return false, fmt.Errorf("failed to stage changes: %w", err)
 	}
 
-	_, err = gitops.CommitChanges(c.repo, c.workTree, commitMessage, nil, "autoupdate", "autoupdate@noreply")
+	userConfig, err := gitops.ReadUserConfig(c.repo)
+	if err != nil {
+		return false, fmt.Errorf("failed to read git user config: %w", err)
+	}
+
+	name := userConfig.Name
+	email := userConfig.Email
+	if name == "" {
+		name = "autoupdate"
+	}
+	if email == "" {
+		email = "autoupdate@noreply"
+	}
+
+	signer, err := resolveCommitSigner(c.repo, userConfig)
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve commit signer: %w", err)
+	}
+
+	_, err = gitops.CommitChanges(c.repo, c.workTree, commitMessage, signer, name, email)
 	if err != nil {
 		return false, fmt.Errorf("failed to commit changes: %w", err)
 	}
@@ -123,6 +151,54 @@ func (c *LocalGitContext) StageCommitAndPush(
 	}
 
 	return true, nil
+}
+
+// resolveCommitSigner reads git config to determine if and how commits
+// should be signed. Returns nil if signing is not configured.
+func resolveCommitSigner(
+	repo *git.Repository,
+	userConfig *gitops.UserConfig,
+) (globalEntities.CommitSigner, error) {
+	localCfg, err := repo.Config()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read repo config: %w", err)
+	}
+
+	globalCfg, err := gitHelpers.GetGlobalGitConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read global git config: %w", err)
+	}
+
+	gpgSign := gitHelpers.GetOptionFromConfig(localCfg, globalCfg, "commit", "gpgsign")
+	if gpgSign != "true" {
+		return nil, nil
+	}
+
+	switch {
+	case userConfig.SigningFormat == "ssh":
+		logger.Info("Signing commit with SSH key")
+		sshKeyPath, sshErr := signingHelpers.ReadSSHSigningKey(userConfig.SigningKey)
+		if sshErr != nil {
+			return nil, sshErr
+		}
+		return signingInfra.NewSSHSigner(sshKeyPath), nil
+
+	default:
+		logger.Info("Signing commit with GPG key")
+		gpgPassphrase := os.Getenv("GPG_PASSPHRASE")
+		gpgKeyReader, gpgErr := signingHelpers.GetGpgKeyReader(
+			context.Background(), userConfig.SigningKey, "", "autoupdate",
+		)
+		if gpgErr != nil {
+			return nil, gpgErr
+		}
+
+		signKey, gpgErr := signingHelpers.GetGpgKey(gpgKeyReader, gpgPassphrase)
+		if gpgErr != nil {
+			return nil, gpgErr
+		}
+		return signingInfra.NewGPGSigner(signKey), nil
+	}
 }
 
 // pushHTTPS pushes changes using go-git's HTTP basic auth with

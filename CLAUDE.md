@@ -57,6 +57,10 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 2. Implement `UpdaterRepository` interface (`Name()`, `Detect()`, `CreateUpdatePRs()`)
 3. Register in `internal/infrastructure/repositories/container.go`
 
+### Commit Signing
+
+When `commit.gpgsign=true` is set in git config, commits are automatically signed using GPG or SSH (based on `gpg.format`). The signing key is read from `user.signingkey`. GPG passphrase is read from `GPG_PASSPHRASE` env var.
+
 ### Config System
 
 Auto-discovery searches `.`, `.config`, `configs`, `$HOME`, `$HOME/.config` for `autoupdate.yaml` / `.autoupdate.yaml`. Tokens support inline values, `${ENV_VAR}` expansion, and file path resolution.

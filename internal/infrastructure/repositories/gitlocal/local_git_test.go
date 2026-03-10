@@ -231,6 +231,7 @@ func createTestRepoWithCommit(t *testing.T) string {
 	require.NoError(t, err)
 	cfg.User.Name = "test"
 	cfg.User.Email = "test@test.com"
+	cfg.Raw.Section("commit").SetOption("gpgsign", "false")
 	require.NoError(t, repo.SetConfig(cfg))
 
 	wt, err := repo.Worktree()
