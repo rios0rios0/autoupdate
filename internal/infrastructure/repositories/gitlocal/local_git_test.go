@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,9 +195,44 @@ func TestStageCommitAndPush(t *testing.T) {
 		require.NoError(t, commitErr)
 		assert.Contains(t, commit.Message, "chore(deps): test commit")
 	})
+
+	t.Run("should return error when HTTPS push has nil resolver", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := createTestRepoWithHTTPSRemote(t)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
+		require.NoError(t, err)
+		require.NoError(t, ctx.CreateBranch("chore/test-branch"))
+		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("x"), 0o600))
+
+		// when
+		_, err = ctx.StageCommitAndPush("chore/test-branch", "msg", "token")
+
+		// then
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "push auth resolver is required")
+	})
 }
 
 // --- test helpers ---
+
+func createTestRepoWithHTTPSRemote(t *testing.T) string {
+	t.Helper()
+
+	repoDir := createTestRepoWithCommit(t)
+
+	repo, err := git.PlainOpen(repoDir)
+	require.NoError(t, err)
+
+	_, err = repo.CreateRemote(&gitconfig.RemoteConfig{
+		Name: "origin",
+		URLs: []string{"https://github.com/test/test-repo.git"},
+	})
+	require.NoError(t, err)
+
+	return repoDir
+}
 
 func createTestRepoWithCommit(t *testing.T) string {
 	t.Helper()

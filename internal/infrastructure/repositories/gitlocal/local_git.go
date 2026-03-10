@@ -25,9 +25,11 @@ import (
 type PushAuthResolver interface {
 	// GetAdapterByURL returns a LocalGitAuthProvider matching the URL, or nil.
 	GetAdapterByURL(url string) globalEntities.LocalGitAuthProvider
-	// GetAuthProvider creates a token-enabled provider instance and returns
-	// it as a LocalGitAuthProvider for transport authentication.
-	GetAuthProvider(name, token string) (globalEntities.LocalGitAuthProvider, error)
+	// GetAuthProvider creates a token-enabled provider for the given service
+	// type and returns it as a LocalGitAuthProvider for transport authentication.
+	// The implementation is responsible for mapping ServiceType to the internal
+	// provider name.
+	GetAuthProvider(serviceType globalEntities.ServiceType, token string) (globalEntities.LocalGitAuthProvider, error)
 }
 
 // LocalGitContext wraps go-git repository and worktree objects, providing
@@ -240,11 +242,15 @@ func (c *LocalGitContext) pushChanges(authToken string, refSpec config.RefSpec) 
 	remoteURL := urls[0]
 
 	switch {
-	case strings.HasPrefix(remoteURL, "git@"):
+	case strings.HasPrefix(remoteURL, "git@") || strings.HasPrefix(remoteURL, "ssh://"):
 		logger.Info("Pushing to remote via SSH")
 		return gitops.PushChangesSSH(c.repo, refSpec)
 
-	case strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://"):
+	case strings.HasPrefix(remoteURL, "https://"):
+		return c.pushChangesHTTPS(remoteURL, authToken, refSpec)
+
+	case strings.HasPrefix(remoteURL, "http://"):
+		logger.Warn("Pushing over plaintext HTTP — credentials may be exposed; consider switching to HTTPS")
 		return c.pushChangesHTTPS(remoteURL, authToken, refSpec)
 
 	default:
@@ -294,28 +300,12 @@ func (c *LocalGitContext) collectAuthMethods(
 	serviceType globalEntities.ServiceType,
 	authToken string,
 ) []transport.AuthMethod {
-	providerName := serviceTypeToProviderName(serviceType)
-	if providerName == "" {
-		return nil
-	}
-
-	lgap, err := c.resolver.GetAuthProvider(providerName, authToken)
+	lgap, err := c.resolver.GetAuthProvider(serviceType, authToken)
 	if err != nil {
-		logger.Warnf("Failed to create auth provider %s: %v", providerName, err)
+		logger.Warnf("Failed to create auth provider for %v: %v", serviceType, err)
 		return nil
 	}
 
 	lgap.ConfigureTransport()
 	return lgap.GetAuthMethods("")
-}
-
-// serviceTypeToProviderName maps a gitforge ServiceType to the provider
-// name string used for registry lookups.
-func serviceTypeToProviderName(serviceType globalEntities.ServiceType) string {
-	providerNames := map[globalEntities.ServiceType]string{
-		globalEntities.GITHUB:      "github",
-		globalEntities.GITLAB:      "gitlab",
-		globalEntities.AZUREDEVOPS: "azuredevops",
-	}
-	return providerNames[serviceType]
 }
