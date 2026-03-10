@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added GPG and SSH commit signing support in local mode (reads from git config `commit.gpgsign` and `gpg.format`)
+
 ## [0.7.0] - 2026-03-09
 
 ### Added
