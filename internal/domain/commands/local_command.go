@@ -126,7 +126,7 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 	logger.Infof("Default branch: %s", defaultBranch)
 
 	// Run the appropriate upgrade
-	prInfo, upgradeErr := runLocalUpgrade(ctx, repoDir, projType, remote.ProviderType, token, opts)
+	prInfo, upgradeErr := runLocalUpgrade(ctx, repoDir, projType, remote.ProviderType, token, opts, it.providerRegistry)
 	if upgradeErr != nil {
 		return upgradeErr
 	}
@@ -157,6 +157,7 @@ type localUpgradeHandler func(
 	ctx context.Context,
 	repoDir, providerType, token string,
 	opts LocalOptions,
+	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error)
 
 // localUpgradeHandlers returns a map from langforge Language to local upgrade handler.
@@ -184,24 +185,27 @@ func runLocalUpgrade(
 	projType langEntities.Language,
 	providerType, token string,
 	opts LocalOptions,
+	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error) {
 	handler, ok := localUpgradeHandlers()[projType]
 	if !ok || handler == nil {
 		return nil, fmt.Errorf("unsupported project type: %s", projType)
 	}
-	return handler(ctx, repoDir, providerType, token, opts)
+	return handler(ctx, repoDir, providerType, token, opts, registry)
 }
 
 func runGoLocalUpgrade(
 	ctx context.Context,
 	repoDir, providerType, token string,
 	opts LocalOptions,
+	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error) {
 	result, err := goRepo.RunLocalUpgrade(ctx, repoDir, goRepo.LocalUpgradeOptions{
 		DryRun:       opts.DryRun,
 		Verbose:      opts.Verbose,
 		AuthToken:    token,
 		ProviderName: providerType,
+		PushAuth:     registry,
 	})
 	if err != nil {
 		return nil, err
@@ -219,12 +223,14 @@ func runPythonLocalUpgrade(
 	ctx context.Context,
 	repoDir, providerType, token string,
 	opts LocalOptions,
+	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error) {
 	result, err := pyRepo.RunLocalUpgrade(ctx, repoDir, pyRepo.LocalUpgradeOptions{
 		DryRun:       opts.DryRun,
 		Verbose:      opts.Verbose,
 		AuthToken:    token,
 		ProviderName: providerType,
+		PushAuth:     registry,
 	})
 	if err != nil {
 		return nil, err
@@ -242,12 +248,14 @@ func runJSLocalUpgrade(
 	ctx context.Context,
 	repoDir, providerType, token string,
 	opts LocalOptions,
+	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error) {
 	result, err := jsRepo.RunLocalUpgrade(ctx, repoDir, jsRepo.LocalUpgradeOptions{
 		DryRun:       opts.DryRun,
 		Verbose:      opts.Verbose,
 		AuthToken:    token,
 		ProviderName: providerType,
+		PushAuth:     registry,
 	})
 	if err != nil {
 		return nil, err

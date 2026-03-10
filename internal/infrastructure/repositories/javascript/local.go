@@ -19,7 +19,8 @@ type LocalUpgradeOptions struct {
 	DryRun       bool
 	Verbose      bool
 	AuthToken    string
-	ProviderName string // git provider name (e.g. "azuredevops", "github", "gitlab")
+	ProviderName string                    // git provider name (e.g. "azuredevops", "github", "gitlab")
+	PushAuth     gitlocal.PushAuthResolver // resolves auth methods for git push
 }
 
 // LocalResult holds the outcome of a local upgrade operation.
@@ -154,7 +155,7 @@ func executeLocalUpgrade(
 	opts LocalUpgradeOptions,
 ) (*LocalResult, error) {
 	// --- Git Setup (go-git) ---
-	gitCtx, err := gitlocal.NewLocalGitContext(repoDir)
+	gitCtx, err := gitlocal.NewLocalGitContext(repoDir, opts.PushAuth)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +184,7 @@ func executeLocalUpgrade(
 	}
 
 	pushed, pushErr := gitCtx.StageCommitAndPush(
-		vCtx.BranchName, commitMsg, opts.ProviderName, opts.AuthToken,
+		vCtx.BranchName, commitMsg, opts.AuthToken,
 	)
 	if pushErr != nil {
 		return nil, pushErr
