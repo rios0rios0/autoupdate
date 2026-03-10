@@ -72,7 +72,7 @@ func (r *ProviderRegistry) GetAdapterByServiceType(
 func (r *ProviderRegistry) GetAuthProvider(
 	serviceType globalEntities.ServiceType, token string,
 ) (globalEntities.LocalGitAuthProvider, error) {
-	name := serviceTypeToProviderName(serviceType)
+	name := registryInfra.ServiceTypeToProviderName(serviceType)
 	if name == "" {
 		return nil, fmt.Errorf("unsupported service type: %v", serviceType)
 	}
@@ -85,15 +85,4 @@ func (r *ProviderRegistry) GetAuthProvider(
 		return nil, fmt.Errorf("provider %q does not implement LocalGitAuthProvider", name)
 	}
 	return lgap, nil
-}
-
-// serviceTypeToProviderName maps a gitforge ServiceType to the provider
-// name string used for registry lookups.
-func serviceTypeToProviderName(serviceType globalEntities.ServiceType) string {
-	providerNames := map[globalEntities.ServiceType]string{
-		globalEntities.GITHUB:      "github",
-		globalEntities.GITLAB:      "gitlab",
-		globalEntities.AZUREDEVOPS: "azuredevops",
-	}
-	return providerNames[serviceType]
 }

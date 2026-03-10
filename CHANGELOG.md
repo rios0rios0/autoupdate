@@ -24,6 +24,9 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Changed
 
 - changed local mode push to use gitforge's adapter pattern instead of hardcoded provider-username map, supporting SSH and HTTPS with auth method retry
+- changed commit signing resolution to use gitforge's shared `ResolveSignerFromGitConfig()`, eliminating cross-CLI duplication
+- changed push transport detection and auth retry to use gitforge's shared `PushWithTransportDetection()`, eliminating cross-CLI duplication
+- changed `serviceTypeToProviderName()` to use gitforge's shared `ServiceTypeToProviderName()`, eliminating cross-CLI duplication
 
 ## [0.7.0] - 2026-03-09
 
