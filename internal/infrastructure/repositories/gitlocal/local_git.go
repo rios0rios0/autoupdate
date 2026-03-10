@@ -1,11 +1,9 @@
 package gitlocal
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -16,7 +14,6 @@ import (
 	gitHelpers "github.com/rios0rios0/gitforge/pkg/git/infrastructure/helpers"
 	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
 	signingInfra "github.com/rios0rios0/gitforge/pkg/signing/infrastructure"
-	signingHelpers "github.com/rios0rios0/gitforge/pkg/signing/infrastructure/helpers"
 )
 
 // PushAuthResolver resolves authentication for git push operations.
@@ -110,10 +107,10 @@ func (c *LocalGitContext) HasChanges() (bool, error) {
 // StageCommitAndPush stages all changes, commits with the given message,
 // and pushes the branch to the remote.
 //
-// The transport (SSH or HTTPS) is auto-detected from the remote URL.
-// For SSH remotes, system SSH keys are used.  For HTTPS remotes, the
-// authToken is used to create a token-enabled provider via the registry
-// and collect auth methods.
+// The transport (SSH or HTTPS) is auto-detected from the remote URL via
+// gitforge's PushWithTransportDetection.  For SSH remotes, system SSH
+// keys are used.  For HTTPS remotes, the authToken is used to create a
+// token-enabled provider via the registry and collect auth methods.
 //
 // If the repository's git config has commit.gpgsign=true, the commit
 // will be signed using GPG or SSH depending on gpg.format.
@@ -153,7 +150,25 @@ func (c *LocalGitContext) StageCommitAndPush(
 		email = "autoupdate@noreply"
 	}
 
-	signer, err := resolveCommitSigner(c.repo, userConfig)
+	localCfg, err := c.repo.Config()
+	if err != nil {
+		return false, fmt.Errorf("failed to read repo config: %w", err)
+	}
+
+	globalCfg, err := gitHelpers.GetGlobalGitConfig()
+	if err != nil {
+		return false, fmt.Errorf("failed to read global git config: %w", err)
+	}
+
+	gpgSign := gitHelpers.GetOptionFromConfig(localCfg, globalCfg, "commit", "gpgsign")
+	signer, err := signingInfra.ResolveSignerFromGitConfig(
+		gpgSign,
+		userConfig.SigningFormat,
+		userConfig.SigningKey,
+		"",
+		os.Getenv("GPG_PASSPHRASE"),
+		"autoupdate",
+	)
 	if err != nil {
 		return false, fmt.Errorf("failed to resolve commit signer: %w", err)
 	}
@@ -167,145 +182,49 @@ func (c *LocalGitContext) StageCommitAndPush(
 		fmt.Sprintf("refs/heads/%s:refs/heads/%s", branchName, branchName),
 	)
 
-	if err = c.pushChanges(authToken, refSpec); err != nil {
+	authMethods, err := c.collectAuthMethods(authToken)
+	if err != nil {
+		return false, fmt.Errorf("failed to collect auth methods: %w", err)
+	}
+
+	if err = gitops.PushWithTransportDetection(c.repo, refSpec, authMethods); err != nil {
 		return false, fmt.Errorf("failed to push branch %s: %w", branchName, err)
 	}
 
 	return true, nil
 }
 
-// resolveCommitSigner reads git config to determine if and how commits
-// should be signed. Returns nil if signing is not configured.
-func resolveCommitSigner(
-	repo *git.Repository,
-	userConfig *gitops.UserConfig,
-) (globalEntities.CommitSigner, error) {
-	localCfg, err := repo.Config()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read repo config: %w", err)
-	}
-
-	globalCfg, err := gitHelpers.GetGlobalGitConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read global git config: %w", err)
-	}
-
-	gpgSign := gitHelpers.GetOptionFromConfig(localCfg, globalCfg, "commit", "gpgsign")
-	if gpgSign != "true" {
+// collectAuthMethods resolves the remote URL, finds the matching provider,
+// and collects all available auth methods for push.  Returns nil (no auth
+// methods) when the resolver is nil, which is fine for SSH push where auth
+// methods are not needed.
+func (c *LocalGitContext) collectAuthMethods(authToken string) ([]transport.AuthMethod, error) {
+	if c.resolver == nil {
 		return nil, nil
 	}
 
-	switch {
-	case userConfig.SigningFormat == "ssh":
-		logger.Info("Signing commit with SSH key")
-		sshKeyPath, sshErr := signingHelpers.ReadSSHSigningKey(userConfig.SigningKey)
-		if sshErr != nil {
-			return nil, sshErr
-		}
-		return signingInfra.NewSSHSigner(sshKeyPath), nil
-
-	default:
-		logger.Info("Signing commit with GPG key")
-		gpgPassphrase := os.Getenv("GPG_PASSPHRASE")
-		gpgKeyReader, gpgErr := signingHelpers.GetGpgKeyReader(
-			context.Background(), userConfig.SigningKey, "", "autoupdate",
-		)
-		if gpgErr != nil {
-			return nil, gpgErr
-		}
-
-		signKey, gpgErr := signingHelpers.GetGpgKey(gpgKeyReader, gpgPassphrase)
-		if gpgErr != nil {
-			return nil, gpgErr
-		}
-		return signingInfra.NewGPGSigner(signKey), nil
-	}
-}
-
-// pushChanges detects the remote transport (SSH or HTTPS) from the
-// origin URL and pushes using the appropriate method.
-//
-// For SSH remotes, it delegates to gitforge's PushChangesSSH which uses
-// system SSH keys.  For HTTPS remotes, it creates a token-enabled
-// provider via the registry, collects auth methods, and tries each
-// until one succeeds.
-func (c *LocalGitContext) pushChanges(authToken string, refSpec config.RefSpec) error {
 	remoteCfg, err := c.repo.Remote("origin")
 	if err != nil {
-		return fmt.Errorf("failed to get origin remote: %w", err)
+		return nil, fmt.Errorf("failed to get origin remote: %w", err)
 	}
 
 	urls := remoteCfg.Config().URLs
 	if len(urls) == 0 {
-		return errors.New("origin remote has no URLs configured")
-	}
-	remoteURL := urls[0]
-
-	switch {
-	case strings.HasPrefix(remoteURL, "git@") || strings.HasPrefix(remoteURL, "ssh://"):
-		logger.Info("Pushing to remote via SSH")
-		return gitops.PushChangesSSH(c.repo, refSpec)
-
-	case strings.HasPrefix(remoteURL, "https://"):
-		return c.pushChangesHTTPS(remoteURL, authToken, refSpec)
-
-	case strings.HasPrefix(remoteURL, "http://"):
-		logger.Warn("Pushing over plaintext HTTP — credentials may be exposed; consider switching to HTTPS")
-		return c.pushChangesHTTPS(remoteURL, authToken, refSpec)
-
-	default:
-		return fmt.Errorf("unsupported remote URL scheme: %s", remoteURL)
-	}
-}
-
-// pushChangesHTTPS resolves the provider from the remote URL, creates a
-// token-enabled provider instance, and pushes with auth method retry.
-func (c *LocalGitContext) pushChangesHTTPS(remoteURL, authToken string, refSpec config.RefSpec) error {
-	if c.resolver == nil {
-		return errors.New("push auth resolver is required for HTTPS push")
+		return nil, nil
 	}
 
-	adapter := c.resolver.GetAdapterByURL(remoteURL)
+	adapter := c.resolver.GetAdapterByURL(urls[0])
 	if adapter == nil {
-		return fmt.Errorf("no registered provider matches remote URL: %s", remoteURL)
+		return nil, nil
 	}
 
 	serviceType := adapter.GetServiceType()
-	logger.Infof("Pushing to remote via HTTPS (service: %v)", serviceType)
-
-	authMethods := c.collectAuthMethods(serviceType, authToken)
-	if len(authMethods) == 0 {
-		return fmt.Errorf("no auth methods available for service type %v", serviceType)
-	}
-
-	var lastErr error
-	for _, method := range authMethods {
-		lastErr = c.repo.Push(&git.PushOptions{
-			RefSpecs:   []config.RefSpec{refSpec},
-			RemoteName: "origin",
-			Auth:       method,
-		})
-		if lastErr == nil {
-			return nil
-		}
-		logger.Debugf("Push attempt failed with auth method %T: %v", method, lastErr)
-	}
-
-	return fmt.Errorf("all push attempts failed, last error: %w", lastErr)
-}
-
-// collectAuthMethods creates a token-enabled provider for the given
-// service type and collects all available auth methods from it.
-func (c *LocalGitContext) collectAuthMethods(
-	serviceType globalEntities.ServiceType,
-	authToken string,
-) []transport.AuthMethod {
 	lgap, err := c.resolver.GetAuthProvider(serviceType, authToken)
 	if err != nil {
 		logger.Warnf("Failed to create auth provider for %v: %v", serviceType, err)
-		return nil
+		return nil, nil
 	}
 
 	lgap.ConfigureTransport()
-	return lgap.GetAuthMethods("")
+	return lgap.GetAuthMethods(""), nil
 }

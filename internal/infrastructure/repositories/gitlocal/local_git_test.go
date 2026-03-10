@@ -211,7 +211,7 @@ func TestStageCommitAndPush(t *testing.T) {
 
 		// then
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "push auth resolver is required")
+		assert.Contains(t, err.Error(), "no authentication methods provided for HTTPS push")
 	})
 }
 
