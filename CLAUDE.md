@@ -61,6 +61,14 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 
 When `commit.gpgsign=true` is set in git config, commits are automatically signed using GPG or SSH (based on `gpg.format`). The signing key is read from `user.signingkey`. GPG passphrase is read from `GPG_PASSPHRASE` env var.
 
+### Push Transport (Local Mode)
+
+Push transport is auto-detected from the origin remote URL:
+- **SSH** (`git@...`): Uses system SSH keys via gitforge's `PushChangesSSH`
+- **HTTPS** (`https://...`): Uses gitforge's adapter pattern — resolves the provider from the URL, creates a token-enabled instance, and pushes with auth method retry
+
+The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` to avoid import cycles. The auth token (from `--token` flag or env vars) is only needed for HTTPS push and API calls.
+
 ### Config System
 
 Auto-discovery searches `.`, `.config`, `configs`, `$HOME`, `$HOME/.config` for `autoupdate.yaml` / `.autoupdate.yaml`. Tokens support inline values, `${ENV_VAR}` expansion, and file path resolution.

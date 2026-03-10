@@ -26,7 +26,7 @@ func TestNewLocalGitContext(t *testing.T) {
 		repoDir := createTestRepoWithCommit(t)
 
 		// when
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 
 		// then
 		require.NoError(t, err)
@@ -40,7 +40,7 @@ func TestNewLocalGitContext(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		// when
-		ctx, err := gitlocal.NewLocalGitContext(tmpDir)
+		ctx, err := gitlocal.NewLocalGitContext(tmpDir, nil)
 
 		// then
 		require.Error(t, err)
@@ -57,7 +57,7 @@ func TestEnsureClean(t *testing.T) {
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
@@ -73,7 +73,7 @@ func TestEnsureClean(t *testing.T) {
 		// given
 		repoDir := createTestRepoWithCommit(t)
 		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "dirty.txt"), []byte("dirty"), 0o600))
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
@@ -93,7 +93,7 @@ func TestCreateBranch(t *testing.T) {
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
@@ -117,7 +117,7 @@ func TestHasChanges(t *testing.T) {
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
@@ -134,7 +134,7 @@ func TestHasChanges(t *testing.T) {
 		// given
 		repoDir := createTestRepoWithCommit(t)
 		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "new.txt"), []byte("new"), 0o600))
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
@@ -154,11 +154,11 @@ func TestStageCommitAndPush(t *testing.T) {
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
-		pushed, err := ctx.StageCommitAndPush("main", "test commit", "github", "fake-token")
+		pushed, err := ctx.StageCommitAndPush("main", "test commit", "fake-token")
 
 		// then
 		require.NoError(t, err)
@@ -170,7 +170,7 @@ func TestStageCommitAndPush(t *testing.T) {
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 		require.NoError(t, ctx.CreateBranch("chore/test-branch"))
 		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "update.txt"), []byte("data"), 0o600))
@@ -179,7 +179,7 @@ func TestStageCommitAndPush(t *testing.T) {
 		// Push will fail because there is no remote, but we verify
 		// that staging and committing succeed by checking the error
 		// message references the push step, not stage/commit.
-		_, err = ctx.StageCommitAndPush("chore/test-branch", "chore(deps): test commit", "github", "fake-token")
+		_, err = ctx.StageCommitAndPush("chore/test-branch", "chore(deps): test commit", "fake-token")
 
 		// then
 		require.Error(t, err)
@@ -193,24 +193,6 @@ func TestStageCommitAndPush(t *testing.T) {
 		commit, commitErr := repo.CommitObject(head.Hash())
 		require.NoError(t, commitErr)
 		assert.Contains(t, commit.Message, "chore(deps): test commit")
-	})
-
-	t.Run("should return error for unsupported provider", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
-		require.NoError(t, err)
-		require.NoError(t, ctx.CreateBranch("chore/test-branch"))
-		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("x"), 0o600))
-
-		// when
-		_, err = ctx.StageCommitAndPush("chore/test-branch", "msg", "bitbucket", "token")
-
-		// then
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unsupported provider")
 	})
 }
 

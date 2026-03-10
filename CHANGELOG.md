@@ -19,6 +19,11 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Added
 
 - added GPG and SSH commit signing support in local mode (reads from git config `commit.gpgsign` and `gpg.format`)
+- added SSH push support in local mode (auto-detected from remote URL)
+
+### Changed
+
+- changed local mode push to use gitforge's adapter pattern instead of hardcoded provider-username map, supporting SSH and HTTPS with auth method retry
 
 ## [0.7.0] - 2026-03-09
 

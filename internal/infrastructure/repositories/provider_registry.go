@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	domainRepos "github.com/rios0rios0/autoupdate/internal/domain/repositories"
-	gitforgeEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
+	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
 	registryInfra "github.com/rios0rios0/gitforge/pkg/registry/infrastructure"
 )
 
@@ -26,7 +26,7 @@ func NewProviderRegistry() *ProviderRegistry {
 // Register adds a FileAccessProvider factory under the given name.
 // This wraps the factory into gitforge's ForgeProvider-based registration.
 func (r *ProviderRegistry) Register(name string, factory ProviderFactory) {
-	r.RegisterFactory(name, func(token string) gitforgeEntities.ForgeProvider {
+	r.RegisterFactory(name, func(token string) globalEntities.ForgeProvider {
 		return factory(token)
 	})
 }
@@ -42,4 +42,42 @@ func (r *ProviderRegistry) Get(name, token string) (domainRepos.ProviderReposito
 		return nil, fmt.Errorf("provider %q does not implement FileAccessProvider", name)
 	}
 	return fp, nil
+}
+
+// GetAdapterByURL returns the LocalGitAuthProvider adapter matching the given
+// remote URL, or nil if no registered adapter matches.
+func (r *ProviderRegistry) GetAdapterByURL(url string) globalEntities.LocalGitAuthProvider {
+	adapter := r.ProviderRegistry.GetAdapterByURL(url)
+	if adapter == nil {
+		return nil
+	}
+	lgap, ok := adapter.(globalEntities.LocalGitAuthProvider)
+	if !ok {
+		return nil
+	}
+	return lgap
+}
+
+// GetAdapterByServiceType returns the LocalGitAuthProvider adapter for the
+// given service type, or nil if none is registered.
+func (r *ProviderRegistry) GetAdapterByServiceType(
+	serviceType globalEntities.ServiceType,
+) globalEntities.LocalGitAuthProvider {
+	return r.ProviderRegistry.GetAdapterByServiceType(serviceType)
+}
+
+// GetAuthProvider creates a token-enabled provider instance and returns it
+// as a LocalGitAuthProvider for transport authentication.
+func (r *ProviderRegistry) GetAuthProvider(
+	name, token string,
+) (globalEntities.LocalGitAuthProvider, error) {
+	provider, err := r.ProviderRegistry.Get(name, token)
+	if err != nil {
+		return nil, err
+	}
+	lgap, ok := provider.(globalEntities.LocalGitAuthProvider)
+	if !ok {
+		return nil, fmt.Errorf("provider %q does not implement LocalGitAuthProvider", name)
+	}
+	return lgap, nil
 }
