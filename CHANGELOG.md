@@ -16,6 +16,18 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added GPG and SSH commit signing support in local mode (reads from git config `commit.gpgsign` and `gpg.format`)
+- added SSH push support in local mode (auto-detected from remote URL)
+
+### Changed
+
+- changed local mode push to use gitforge's adapter pattern instead of hardcoded provider-username map, supporting SSH and HTTPS with auth method retry
+- changed commit signing resolution to use gitforge's shared `ResolveSignerFromGitConfig()`, eliminating cross-CLI duplication
+- changed push transport detection and auth retry to use gitforge's shared `PushWithTransportDetection()`, eliminating cross-CLI duplication
+- changed `serviceTypeToProviderName()` to use gitforge's shared `ServiceTypeToProviderName()`, eliminating cross-CLI duplication
+
 ## [0.7.0] - 2026-03-09
 
 ### Added

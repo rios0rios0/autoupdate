@@ -18,6 +18,11 @@ func RegisterProviders(container *dig.Container) error {
 	// Register provider registry using gitforge's factory registration
 	if err := container.Provide(func() *ProviderRegistry {
 		reg := NewProviderRegistry()
+		// Register token-less adapters for URL/service-type matching (used by push auth)
+		reg.RegisterAdapter(github.NewProvider(""))
+		reg.RegisterAdapter(gitlab.NewProvider(""))
+		reg.RegisterAdapter(azuredevops.NewProvider(""))
+		// Register factories for creating token-bound provider instances
 		reg.RegisterFactory("github", github.NewProvider)
 		reg.RegisterFactory("gitlab", gitlab.NewProvider)
 		reg.RegisterFactory("azuredevops", azuredevops.NewProvider)

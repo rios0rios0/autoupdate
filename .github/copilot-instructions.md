@@ -154,6 +154,18 @@ autoupdate/
 - Token resolution: inline values, `${ENV_VAR}` expansion, file paths
 - Updaters can be enabled/disabled with per-updater `auto_complete` and `target_branch`
 
+### Commit Signing
+When `commit.gpgsign=true` is set in git config (local or global), commits are automatically signed:
+- **SSH signing**: detected when `gpg.format=ssh`; reads the signing key path from `user.signingkey`
+- **GPG signing**: default when `gpg.format` is unset or `openpgp`; reads the GPG key ID from `user.signingkey` and passphrase from `GPG_PASSPHRASE` environment variable
+- Signing is transport-agnostic (embedded in the commit object) and works with both SSH and HTTPS push
+
+### Push Transport (Local Mode)
+Push transport is auto-detected from the origin remote URL:
+- **SSH** (`git@...`): Uses system SSH keys via gitforge's `PushChangesSSH`
+- **HTTPS** (`https://...`): Uses gitforge's adapter pattern with auth method retry
+- The `PushAuthResolver` interface in `gitlocal/` abstracts the `ProviderRegistry` to avoid import cycles between `gitlocal` and the parent `repositories` package
+
 ### Provider Support
 All Git provider implementations come from the `github.com/rios0rios0/gitforge` library:
 - **GitHub**: via `gitforge/pkg/providers/infrastructure/github`
