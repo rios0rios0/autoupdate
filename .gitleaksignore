@@ -8,6 +8,10 @@ internal/infrastructure/repositories/python/local.go:Password in URL:296
 internal/infrastructure/repositories/python/local.go:Password in URL:300
 internal/infrastructure/repositories/python/python_updater_repository.go:Password in URL:494
 internal/infrastructure/repositories/python/python_updater_repository.go:Password in URL:498
+internal/infrastructure/repositories/javascript/local.go:Password in URL:312
+internal/infrastructure/repositories/javascript/local.go:Password in URL:316
+internal/infrastructure/repositories/python/local.go:Password in URL:297
+internal/infrastructure/repositories/python/local.go:Password in URL:301
 infrastructure/provider/github/github.go:Password in URL:366
 infrastructure/provider/github/github_test.go:Password in URL:124
 infrastructure/provider/gitlab/gitlab.go:Password in URL:386
