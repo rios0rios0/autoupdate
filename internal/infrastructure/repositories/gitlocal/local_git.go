@@ -138,7 +138,8 @@ func (c *LocalGitContext) StageCommitAndPush(
 
 	userConfig, err := gitops.ReadUserConfig(c.repo)
 	if err != nil {
-		return false, fmt.Errorf("failed to read git user config: %w", err)
+		logger.Warnf("Could not read git user config, using defaults: %v", err)
+		userConfig = &gitops.UserConfig{}
 	}
 
 	name := userConfig.Name
@@ -157,7 +158,8 @@ func (c *LocalGitContext) StageCommitAndPush(
 
 	globalCfg, err := gitHelpers.GetGlobalGitConfig()
 	if err != nil {
-		return false, fmt.Errorf("failed to read global git config: %w", err)
+		logger.Warnf("Could not read global git config, using local only: %v", err)
+		globalCfg = config.NewConfig()
 	}
 
 	gpgSign := gitHelpers.GetOptionFromConfig(localCfg, globalCfg, "commit", "gpgsign")
