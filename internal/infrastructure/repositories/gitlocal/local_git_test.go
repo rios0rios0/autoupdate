@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,7 +27,7 @@ func TestNewLocalGitContext(t *testing.T) {
 		repoDir := createTestRepoWithCommit(t)
 
 		// when
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 
 		// then
 		require.NoError(t, err)
@@ -40,7 +41,7 @@ func TestNewLocalGitContext(t *testing.T) {
 		tmpDir := t.TempDir()
 
 		// when
-		ctx, err := gitlocal.NewLocalGitContext(tmpDir)
+		ctx, err := gitlocal.NewLocalGitContext(tmpDir, nil)
 
 		// then
 		require.Error(t, err)
@@ -57,7 +58,7 @@ func TestEnsureClean(t *testing.T) {
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
@@ -73,7 +74,7 @@ func TestEnsureClean(t *testing.T) {
 		// given
 		repoDir := createTestRepoWithCommit(t)
 		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "dirty.txt"), []byte("dirty"), 0o600))
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
@@ -93,7 +94,7 @@ func TestCreateBranch(t *testing.T) {
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
@@ -117,7 +118,7 @@ func TestHasChanges(t *testing.T) {
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
@@ -134,7 +135,7 @@ func TestHasChanges(t *testing.T) {
 		// given
 		repoDir := createTestRepoWithCommit(t)
 		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "new.txt"), []byte("new"), 0o600))
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
@@ -154,11 +155,11 @@ func TestStageCommitAndPush(t *testing.T) {
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
-		pushed, err := ctx.StageCommitAndPush("main", "test commit", "github", "fake-token")
+		pushed, err := ctx.StageCommitAndPush("main", "test commit", "fake-token")
 
 		// then
 		require.NoError(t, err)
@@ -170,7 +171,7 @@ func TestStageCommitAndPush(t *testing.T) {
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 		require.NoError(t, ctx.CreateBranch("chore/test-branch"))
 		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "update.txt"), []byte("data"), 0o600))
@@ -179,7 +180,7 @@ func TestStageCommitAndPush(t *testing.T) {
 		// Push will fail because there is no remote, but we verify
 		// that staging and committing succeed by checking the error
 		// message references the push step, not stage/commit.
-		_, err = ctx.StageCommitAndPush("chore/test-branch", "chore(deps): test commit", "github", "fake-token")
+		_, err = ctx.StageCommitAndPush("chore/test-branch", "chore(deps): test commit", "fake-token")
 
 		// then
 		require.Error(t, err)
@@ -195,26 +196,43 @@ func TestStageCommitAndPush(t *testing.T) {
 		assert.Contains(t, commit.Message, "chore(deps): test commit")
 	})
 
-	t.Run("should return error for unsupported provider", func(t *testing.T) {
+	t.Run("should return error when HTTPS push has nil resolver", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		repoDir := createTestRepoWithCommit(t)
-		ctx, err := gitlocal.NewLocalGitContext(repoDir)
+		repoDir := createTestRepoWithHTTPSRemote(t)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 		require.NoError(t, ctx.CreateBranch("chore/test-branch"))
 		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("x"), 0o600))
 
 		// when
-		_, err = ctx.StageCommitAndPush("chore/test-branch", "msg", "bitbucket", "token")
+		_, err = ctx.StageCommitAndPush("chore/test-branch", "msg", "token")
 
 		// then
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unsupported provider")
+		assert.Contains(t, err.Error(), "no authentication methods provided for HTTPS push")
 	})
 }
 
 // --- test helpers ---
+
+func createTestRepoWithHTTPSRemote(t *testing.T) string {
+	t.Helper()
+
+	repoDir := createTestRepoWithCommit(t)
+
+	repo, err := git.PlainOpen(repoDir)
+	require.NoError(t, err)
+
+	_, err = repo.CreateRemote(&gitconfig.RemoteConfig{
+		Name: "origin",
+		URLs: []string{"https://github.com/test/test-repo.git"},
+	})
+	require.NoError(t, err)
+
+	return repoDir
+}
 
 func createTestRepoWithCommit(t *testing.T) string {
 	t.Helper()
@@ -231,6 +249,7 @@ func createTestRepoWithCommit(t *testing.T) string {
 	require.NoError(t, err)
 	cfg.User.Name = "test"
 	cfg.User.Email = "test@test.com"
+	cfg.Raw.Section("commit").SetOption("gpgsign", "false")
 	require.NoError(t, repo.SetConfig(cfg))
 
 	wt, err := repo.Worktree()
