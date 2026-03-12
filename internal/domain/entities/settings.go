@@ -4,9 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
-
-	logger "github.com/sirupsen/logrus"
 
 	configEntities "github.com/rios0rios0/gitforge/pkg/config/domain/entities"
 	"gopkg.in/yaml.v3"
@@ -52,12 +49,12 @@ func NewSettings(path string) (*Settings, error) {
 		settings.Providers[i].Token = settings.Providers[i].ResolveToken()
 	}
 
-	// Resolve global token fields — supports inline values, env var expansion,
-	// and file path resolution (mirrors autobump's ReadConfig).
-	handleTokenFile("GPG passphrase", &settings.GpgKeyPassphrase)
-	handleTokenFile("GitHub access token", &settings.GitHubAccessToken)
-	handleTokenFile("GitLab access token", &settings.GitLabAccessToken)
-	handleTokenFile("Azure DevOps access token", &settings.AzureDevOpsAccessToken)
+	// Resolve global token fields using the same ${ENV_VAR} expansion and
+	// file path resolution as provider tokens (via gitforge's ResolveToken).
+	settings.GpgKeyPassphrase = configEntities.ResolveToken(settings.GpgKeyPassphrase)
+	settings.GitHubAccessToken = configEntities.ResolveToken(settings.GitHubAccessToken)
+	settings.GitLabAccessToken = configEntities.ResolveToken(settings.GitLabAccessToken)
+	settings.AzureDevOpsAccessToken = configEntities.ResolveToken(settings.AzureDevOpsAccessToken)
 
 	settings.GitLabCIJobToken = os.Getenv("CI_JOB_TOKEN")
 
@@ -97,22 +94,4 @@ func ValidateSettings(settings *Settings) error {
 	}
 
 	return nil
-}
-
-// handleTokenFile reads the token from a file if the value points to an existing
-// file path, replacing the token string with the file content. This allows
-// configuration values to be stored as file references for security.
-func handleTokenFile(name string, token *string) {
-	if *token == "" {
-		return
-	}
-	if _, err := os.Stat(*token); !os.IsNotExist(err) {
-		logger.Infof("Reading %s from file...", name)
-		fileToken, readErr := os.ReadFile(*token)
-		if readErr != nil {
-			logger.Errorf("failed to read %s from file: %v", name, readErr)
-		} else {
-			*token = strings.TrimSpace(string(fileToken))
-		}
-	}
 }

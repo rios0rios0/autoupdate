@@ -262,6 +262,9 @@ func (it *RunCommand) runLocalUpdater(
 	if err != nil {
 		logger.Errorf("[%s] Failed to apply updates to %s/%s: %v",
 			name, repo.Organization, repo.Name, err)
+		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
+			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
+		}
 		return nil, 1
 	}
 
@@ -277,8 +280,8 @@ func (it *RunCommand) runLocalUpdater(
 	}
 	if exists {
 		logger.Infof("[%s] PR already exists for branch %q, skipping", name, result.BranchName)
-		if switchErr := batchCtx.SwitchToDefault(); switchErr != nil {
-			logger.Warnf("[%s] Failed to switch back to default branch: %v", name, switchErr)
+		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
+			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
 		}
 		return nil, 0
 	}
@@ -286,26 +289,28 @@ func (it *RunCommand) runLocalUpdater(
 	// Create branch, commit, and push
 	if branchErr := batchCtx.CreateBranchFromDefault(result.BranchName); branchErr != nil {
 		logger.Errorf("[%s] Failed to create branch %s: %v", name, result.BranchName, branchErr)
+		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
+			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
+		}
 		return nil, 1
 	}
 
-	// Re-apply updates on the new branch (files were modified on the previous branch state)
-	// Actually, ApplyUpdates was called while on the default branch, so changes are in
+	// ApplyUpdates was called while on the default branch, so changes are in
 	// the working tree. The branch switch doesn't discard uncommitted changes.
 	pushed, pushErr := batchCtx.CommitSignedAndPush(result.BranchName, result.CommitMessage, settings, authMethods)
 	if pushErr != nil {
 		logger.Errorf("[%s] Failed to commit/push for %s/%s: %v",
 			name, repo.Organization, repo.Name, pushErr)
-		if switchErr := batchCtx.SwitchToDefault(); switchErr != nil {
-			logger.Warnf("[%s] Failed to switch back to default branch: %v", name, switchErr)
+		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
+			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
 		}
 		return nil, 1
 	}
 
 	if !pushed {
 		logger.Infof("[%s] %s/%s: no changes after apply", name, repo.Organization, repo.Name)
-		if switchErr := batchCtx.SwitchToDefault(); switchErr != nil {
-			logger.Warnf("[%s] Failed to switch back to default branch: %v", name, switchErr)
+		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
+			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
 		}
 		return nil, 0
 	}
@@ -326,8 +331,8 @@ func (it *RunCommand) runLocalUpdater(
 	if createErr != nil {
 		logger.Errorf("[%s] Failed to create PR for %s/%s: %v",
 			name, repo.Organization, repo.Name, createErr)
-		if switchErr := batchCtx.SwitchToDefault(); switchErr != nil {
-			logger.Warnf("[%s] Failed to switch back to default branch: %v", name, switchErr)
+		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
+			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
 		}
 		return nil, 1
 	}
