@@ -16,6 +16,16 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- changed token resolution to use gitforge's shared `ResolveTokenFromEnv()` and `TokenEnvHint()`, eliminating duplicated env var mapping logic
+- changed version fetchers to use langforge's shared `pkg/infrastructure/versions` package, eliminating duplicated HTTP fetch logic
+- changed remote file checker to use langforge's shared `fileutil.NewFileChecker()`, `IsGlobPattern()`, and `ExtractExtension()` utilities
+
+### Removed
+
+- removed `internal/infrastructure/repositories/versions/` package (moved to langforge)
+
 ## [0.8.0] - 2026-03-12
 
 ### Added

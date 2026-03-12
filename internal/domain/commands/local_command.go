@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
+	configHelpers "github.com/rios0rios0/gitforge/pkg/config/domain/helpers"
 	gitInfra "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
 	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
 	langEntities "github.com/rios0rios0/langforge/pkg/domain/entities"
@@ -43,6 +43,7 @@ type LocalOptions struct {
 // remoteInfo holds the parsed components of a Git remote URL.
 type remoteInfo struct {
 	ProviderType string
+	ServiceType  globalEntities.ServiceType
 	Org          string
 	Project      string // Azure DevOps only
 	RepoName     string
@@ -108,13 +109,13 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 	// Resolve auth token
 	token := opts.Token
 	if token == "" {
-		token = resolveTokenFromEnv(remote.ProviderType)
+		token = configHelpers.ResolveTokenFromEnv(remote.ServiceType)
 	}
 
 	if !opts.DryRun && token == "" {
 		return fmt.Errorf(
 			"no auth token found for %s; set --token or the appropriate env var (%s)",
-			remote.ProviderType, tokenEnvHint(remote.ProviderType),
+			remote.ProviderType, configHelpers.TokenEnvHint(remote.ServiceType),
 		)
 	}
 
@@ -397,45 +398,11 @@ func parseRemoteURL(rawURL string) (*remoteInfo, error) {
 
 	return &remoteInfo{
 		ProviderType: providerName,
+		ServiceType:  parsed.ServiceType,
 		Org:          parsed.Organization,
 		Project:      parsed.Project,
 		RepoName:     parsed.RepoName,
 	}, nil
-}
-
-func resolveTokenFromEnv(providerType string) string {
-	switch providerType {
-	case providerGitHub:
-		if t := os.Getenv("GITHUB_TOKEN"); t != "" {
-			return t
-		}
-		return os.Getenv("GH_TOKEN")
-	case providerAzureDevOps:
-		if t := os.Getenv("AZURE_DEVOPS_EXT_PAT"); t != "" {
-			return t
-		}
-		return os.Getenv("SYSTEM_ACCESSTOKEN")
-	case providerGitLab:
-		if t := os.Getenv("GITLAB_TOKEN"); t != "" {
-			return t
-		}
-		return os.Getenv("GL_TOKEN")
-	default:
-		return ""
-	}
-}
-
-func tokenEnvHint(providerType string) string {
-	switch providerType {
-	case providerGitHub:
-		return "GITHUB_TOKEN or GH_TOKEN"
-	case providerAzureDevOps:
-		return "AZURE_DEVOPS_EXT_PAT or SYSTEM_ACCESSTOKEN"
-	case providerGitLab:
-		return "GITLAB_TOKEN or GL_TOKEN"
-	default:
-		return "<unknown provider>"
-	}
 }
 
 func detectDefaultBranch(ctx context.Context, repoDir string) (string, error) {
