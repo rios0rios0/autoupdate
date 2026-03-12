@@ -83,12 +83,23 @@ func (c *BatchGitContext) CreateBranchFromDefault(branchName string) error {
 	return gitops.CreateAndSwitchBranch(c.repo, c.workTree, branchName, head.Hash())
 }
 
-// SwitchToDefault switches back to the default branch. This is used between
-// updaters to ensure each updater starts from a clean default branch.
+// SwitchToDefault switches back to the default branch. This is used after
+// a successful commit+push where the worktree is already clean.
 func (c *BatchGitContext) SwitchToDefault() error {
 	return c.workTree.Checkout(&git.CheckoutOptions{
 		Branch: plumbing.NewBranchReferenceName(c.defaultBranch),
 	})
+}
+
+// ResetToDefault discards all uncommitted changes (hard reset) and switches
+// back to the default branch. This ensures the next updater starts from a
+// clean worktree, even if the previous updater failed mid-way through
+// modifying files.
+func (c *BatchGitContext) ResetToDefault() error {
+	if err := c.workTree.Reset(&git.ResetOptions{Mode: git.HardReset}); err != nil {
+		return fmt.Errorf("failed to hard-reset worktree: %w", err)
+	}
+	return c.SwitchToDefault()
 }
 
 // HasChanges returns true when the working tree has unstaged or untracked

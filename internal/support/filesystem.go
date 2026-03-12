@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	logger "github.com/sirupsen/logrus"
+
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 )
 
 // WalkFilesByExtension finds all files under root whose names end with ext.
-// Returns paths relative to root.
+// Returns paths relative to root, normalized to forward slashes.
 func WalkFilesByExtension(root, ext string) ([]string, error) {
 	var matches []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -30,7 +32,7 @@ func WalkFilesByExtension(root, ext string) ([]string, error) {
 			if relErr != nil {
 				return relErr
 			}
-			matches = append(matches, rel)
+			matches = append(matches, filepath.ToSlash(rel))
 		}
 		return nil
 	})
@@ -38,7 +40,7 @@ func WalkFilesByExtension(root, ext string) ([]string, error) {
 }
 
 // WalkFilesByPredicate finds all files under root where match(baseName)
-// returns true. Returns paths relative to root.
+// returns true. Returns paths relative to root, normalized to forward slashes.
 func WalkFilesByPredicate(root string, match func(name string) bool) ([]string, error) {
 	var matches []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -56,7 +58,7 @@ func WalkFilesByPredicate(root string, match func(name string) bool) ([]string, 
 			if relErr != nil {
 				return relErr
 			}
-			matches = append(matches, rel)
+			matches = append(matches, filepath.ToSlash(rel))
 		}
 		return nil
 	})
@@ -67,6 +69,10 @@ func WalkFilesByPredicate(root string, match func(name string) bool) ([]string, 
 func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 	for _, c := range changes {
 		fullPath := filepath.Join(rootDir, c.Path)
+		dir := filepath.Dir(fullPath)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("failed to create directory for %s: %w", c.Path, err)
+		}
 		if err := os.WriteFile(fullPath, []byte(c.Content), 0o644); err != nil {
 			return fmt.Errorf("failed to write %s: %w", c.Path, err)
 		}
@@ -80,6 +86,7 @@ func LocalChangelogUpdate(repoDir string, entries []string) bool {
 	changelogPath := filepath.Join(repoDir, "CHANGELOG.md")
 	data, err := os.ReadFile(changelogPath)
 	if err != nil {
+		logger.Warnf("Failed to read CHANGELOG.md: %v", err)
 		return false
 	}
 
@@ -90,6 +97,7 @@ func LocalChangelogUpdate(repoDir string, entries []string) bool {
 	}
 
 	if writeErr := os.WriteFile(changelogPath, []byte(modified), 0o644); writeErr != nil {
+		logger.Warnf("Failed to write CHANGELOG.md: %v", writeErr)
 		return false
 	}
 	return true
