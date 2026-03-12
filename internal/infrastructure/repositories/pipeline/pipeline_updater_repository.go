@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -111,6 +113,98 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 	}
 
 	return createUpgradePR(ctx, provider, repo, opts, upgrades, fileContents)
+}
+
+// ApplyUpdates implements repositories.LocalUpdater for the clone-based pipeline.
+// It scans the local filesystem for pipeline version references, fetches latest
+// versions via HTTP, writes changes to disk, and returns PR metadata.
+func (u *UpdaterRepository) ApplyUpdates(
+	ctx context.Context,
+	repoDir string,
+	_ repositories.ProviderRepository,
+	repo entities.Repository,
+	_ entities.UpdateOptions,
+) (*repositories.LocalUpdateResult, error) {
+	logger.Infof("[pipeline] Scanning local clone of %s/%s for pipeline version references",
+		repo.Organization, repo.Name)
+
+	latestVersions := fetchAllLatestVersions(ctx)
+	if len(latestVersions) == 0 {
+		logger.Warnf("[pipeline] Could not fetch any latest versions, skipping")
+		return nil, nil
+	}
+
+	upgrades, fileContents := localScanAndDetermineUpgrades(repoDir, latestVersions)
+	if len(upgrades) == 0 {
+		return nil, nil
+	}
+
+	logger.Infof("[pipeline] %s/%s: found %d version(s) to upgrade (local)",
+		repo.Organization, repo.Name, len(upgrades))
+
+	fileChanges := applyUpgrades(upgrades, fileContents)
+	if err := support.WriteFileChanges(repoDir, fileChanges); err != nil {
+		return nil, err
+	}
+
+	entries := make([]string, 0, len(upgrades))
+	for _, up := range upgrades {
+		entries = append(entries, fmt.Sprintf(
+			"- changed the %s pipeline version from %s to %s",
+			up.match.Language, up.match.CurrentVer, up.newVersion,
+		))
+	}
+	support.LocalChangelogUpdate(repoDir, entries)
+
+	return &repositories.LocalUpdateResult{
+		BranchName:    generateBranchName(upgrades),
+		CommitMessage: generateCommitMessage(upgrades),
+		PRTitle:       generatePRTitle(upgrades),
+		PRDescription: generatePRDescription(upgrades),
+	}, nil
+}
+
+// localScanAndDetermineUpgrades walks the local filesystem for YAML files,
+// scans them for version references, and returns upgrade tasks plus file contents.
+func localScanAndDetermineUpgrades(
+	repoDir string,
+	latestVersions map[string]string,
+) ([]upgradeTask, map[string]string) {
+	fileContents := make(map[string]string)
+	var upgrades []upgradeTask
+
+	yamlFiles, err := support.WalkFilesByExtension(repoDir, ".yaml")
+	if err != nil {
+		logger.Warnf("[pipeline] Failed to walk .yaml files: %v", err)
+	}
+	ymlFiles, ymlErr := support.WalkFilesByExtension(repoDir, ".yml")
+	if ymlErr != nil {
+		logger.Warnf("[pipeline] Failed to walk .yml files: %v", ymlErr)
+	}
+	allFiles := append(yamlFiles, ymlFiles...)
+
+	for _, relPath := range allFiles {
+		ci := classifyFile(relPath)
+		if ci == "" {
+			continue
+		}
+
+		data, readErr := os.ReadFile(filepath.Join(repoDir, relPath))
+		if readErr != nil {
+			logger.Warnf("[pipeline] Failed to read %s: %v", relPath, readErr)
+			continue
+		}
+		content := string(data)
+
+		fileUpgrades := findUpgradesInFile(content, relPath, ci, latestVersions)
+		upgrades = append(upgrades, fileUpgrades...)
+
+		if len(fileUpgrades) > 0 {
+			fileContents[relPath] = content
+		}
+	}
+
+	return upgrades, fileContents
 }
 
 // --- version fetching ---

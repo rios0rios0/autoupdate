@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
+
+	logger "github.com/sirupsen/logrus"
 
 	configEntities "github.com/rios0rios0/gitforge/pkg/config/domain/entities"
 	"gopkg.in/yaml.v3"
@@ -14,8 +17,14 @@ type ProviderConfig = configEntities.ProviderConfig
 
 // Settings is the top-level configuration for autoupdate, loaded from YAML.
 type Settings struct {
-	Providers []ProviderConfig         `yaml:"providers"`
-	Updaters  map[string]UpdaterConfig `yaml:"updaters"`
+	Providers              []ProviderConfig         `yaml:"providers"`
+	Updaters               map[string]UpdaterConfig `yaml:"updaters"`
+	GpgKeyPath             string                   `yaml:"gpg_key_path"`
+	GpgKeyPassphrase       string                   `yaml:"gpg_key_passphrase"`
+	GitHubAccessToken      string                   `yaml:"github_access_token"`
+	GitLabAccessToken      string                   `yaml:"gitlab_access_token"`
+	AzureDevOpsAccessToken string                   `yaml:"azure_devops_access_token"`
+	GitLabCIJobToken       string                   `yaml:"-"`
 }
 
 // UpdaterConfig holds per-updater settings.
@@ -41,6 +50,19 @@ func NewSettings(path string) (*Settings, error) {
 	// Resolve tokens (env vars and file paths)
 	for i := range settings.Providers {
 		settings.Providers[i].Token = settings.Providers[i].ResolveToken()
+	}
+
+	// Resolve global token fields — supports inline values, env var expansion,
+	// and file path resolution (mirrors autobump's ReadConfig).
+	handleTokenFile("GPG passphrase", &settings.GpgKeyPassphrase)
+	handleTokenFile("GitHub access token", &settings.GitHubAccessToken)
+	handleTokenFile("GitLab access token", &settings.GitLabAccessToken)
+	handleTokenFile("Azure DevOps access token", &settings.AzureDevOpsAccessToken)
+
+	settings.GitLabCIJobToken = os.Getenv("CI_JOB_TOKEN")
+
+	if settings.GpgKeyPassphrase == "" {
+		settings.GpgKeyPassphrase = os.Getenv("GPG_PASSPHRASE")
 	}
 
 	if validateErr := ValidateSettings(&settings); validateErr != nil {
@@ -75,4 +97,22 @@ func ValidateSettings(settings *Settings) error {
 	}
 
 	return nil
+}
+
+// handleTokenFile reads the token from a file if the value points to an existing
+// file path, replacing the token string with the file content. This allows
+// configuration values to be stored as file references for security.
+func handleTokenFile(name string, token *string) {
+	if *token == "" {
+		return
+	}
+	if _, err := os.Stat(*token); !os.IsNotExist(err) {
+		logger.Infof("Reading %s from file...", name)
+		fileToken, readErr := os.ReadFile(*token)
+		if readErr != nil {
+			logger.Errorf("failed to read %s from file: %v", name, readErr)
+		} else {
+			*token = strings.TrimSpace(string(fileToken))
+		}
+	}
 }
