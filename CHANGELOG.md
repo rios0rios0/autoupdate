@@ -27,6 +27,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - changed commit signing resolution to use gitforge's shared `ResolveSignerFromGitConfig()`, eliminating cross-CLI duplication
 - changed push transport detection and auth retry to use gitforge's shared `PushWithTransportDetection()`, eliminating cross-CLI duplication
 - changed `serviceTypeToProviderName()` to use gitforge's shared `ServiceTypeToProviderName()`, eliminating cross-CLI duplication
+- changed the Go version to `1.26.1` and updated all module dependencies
 
 ## [0.7.0] - 2026-03-09
 
