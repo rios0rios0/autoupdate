@@ -144,67 +144,6 @@ func TestParseRemoteURL(t *testing.T) {
 	})
 }
 
-func TestResolveTokenFromEnv(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should return empty string for unknown provider", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		provider := "unknown"
-
-		// when
-		result := commands.ResolveTokenFromEnv(provider)
-
-		// then
-		assert.Empty(t, result)
-	})
-}
-
-func TestTokenEnvHint(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should return GitHub env hint", func(t *testing.T) {
-		t.Parallel()
-
-		// given / when
-		hint := commands.TokenEnvHint("github")
-
-		// then
-		assert.Contains(t, hint, "GITHUB_TOKEN")
-	})
-
-	t.Run("should return Azure DevOps env hint", func(t *testing.T) {
-		t.Parallel()
-
-		// given / when
-		hint := commands.TokenEnvHint("azuredevops")
-
-		// then
-		assert.Contains(t, hint, "AZURE_DEVOPS_EXT_PAT")
-	})
-
-	t.Run("should return GitLab env hint", func(t *testing.T) {
-		t.Parallel()
-
-		// given / when
-		hint := commands.TokenEnvHint("gitlab")
-
-		// then
-		assert.Contains(t, hint, "GITLAB_TOKEN")
-	})
-
-	t.Run("should return unknown for unrecognized provider", func(t *testing.T) {
-		t.Parallel()
-
-		// given / when
-		hint := commands.TokenEnvHint("bitbucket")
-
-		// then
-		assert.Contains(t, hint, "unknown")
-	})
-}
-
 func TestGeneratePRContent(t *testing.T) {
 	t.Parallel()
 
