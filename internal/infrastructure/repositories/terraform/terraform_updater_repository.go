@@ -3,6 +3,8 @@ package terraform
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -104,6 +106,109 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 	}
 
 	return u.createUpgradePR(ctx, provider, repo, opts, upgrades)
+}
+
+// ApplyUpdates implements repositories.LocalUpdater for the clone-based pipeline.
+// It scans the local filesystem for Terraform dependencies, determines upgrades
+// using the provider API for tag resolution, writes changes to disk, and returns
+// the PR metadata.
+func (u *UpdaterRepository) ApplyUpdates(
+	ctx context.Context,
+	repoDir string,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+	opts entities.UpdateOptions,
+) (*repositories.LocalUpdateResult, error) {
+	logger.Infof("[terraform] Scanning local clone of %s/%s for Terraform dependencies",
+		repo.Organization, repo.Name)
+
+	allDeps := u.localScanAllDependencies(repoDir)
+	if len(allDeps) == 0 {
+		return nil, nil
+	}
+
+	upgrades := u.determineUpgrades(ctx, provider, repo, allDeps)
+	if len(upgrades) == 0 {
+		return nil, nil
+	}
+
+	logger.Infof("[terraform] %s/%s: found %d dependencies to upgrade (local)",
+		repo.Organization, repo.Name, len(upgrades))
+
+	fileChanges := applyUpgrades(upgrades)
+	if err := support.WriteFileChanges(repoDir, fileChanges); err != nil {
+		return nil, err
+	}
+
+	entries := make([]string, 0, len(upgrades))
+	for _, up := range upgrades {
+		label := "Terraform module"
+		if up.kind == depKindImage {
+			label = "container image"
+		}
+		entries = append(entries, fmt.Sprintf(
+			"- changed the %s %s from %s to %s",
+			label, extractRepoName(up.dep.Source), up.dep.CurrentVer, up.newVersion,
+		))
+	}
+	support.LocalChangelogUpdate(repoDir, entries)
+
+	return &repositories.LocalUpdateResult{
+		BranchName:    generateBranchName(upgrades),
+		CommitMessage: generateCommitMessage(upgrades),
+		PRTitle:       generatePRTitle(upgrades),
+		PRDescription: generatePRDescription(upgrades),
+	}, nil
+}
+
+// localScanAllDependencies walks the local filesystem for .tf and .hcl files
+// and parses them for module and container image dependencies.
+func (u *UpdaterRepository) localScanAllDependencies(repoDir string) []depWithContent {
+	var allDeps []depWithContent
+
+	tfFiles, err := support.WalkFilesByExtension(repoDir, ".tf")
+	if err != nil {
+		logger.Warnf("[terraform] Failed to walk .tf files: %v", err)
+	}
+	for _, relPath := range tfFiles {
+		data, readErr := os.ReadFile(filepath.Join(repoDir, relPath))
+		if readErr != nil {
+			logger.Warnf("[terraform] Failed to read %s: %v", relPath, readErr)
+			continue
+		}
+		content := string(data)
+		deps := scanTerraformFile(content, relPath)
+		for _, dep := range deps {
+			allDeps = append(allDeps, depWithContent{
+				Dependency:  dep,
+				FileContent: content,
+				Kind:        depKindModule,
+			})
+		}
+	}
+
+	hclFiles, hclErr := support.WalkFilesByExtension(repoDir, ".hcl")
+	if hclErr != nil {
+		logger.Warnf("[terraform] Failed to walk .hcl files: %v", hclErr)
+	}
+	for _, relPath := range hclFiles {
+		data, readErr := os.ReadFile(filepath.Join(repoDir, relPath))
+		if readErr != nil {
+			logger.Warnf("[terraform] Failed to read %s: %v", relPath, readErr)
+			continue
+		}
+		content := string(data)
+		deps := scanHCLFile(content, relPath)
+		for _, dep := range deps {
+			allDeps = append(allDeps, depWithContent{
+				Dependency:  dep,
+				FileContent: content,
+				Kind:        depKindImage,
+			})
+		}
+	}
+
+	return allDeps
 }
 
 // scanAllDependencies lists .tf and .hcl files and parses them for

@@ -206,6 +206,88 @@ func openPullRequest(
 	return []entities.PullRequest{*pr}, nil
 }
 
+// ApplyUpdates implements repositories.LocalUpdater. It runs language-specific
+// JavaScript upgrade operations on a locally cloned repository, without
+// performing any git clone, branch, commit, or push operations.
+func (u *UpdaterRepository) ApplyUpdates(
+	ctx context.Context,
+	repoDir string,
+	_ repositories.ProviderRepository,
+	repo entities.Repository,
+	_ entities.UpdateOptions,
+) (*repositories.LocalUpdateResult, error) {
+	logger.Infof("[javascript] Processing local clone of %s/%s", repo.Organization, repo.Name)
+
+	// resolveLocalVersionContext (from local.go) handles fetching + comparison
+	vCtx := resolveLocalVersionContext(ctx, repoDir)
+	pkgMgr := detectLocalPackageManager(repoDir)
+
+	script := buildBatchJSScript()
+	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
+	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
+		return nil, fmt.Errorf("failed to write script: %w", writeErr)
+	}
+	defer func() { _ = os.Remove(scriptPath) }()
+
+	cmd := exec.CommandContext(ctx, "bash", scriptPath)
+	cmd.Dir = repoDir
+	env := append(os.Environ(), "PACKAGE_MANAGER="+pkgMgr)
+	if vCtx.LatestVersion != "" {
+		env = append(env, "NODE_VERSION="+vCtx.LatestVersion)
+	}
+	cmd.Env = env
+
+	output, cmdErr := cmd.CombinedOutput()
+	if cmdErr != nil {
+		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, string(output))
+	}
+
+	nodeVersionUpdated := strings.Contains(string(output), "NODE_VERSION_UPDATED=true")
+
+	// Update CHANGELOG locally
+	var entry string
+	if nodeVersionUpdated {
+		entry = fmt.Sprintf(
+			"- changed the Node.js version to `%s` and updated all JavaScript dependencies",
+			vCtx.LatestVersion,
+		)
+	} else {
+		entry = "- changed the JavaScript dependencies to their latest versions"
+	}
+	support.LocalChangelogUpdate(repoDir, []string{entry})
+
+	commitMsg := "chore(deps): updated JavaScript dependencies"
+	prTitle := commitMsg
+	if nodeVersionUpdated {
+		commitMsg = fmt.Sprintf(
+			"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
+			vCtx.LatestVersion,
+		)
+		prTitle = commitMsg
+	}
+
+	return &repositories.LocalUpdateResult{
+		BranchName:    vCtx.BranchName,
+		CommitMessage: commitMsg,
+		PRTitle:       prTitle,
+		PRDescription: GeneratePRDescription(vCtx.LatestVersion, pkgMgr, nodeVersionUpdated),
+	}, nil
+}
+
+// buildBatchJSScript generates a bash script with only language-specific
+// operations (no git clone, branch, commit, or push) for the batch pipeline.
+func buildBatchJSScript() string {
+	var sb strings.Builder
+
+	sb.WriteString("#!/bin/bash\n")
+	sb.WriteString("set -euo pipefail\n\n")
+
+	writeJSUpgradeCommands(&sb, upgradeParams{})
+	writeDockerfileUpdate(&sb)
+
+	return sb.String()
+}
+
 // --- internal types ---
 
 type versionContext struct {
