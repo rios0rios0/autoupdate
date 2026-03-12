@@ -3,12 +3,6 @@ package commands
 // ParseRemoteURL exports parseRemoteURL for testing.
 var ParseRemoteURL = parseRemoteURL //nolint:gochecknoglobals // test export
 
-// ResolveTokenFromEnv exports resolveTokenFromEnv for testing.
-var ResolveTokenFromEnv = resolveTokenFromEnv //nolint:gochecknoglobals // test export
-
-// TokenEnvHint exports tokenEnvHint for testing.
-var TokenEnvHint = tokenEnvHint //nolint:gochecknoglobals // test export
-
 // RemoteInfo exports remoteInfo for testing.
 type RemoteInfo = remoteInfo
 

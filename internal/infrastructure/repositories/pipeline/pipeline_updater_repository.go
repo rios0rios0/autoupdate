@@ -11,9 +11,9 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
-	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/versions"
 	"github.com/rios0rios0/autoupdate/internal/support"
 	langPipeline "github.com/rios0rios0/langforge/pkg/infrastructure/languages/pipeline"
+	langVersions "github.com/rios0rios0/langforge/pkg/infrastructure/versions"
 )
 
 const (
@@ -134,13 +134,13 @@ func fetchAllLatestVersions(ctx context.Context) map[string]string {
 }
 
 // languageFetchers returns the map of language name to version fetcher.
-func languageFetchers() map[string]versions.VersionFetcher {
-	return map[string]versions.VersionFetcher{
-		"golang":    versions.FetchLatestGoVersion,
-		"python":    versions.FetchLatestPythonVersion,
-		"nodejs":    versions.FetchLatestNodeVersion,
-		"java":      versions.FetchLatestJavaVersion,
-		"terraform": versions.FetchLatestTerraformVersion,
+func languageFetchers() map[string]langVersions.VersionFetcher {
+	return map[string]langVersions.VersionFetcher{
+		"golang":    langVersions.FetchLatestGoVersion,
+		"python":    langVersions.FetchLatestPythonVersion,
+		"nodejs":    langVersions.FetchLatestNodeVersion,
+		"java":      langVersions.FetchLatestJavaVersion,
+		"terraform": langVersions.FetchLatestTerraformVersion,
 	}
 }
 
