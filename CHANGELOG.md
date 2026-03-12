@@ -25,6 +25,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Changed
 
+- changed `serviceTypeToProviderName()` to use gitforge's shared `ServiceTypeToProviderName()`, eliminating cross-CLI duplication
+- changed commit signing resolution to use gitforge's shared `ResolveSignerFromGitConfig()`, eliminating cross-CLI duplication
 - changed local mode push to use gitforge's adapter pattern instead of hardcoded provider-username map, supporting SSH and HTTPS with auth method retry
 - changed push transport detection and auth retry to use gitforge's shared `PushWithTransportDetection()`, eliminating cross-CLI duplication
 - changed the Go version to `1.26.1` and updated all module dependencies
