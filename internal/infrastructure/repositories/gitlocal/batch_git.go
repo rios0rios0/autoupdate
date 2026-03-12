@@ -45,13 +45,13 @@ func CloneRepository(
 
 	repo, err := gitOps.CloneRepo(cloneURL, tmpDir, authMethods)
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("failed to clone %s: %w", cloneURL, err)
 	}
 
 	wt, err := repo.Worktree()
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("failed to get worktree: %w", err)
 	}
 
@@ -201,6 +201,6 @@ func (c *BatchGitContext) CommitSignedAndPush(
 // Close removes the temporary directory created during cloning.
 func (c *BatchGitContext) Close() {
 	if c.tmpDir != "" {
-		os.RemoveAll(c.tmpDir)
+		_ = os.RemoveAll(c.tmpDir)
 	}
 }

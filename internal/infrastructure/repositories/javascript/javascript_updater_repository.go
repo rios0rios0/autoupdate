@@ -227,7 +227,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
 		return nil, fmt.Errorf("failed to write script: %w", writeErr)
 	}
-	defer os.Remove(scriptPath)
+	defer func() { _ = os.Remove(scriptPath) }()
 
 	cmd := exec.CommandContext(ctx, "bash", scriptPath)
 	cmd.Dir = repoDir
