@@ -16,11 +16,22 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added GPG/SSH commit signing support in batch mode (`run` command) via `BatchGitContext`
+- added multi-token authentication retry for batch mode git push operations
+- added transport auto-detection (SSH vs HTTPS) for batch mode push
+- added `gpg_key_path`, `gpg_key_passphrase`, `github_access_token`, `gitlab_access_token`, and `azure_devops_access_token` configuration fields
+- added `LocalUpdater` interface for updaters that work on locally cloned repositories
+
 ### Changed
 
 - changed token resolution to use gitforge's shared `ResolveTokenFromEnv()` and `TokenEnvHint()`, eliminating duplicated env var mapping logic
 - changed version fetchers to use langforge's shared `pkg/infrastructure/versions` package, eliminating duplicated HTTP fetch logic
 - changed remote file checker to use langforge's shared `fileutil.NewFileChecker()`, `IsGlobPattern()`, and `ExtractExtension()` utilities
+- changed batch mode (`run` command) to use a clone-based pipeline with centralized git operations (clone, branch, commit, push) instead of per-updater git management
+- changed all six updaters (Terraform, Pipeline, Dockerfile, Go, Python, JavaScript) to implement the `LocalUpdater` interface for local filesystem operations in the batch pipeline
+- changed Go, Python, and JavaScript updater batch scripts to contain only language-specific operations (removed git clone, commit, and push from batch bash scripts)
 
 ### Removed
 
