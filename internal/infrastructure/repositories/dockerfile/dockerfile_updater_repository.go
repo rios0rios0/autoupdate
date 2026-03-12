@@ -3,6 +3,8 @@ package dockerfile
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -104,6 +106,79 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 	}
 
 	return createUpgradePR(ctx, provider, repo, opts, upgrades, allRefs)
+}
+
+// ApplyUpdates implements repositories.LocalUpdater for the clone-based pipeline.
+// It scans the local filesystem for Dockerfiles, fetches latest tags from Docker Hub,
+// writes changes to disk, and returns PR metadata.
+func (u *UpdaterRepository) ApplyUpdates(
+	ctx context.Context,
+	repoDir string,
+	_ repositories.ProviderRepository,
+	repo entities.Repository,
+	_ entities.UpdateOptions,
+) (*repositories.LocalUpdateResult, error) {
+	logger.Infof("[dockerfile] Scanning local clone of %s/%s for Dockerfile base images",
+		repo.Organization, repo.Name)
+
+	allRefs := localScanAllDockerfiles(repoDir)
+	if len(allRefs) == 0 {
+		return nil, nil
+	}
+
+	upgrades := determineUpgrades(ctx, allRefs)
+	if len(upgrades) == 0 {
+		return nil, nil
+	}
+
+	logger.Infof("[dockerfile] %s/%s: found %d image(s) to upgrade (local)",
+		repo.Organization, repo.Name, len(upgrades))
+
+	fileChanges := applyUpgrades(upgrades, allRefs)
+	if err := support.WriteFileChanges(repoDir, fileChanges); err != nil {
+		return nil, err
+	}
+
+	entries := make([]string, 0, len(upgrades))
+	for _, up := range upgrades {
+		entries = append(entries, fmt.Sprintf(
+			"- changed the Docker base image %s from %s to %s",
+			up.parsed.FullName(), up.dep.CurrentVer, up.newTag,
+		))
+	}
+	support.LocalChangelogUpdate(repoDir, entries)
+
+	return &repositories.LocalUpdateResult{
+		BranchName:    generateBranchName(upgrades),
+		CommitMessage: generateCommitMessage(upgrades),
+		PRTitle:       generatePRTitle(upgrades),
+		PRDescription: generatePRDescription(upgrades),
+	}, nil
+}
+
+// localScanAllDockerfiles walks the local filesystem for Dockerfiles
+// and parses them for base image references.
+func localScanAllDockerfiles(repoDir string) []imageRef {
+	var allRefs []imageRef
+
+	files, err := support.WalkFilesByPredicate(repoDir, isDockerfilePath)
+	if err != nil {
+		logger.Warnf("[dockerfile] Failed to walk Dockerfile files: %v", err)
+		return nil
+	}
+
+	for _, relPath := range files {
+		data, readErr := os.ReadFile(filepath.Join(repoDir, relPath))
+		if readErr != nil {
+			logger.Warnf("[dockerfile] Failed to read %s: %v", relPath, readErr)
+			continue
+		}
+
+		refs := scanDockerfile(string(data), relPath)
+		allRefs = append(allRefs, refs...)
+	}
+
+	return allRefs
 }
 
 // --- scanning ---

@@ -205,6 +205,105 @@ func openPullRequest(
 	return []entities.PullRequest{*pr}, nil
 }
 
+// ApplyUpdates implements repositories.LocalUpdater. It runs language-specific
+// Python upgrade operations on a locally cloned repository, without performing
+// any git clone, branch, commit, or push operations.
+func (u *UpdaterRepository) ApplyUpdates(
+	ctx context.Context,
+	repoDir string,
+	_ repositories.ProviderRepository,
+	repo entities.Repository,
+	_ entities.UpdateOptions,
+) (*repositories.LocalUpdateResult, error) {
+	logger.Infof("[python] Processing local clone of %s/%s", repo.Organization, repo.Name)
+
+	// resolveLocalVersionContext (from local.go) handles fetching + comparison
+	vCtx := resolveLocalVersionContext(ctx, repoDir)
+
+	hasRequirements := false
+	if _, statErr := os.Stat(filepath.Join(repoDir, "requirements.txt")); statErr == nil {
+		hasRequirements = true
+	}
+
+	hasPyproject := false
+	if _, statErr := os.Stat(filepath.Join(repoDir, "pyproject.toml")); statErr == nil {
+		hasPyproject = true
+	}
+
+	pythonBinary, binErr := findPythonBinary()
+	if binErr != nil {
+		return nil, fmt.Errorf("python binary not found: %w", binErr)
+	}
+
+	script := buildBatchPythonScript(hasRequirements, hasPyproject)
+	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
+	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
+		return nil, fmt.Errorf("failed to write script: %w", writeErr)
+	}
+	defer os.Remove(scriptPath)
+
+	cmd := exec.CommandContext(ctx, "bash", scriptPath)
+	cmd.Dir = repoDir
+	env := append(os.Environ(), "PYTHON_BINARY="+pythonBinary)
+	if vCtx.LatestVersion != "" {
+		env = append(env, "PYTHON_VERSION="+vCtx.LatestVersion)
+	}
+	cmd.Env = env
+
+	output, cmdErr := cmd.CombinedOutput()
+	if cmdErr != nil {
+		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, string(output))
+	}
+
+	pyVersionUpdated := strings.Contains(string(output), "PYTHON_VERSION_UPDATED=true")
+
+	// Update CHANGELOG locally
+	var entry string
+	if pyVersionUpdated {
+		entry = fmt.Sprintf(
+			"- changed the Python version to `%s` and updated all pip dependencies",
+			vCtx.LatestVersion,
+		)
+	} else {
+		entry = "- changed the Python dependencies to their latest versions"
+	}
+	support.LocalChangelogUpdate(repoDir, []string{entry})
+
+	commitMsg := "chore(deps): updated Python dependencies"
+	prTitle := commitMsg
+	if pyVersionUpdated {
+		commitMsg = fmt.Sprintf(
+			"chore(deps): upgraded Python to `%s` and updated all dependencies",
+			vCtx.LatestVersion,
+		)
+		prTitle = commitMsg
+	}
+
+	return &repositories.LocalUpdateResult{
+		BranchName:    vCtx.BranchName,
+		CommitMessage: commitMsg,
+		PRTitle:       prTitle,
+		PRDescription: GeneratePRDescription(vCtx.LatestVersion, pyVersionUpdated),
+	}, nil
+}
+
+// buildBatchPythonScript generates a bash script with only language-specific
+// operations (no git clone, branch, commit, or push) for the batch pipeline.
+func buildBatchPythonScript(hasRequirements, hasPyproject bool) string {
+	var sb strings.Builder
+
+	sb.WriteString("#!/bin/bash\n")
+	sb.WriteString("set -euo pipefail\n\n")
+
+	writePythonUpgradeCommands(&sb, upgradeParams{
+		HasRequirements: hasRequirements,
+		HasPyproject:    hasPyproject,
+	})
+	writeDockerfileUpdate(&sb)
+
+	return sb.String()
+}
+
 // --- internal types ---
 
 type versionContext struct {

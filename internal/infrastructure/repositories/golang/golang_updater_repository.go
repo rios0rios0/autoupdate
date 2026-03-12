@@ -119,6 +119,156 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 	return openPullRequest(ctx, provider, repo, opts, vCtx, result, hasConfigSH)
 }
 
+// ApplyUpdates implements repositories.LocalUpdater for the clone-based pipeline.
+// It runs Go upgrade commands on the already-cloned repository, updates
+// Dockerfiles and CHANGELOG, and returns PR metadata.
+func (u *UpdaterRepository) ApplyUpdates(
+	ctx context.Context,
+	repoDir string,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+	_ entities.UpdateOptions,
+) (*repositories.LocalUpdateResult, error) {
+	logger.Infof("[golang] Processing local clone of %s/%s", repo.Organization, repo.Name)
+
+	latestGoVersion, err := fetchLatestGoVersion(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch latest Go version: %w", err)
+	}
+	logger.Infof("[golang] Latest stable Go version: %s", latestGoVersion)
+
+	vCtx := localResolveVersionContext(repoDir, latestGoVersion)
+
+	hasConfigSH := fileExistsLocally(filepath.Join(repoDir, "config.sh"))
+
+	goBinary, goErr := findGoBinary()
+	if goErr != nil {
+		return nil, fmt.Errorf("go binary not found: %w", goErr)
+	}
+
+	script := buildLocalGoScript(provider.Name(), hasConfigSH)
+	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
+	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
+		return nil, fmt.Errorf("failed to write script: %w", writeErr)
+	}
+	defer os.Remove(scriptPath)
+
+	cmd := exec.CommandContext(ctx, "bash", scriptPath)
+	cmd.Dir = repoDir
+	cmd.Env = append(os.Environ(),
+		"AUTH_TOKEN="+provider.AuthToken(),
+		"GIT_HTTPS_TOKEN="+provider.AuthToken(),
+		"GO_VERSION="+vCtx.LatestVersion,
+		"GO_BINARY="+goBinary,
+	)
+
+	output, cmdErr := cmd.CombinedOutput()
+	if cmdErr != nil {
+		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, string(output))
+	}
+
+	goVersionUpdated := strings.Contains(string(output), "GO_VERSION_UPDATED=true")
+
+	// Update CHANGELOG locally
+	var entry string
+	if goVersionUpdated {
+		entry = fmt.Sprintf(
+			"- changed the Go version to `%s` and updated all module dependencies",
+			vCtx.LatestVersion,
+		)
+	} else {
+		entry = "- changed the Go module dependencies to their latest versions"
+	}
+	support.LocalChangelogUpdate(repoDir, []string{entry})
+
+	commitMsg := "chore(deps): update Go module dependencies"
+	prTitle := commitMsg
+	if goVersionUpdated {
+		commitMsg = fmt.Sprintf(
+			"chore(deps): upgraded Go version to `%s` and updated all dependencies",
+			vCtx.LatestVersion,
+		)
+		prTitle = commitMsg
+	}
+
+	return &repositories.LocalUpdateResult{
+		BranchName:    vCtx.BranchName,
+		CommitMessage: commitMsg,
+		PRTitle:       prTitle,
+		PRDescription: GenerateGoPRDescription(vCtx.LatestVersion, hasConfigSH, goVersionUpdated),
+	}, nil
+}
+
+// localResolveVersionContext reads the local go.mod to determine the version
+// context instead of using the provider API.
+func localResolveVersionContext(repoDir, latestGoVersion string) *versionContext {
+	needsVersionUpgrade := true
+	goModPath := filepath.Join(repoDir, "go.mod")
+	data, err := os.ReadFile(goModPath)
+	if err != nil {
+		logger.Warnf("[golang] Could not read local go.mod, assuming version upgrade: %v", err)
+	} else {
+		currentGoVersion := parseGoDirective(string(data))
+		needsVersionUpgrade = currentGoVersion != latestGoVersion
+		logger.Infof("[golang] Current go directive: %s (upgrade needed: %v)", currentGoVersion, needsVersionUpgrade)
+	}
+
+	branchName := branchGoDepsFmt
+	if needsVersionUpgrade {
+		branchName = fmt.Sprintf(branchGoVersionFmt, latestGoVersion)
+	}
+
+	return &versionContext{
+		LatestVersion:       latestGoVersion,
+		NeedsVersionUpgrade: needsVersionUpgrade,
+		BranchName:          branchName,
+	}
+}
+
+// buildLocalGoScript generates a bash script with only language-specific
+// operations (no git clone, branch, commit, or push).
+func buildLocalGoScript(providerName string, hasConfigSH bool) string {
+	var sb strings.Builder
+
+	sb.WriteString("#!/bin/bash\n")
+	sb.WriteString("set -euo pipefail\n\n")
+
+	// Set up git credentials for `go get` with private modules
+	sb.WriteString("# Set up isolated git config for auth (needed for private modules)\n")
+	sb.WriteString("TEMP_GITCONFIG=$(mktemp)\n")
+	sb.WriteString("cp ~/.gitconfig \"$TEMP_GITCONFIG\" 2>/dev/null || true\n")
+
+	switch providerName {
+	case "azuredevops":
+		writeAzureDevOpsAuth(&sb)
+	case "github":
+		writeGitHubAuth(&sb)
+	case "gitlab":
+		writeGitLabAuth(&sb)
+	}
+
+	sb.WriteString("export GIT_CONFIG_GLOBAL=\"$TEMP_GITCONFIG\"\n")
+	sb.WriteString("trap 'rm -f \"$TEMP_GITCONFIG\"' EXIT\n\n")
+
+	if hasConfigSH {
+		sb.WriteString("echo \"Running config.sh...\"\n")
+		sb.WriteString("if [ -f \"./config.sh\" ]; then\n")
+		sb.WriteString("    source ./config.sh\n")
+		sb.WriteString("fi\n\n")
+	}
+
+	writeGoUpgradeCommands(&sb)
+	writeDockerfileUpdate(&sb)
+
+	return sb.String()
+}
+
+// fileExistsLocally returns true if the given path exists on the local filesystem.
+func fileExistsLocally(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // cloneAndUpgrade prepares the changelog, clones the repository, runs the
 // upgrade script, and returns the result.
 func cloneAndUpgrade(
