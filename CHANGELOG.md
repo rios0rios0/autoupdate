@@ -32,6 +32,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - changed batch mode (`run` command) to use a clone-based pipeline with centralized git operations (clone, branch, commit, push) instead of per-updater git management
 - changed all six updaters (Terraform, Pipeline, Dockerfile, Go, Python, JavaScript) to implement the `LocalUpdater` interface for local filesystem operations in the batch pipeline
 - changed Go, Python, and JavaScript updater batch scripts to contain only language-specific operations (removed git clone, commit, and push from batch bash scripts)
+- changed the Go module dependencies to their latest versions
 
 ### Removed
 
