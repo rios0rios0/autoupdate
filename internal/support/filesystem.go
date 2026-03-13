@@ -70,10 +70,10 @@ func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 	for _, c := range changes {
 		fullPath := filepath.Join(rootDir, c.Path)
 		dir := filepath.Dir(fullPath)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", c.Path, err)
 		}
-		if err := os.WriteFile(fullPath, []byte(c.Content), 0o644); err != nil {
+		if err := os.WriteFile(fullPath, []byte(c.Content), 0o600); err != nil {
 			return fmt.Errorf("failed to write %s: %w", c.Path, err)
 		}
 	}
@@ -96,7 +96,11 @@ func LocalChangelogUpdate(repoDir string, entries []string) bool {
 		return false
 	}
 
-	if writeErr := os.WriteFile(changelogPath, []byte(modified), 0o644); writeErr != nil {
+	if writeErr := os.WriteFile(
+		changelogPath,
+		[]byte(modified),
+		0o600,
+	); writeErr != nil { //nolint:gosec // repoDir is a controlled internal path
 		logger.Warnf("Failed to write CHANGELOG.md: %v", writeErr)
 		return false
 	}

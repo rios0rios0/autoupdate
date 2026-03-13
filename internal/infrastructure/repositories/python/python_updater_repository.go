@@ -30,6 +30,10 @@ const (
 	// only pip dependencies are being refreshed.
 	branchPyVersionFmt = "chore/upgrade-python-%s"
 	branchPyDepsFmt    = "chore/upgrade-python-deps"
+
+	// Commit/PR messages and changelog entries used across remote and local modes.
+	pyCommitMsgDeps      = "chore(deps): updated Python dependencies"
+	pyChangelogEntryDeps = "- changed the Python dependencies to their latest versions"
 )
 
 // UpdaterRepository implements repositories.UpdaterRepository for Python dependencies.
@@ -178,7 +182,7 @@ func openPullRequest(
 		targetBranch = "refs/heads/" + opts.TargetBranch
 	}
 
-	prTitle := "chore(deps): updated Python dependencies"
+	prTitle := pyCommitMsgDeps
 	if result.PythonVersionUpdated {
 		prTitle = fmt.Sprintf(
 			"chore(deps): upgraded Python to `%s` and updated all dependencies",
@@ -265,11 +269,11 @@ func (u *UpdaterRepository) ApplyUpdates(
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the Python dependencies to their latest versions"
+		entry = pyChangelogEntryDeps
 	}
 	support.LocalChangelogUpdate(repoDir, []string{entry})
 
-	commitMsg := "chore(deps): updated Python dependencies"
+	commitMsg := pyCommitMsgDeps
 	prTitle := commitMsg
 	if pyVersionUpdated {
 		commitMsg = fmt.Sprintf(
@@ -465,7 +469,7 @@ func prepareChangelog(
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the Python dependencies to their latest versions"
+		entry = pyChangelogEntryDeps
 	}
 
 	modified := entities.InsertChangelogEntry(content, []string{entry})

@@ -141,7 +141,7 @@ func executeLocalUpgrade(
 	goVersionUpdated := strings.Contains(outputStr, "GO_VERSION_UPDATED=true")
 
 	// --- Git Finalize (go-git) ---
-	commitMsg := "chore(deps): update Go module dependencies"
+	commitMsg := goCommitMsgDeps
 	if goVersionUpdated {
 		commitMsg = fmt.Sprintf(
 			"chore(deps): upgraded Go version to `%s` and updated all dependencies",
@@ -286,11 +286,11 @@ func writeLocalAuth(sb *strings.Builder, params localUpgradeParams) {
 	sb.WriteString("cp ~/.gitconfig \"$TEMP_GITCONFIG\" 2>/dev/null || true\n")
 
 	switch params.ProviderName {
-	case "azuredevops":
+	case providerAzureDevOps:
 		writeAzureDevOpsAuth(sb)
-	case "github":
+	case providerGitHub:
 		writeGitHubAuth(sb)
-	case "gitlab":
+	case providerGitLab:
 		writeGitLabAuth(sb)
 	}
 
@@ -335,7 +335,7 @@ func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the Go module dependencies to their latest versions"
+		entry = goChangelogEntryDeps
 	}
 
 	modified := entities.InsertChangelogEntry(string(content), []string{entry})

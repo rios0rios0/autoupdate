@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
@@ -61,44 +62,14 @@ func (it *RunCommand) Execute(
 	totalErrors := 0
 
 	for _, provCfg := range settings.Providers {
-		// Skip if CLI filter is set and doesn't match
 		if runOpts.ProviderName != "" && provCfg.Type != runOpts.ProviderName {
 			continue
 		}
 
-		provider, err := it.providerRegistry.Get(provCfg.Type, provCfg.Token)
-		if err != nil {
-			logger.Errorf("Failed to initialize provider %q: %v", provCfg.Type, err)
-			totalErrors++
-			continue
-		}
-
-		logger.Infof("Processing provider: %s", provider.Name())
-
-		for _, org := range provCfg.Organizations {
-			// Skip if CLI filter is set and doesn't match
-			if runOpts.OrgOverride != "" && org != runOpts.OrgOverride {
-				continue
-			}
-
-			logger.Infof("Discovering repositories in %q...", org)
-
-			repos, discoverErr := provider.DiscoverRepositories(ctx, org)
-			if discoverErr != nil {
-				logger.Errorf("Failed to discover repos in %q: %v", org, discoverErr)
-				totalErrors++
-				continue
-			}
-
-			logger.Infof("Found %d repositories in %q", len(repos), org)
-
-			for _, repo := range repos {
-				totalRepos++
-				prs, errs := it.processRepository(ctx, provider, repo, settings, runOpts)
-				totalPRs += len(prs)
-				totalErrors += errs
-			}
-		}
+		prs, repos, errs := it.processProvider(ctx, provCfg, settings, runOpts)
+		totalPRs += prs
+		totalRepos += repos
+		totalErrors += errs
 	}
 
 	logger.Infof(
@@ -106,6 +77,65 @@ func (it *RunCommand) Execute(
 		totalRepos, totalPRs, totalErrors,
 	)
 	return nil
+}
+
+// processProvider initializes a single provider and processes all its organizations.
+func (it *RunCommand) processProvider(
+	ctx context.Context,
+	provCfg entities.ProviderConfig,
+	settings *entities.Settings,
+	runOpts RunOptions,
+) (int, int, int) {
+	provider, err := it.providerRegistry.Get(provCfg.Type, provCfg.Token)
+	if err != nil {
+		logger.Errorf("Failed to initialize provider %q: %v", provCfg.Type, err)
+		return 0, 0, 1
+	}
+
+	logger.Infof("Processing provider: %s", provider.Name())
+
+	totalPRs, totalRepos, totalErrors := 0, 0, 0
+	for _, org := range provCfg.Organizations {
+		if runOpts.OrgOverride != "" && org != runOpts.OrgOverride {
+			continue
+		}
+
+		prs, repos, errs := it.processOrganization(ctx, provider, org, settings, runOpts)
+		totalPRs += prs
+		totalRepos += repos
+		totalErrors += errs
+	}
+
+	return totalPRs, totalRepos, totalErrors
+}
+
+// processOrganization discovers repositories in an organization and processes each one.
+func (it *RunCommand) processOrganization(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	org string,
+	settings *entities.Settings,
+	runOpts RunOptions,
+) (int, int, int) {
+	logger.Infof("Discovering repositories in %q...", org)
+
+	repos, discoverErr := provider.DiscoverRepositories(ctx, org)
+	if discoverErr != nil {
+		logger.Errorf("Failed to discover repos in %q: %v", org, discoverErr)
+		return 0, 0, 1
+	}
+
+	logger.Infof("Found %d repositories in %q", len(repos), org)
+
+	totalPRs, totalRepos, totalErrors := 0, 0, 0
+	for _, repo := range repos {
+		totalRepos++
+		prs, errs := it.processRepository(ctx, provider, repo, settings, runOpts)
+		totalPRs += len(prs)
+		totalErrors += errs
+	}
+
+	return totalPRs, totalRepos, totalErrors
 }
 
 // applicableUpdater holds an updater and its resolved options.
@@ -125,20 +155,53 @@ func (it *RunCommand) processRepository(
 	settings *entities.Settings,
 	runOpts RunOptions,
 ) ([]entities.PullRequest, int) {
-	// Collect applicable updaters
-	var localUpdaters []applicableUpdater
-	var legacyUpdaters []applicableUpdater
+	localUpdaters, legacyUpdaters := it.collectApplicableUpdaters(ctx, provider, repo, settings, runOpts)
 
-	updaters := it.updaterRegistry.All()
-	for _, u := range updaters {
+	var allPRs []entities.PullRequest
+	errorCount := 0
+
+	if len(localUpdaters) > 0 {
+		prs, errs := it.processLocalUpdaters(ctx, provider, repo, settings, localUpdaters)
+		allPRs = append(allPRs, prs...)
+		errorCount += errs
+	}
+
+	for _, au := range legacyUpdaters {
+		prs, err := au.updater.CreateUpdatePRs(ctx, provider, repo, au.opts)
+		if err != nil {
+			logger.Errorf(
+				"[%s] Failed to update %s/%s: %v",
+				au.updater.Name(), repo.Organization, repo.Name, err,
+			)
+			errorCount++
+			continue
+		}
+
+		for _, pr := range prs {
+			logger.Infof("  Created PR #%d: %s (%s)", pr.ID, pr.Title, pr.URL)
+		}
+		allPRs = append(allPRs, prs...)
+	}
+
+	return allPRs, errorCount
+}
+
+// collectApplicableUpdaters partitions detected updaters into local and legacy groups.
+func (it *RunCommand) collectApplicableUpdaters(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+	settings *entities.Settings,
+	runOpts RunOptions,
+) ([]applicableUpdater, []applicableUpdater) {
+	var local, legacy []applicableUpdater
+	for _, u := range it.updaterRegistry.All() {
 		if runOpts.UpdaterName != "" && u.Name() != runOpts.UpdaterName {
 			continue
 		}
 
-		if updaterCfg, ok := settings.Updaters[u.Name()]; ok {
-			if !updaterCfg.Enabled {
-				continue
-			}
+		if updaterCfg, ok := settings.Updaters[u.Name()]; ok && !updaterCfg.Enabled {
+			continue
 		}
 
 		if !u.Detect(ctx, provider, repo) {
@@ -160,41 +223,13 @@ func (it *RunCommand) processRepository(
 
 		au := applicableUpdater{updater: u, opts: opts}
 		if _, ok := u.(repositories.LocalUpdater); ok {
-			localUpdaters = append(localUpdaters, au)
+			local = append(local, au)
 		} else {
-			legacyUpdaters = append(legacyUpdaters, au)
+			legacy = append(legacy, au)
 		}
 	}
 
-	var allPRs []entities.PullRequest
-	errorCount := 0
-
-	// Process local updaters via clone-based pipeline
-	if len(localUpdaters) > 0 {
-		prs, errs := it.processLocalUpdaters(ctx, provider, repo, settings, localUpdaters)
-		allPRs = append(allPRs, prs...)
-		errorCount += errs
-	}
-
-	// Process legacy updaters via the original CreateUpdatePRs flow
-	for _, au := range legacyUpdaters {
-		prs, err := au.updater.CreateUpdatePRs(ctx, provider, repo, au.opts)
-		if err != nil {
-			logger.Errorf(
-				"[%s] Failed to update %s/%s: %v",
-				au.updater.Name(), repo.Organization, repo.Name, err,
-			)
-			errorCount++
-			continue
-		}
-
-		for _, pr := range prs {
-			logger.Infof("  Created PR #%d: %s (%s)", pr.ID, pr.Title, pr.URL)
-		}
-		allPRs = append(allPRs, prs...)
-	}
-
-	return allPRs, errorCount
+	return local, legacy
 }
 
 // processLocalUpdaters clones the repository once and runs all local updaters
@@ -230,13 +265,20 @@ func (it *RunCommand) processLocalUpdaters(
 	errorCount := 0
 
 	for _, au := range updaters {
-		lu := au.updater.(repositories.LocalUpdater) //nolint:forcetypeassert // checked at partition time
+		lu := au.updater.(repositories.LocalUpdater) //nolint:errcheck,forcetypeassert // checked at partition time
 		prs, errs := it.runLocalUpdater(ctx, batchCtx, lu, au, provider, repo, settings, authMethods)
 		allPRs = append(allPRs, prs...)
 		errorCount += errs
 	}
 
 	return allPRs, errorCount
+}
+
+// resetWorktree resets the batch context to the default branch, logging any error.
+func resetWorktree(batchCtx *gitlocal.BatchGitContext, name string) {
+	if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
+		logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
+	}
 }
 
 // runLocalUpdater executes a single local updater against the cloned repo.
@@ -260,62 +302,59 @@ func (it *RunCommand) runLocalUpdater(
 
 	result, err := lu.ApplyUpdates(ctx, batchCtx.RepoDir(), provider, repo, au.opts)
 	if err != nil {
+		if errors.Is(err, repositories.ErrNoUpdatesNeeded) {
+			logger.Infof("[%s] %s/%s: already up to date", name, repo.Organization, repo.Name)
+			return nil, 0
+		}
 		logger.Errorf("[%s] Failed to apply updates to %s/%s: %v",
 			name, repo.Organization, repo.Name, err)
-		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
-			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
-		}
+		resetWorktree(batchCtx, name)
 		return nil, 1
 	}
 
-	if result == nil {
-		logger.Infof("[%s] %s/%s: already up to date", name, repo.Organization, repo.Name)
-		return nil, 0
-	}
-
-	// Check if PR already exists for this branch
 	exists, prCheckErr := provider.PullRequestExists(ctx, repo, result.BranchName)
 	if prCheckErr != nil {
 		logger.Warnf("[%s] Failed to check existing PRs: %v", name, prCheckErr)
 	}
 	if exists {
 		logger.Infof("[%s] PR already exists for branch %q, skipping", name, result.BranchName)
-		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
-			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
-		}
+		resetWorktree(batchCtx, name)
 		return nil, 0
 	}
 
-	// Create branch, commit, and push
 	if branchErr := batchCtx.CreateBranchFromDefault(result.BranchName); branchErr != nil {
 		logger.Errorf("[%s] Failed to create branch %s: %v", name, result.BranchName, branchErr)
-		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
-			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
-		}
+		resetWorktree(batchCtx, name)
 		return nil, 1
 	}
 
-	// ApplyUpdates was called while on the default branch, so changes are in
-	// the working tree. The branch switch doesn't discard uncommitted changes.
 	pushed, pushErr := batchCtx.CommitSignedAndPush(result.BranchName, result.CommitMessage, settings, authMethods)
 	if pushErr != nil {
 		logger.Errorf("[%s] Failed to commit/push for %s/%s: %v",
 			name, repo.Organization, repo.Name, pushErr)
-		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
-			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
-		}
+		resetWorktree(batchCtx, name)
 		return nil, 1
 	}
 
 	if !pushed {
 		logger.Infof("[%s] %s/%s: no changes after apply", name, repo.Organization, repo.Name)
-		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
-			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
-		}
+		resetWorktree(batchCtx, name)
 		return nil, 0
 	}
 
-	// Create the PR
+	return it.createLocalPR(ctx, batchCtx, au, provider, repo, result, name)
+}
+
+// createLocalPR creates a pull request for changes pushed by a local updater.
+func (it *RunCommand) createLocalPR(
+	ctx context.Context,
+	batchCtx *gitlocal.BatchGitContext,
+	au applicableUpdater,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+	result *repositories.LocalUpdateResult,
+	name string,
+) ([]entities.PullRequest, int) {
 	targetBranch := repo.DefaultBranch
 	if au.opts.TargetBranch != "" {
 		targetBranch = "refs/heads/" + au.opts.TargetBranch
@@ -331,16 +370,13 @@ func (it *RunCommand) runLocalUpdater(
 	if createErr != nil {
 		logger.Errorf("[%s] Failed to create PR for %s/%s: %v",
 			name, repo.Organization, repo.Name, createErr)
-		if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
-			logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
-		}
+		resetWorktree(batchCtx, name)
 		return nil, 1
 	}
 
 	logger.Infof("[%s] Created PR #%d for %s/%s: %s",
 		name, pr.ID, repo.Organization, repo.Name, pr.URL)
 
-	// Switch back to default branch for the next updater
 	if switchErr := batchCtx.SwitchToDefault(); switchErr != nil {
 		logger.Warnf("[%s] Failed to switch back to default branch: %v", name, switchErr)
 	}

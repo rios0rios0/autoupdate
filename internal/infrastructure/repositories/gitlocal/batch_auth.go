@@ -1,6 +1,8 @@
 package gitlocal
 
 import (
+	"slices"
+
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
 
@@ -92,10 +94,8 @@ func ResolveServiceTypeFromURL(resolver PushAuthResolver, cloneURL string) globa
 
 // appendUnique appends a value to the slice only if it's not already present.
 func appendUnique(slice []string, value string) []string {
-	for _, existing := range slice {
-		if existing == value {
-			return slice
-		}
+	if slices.Contains(slice, value) {
+		return slice
 	}
 	return append(slice, value)
 }
