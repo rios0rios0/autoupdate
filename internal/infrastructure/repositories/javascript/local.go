@@ -175,7 +175,7 @@ func executeLocalUpgrade(
 	nodeVersionUpdated := strings.Contains(outputStr, "NODE_VERSION_UPDATED=true")
 
 	// --- Git Finalize (go-git) ---
-	commitMsg := "chore(deps): updated JavaScript dependencies"
+	commitMsg := jsCommitMsgDeps
 	if nodeVersionUpdated {
 		commitMsg = fmt.Sprintf(
 			"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
@@ -357,7 +357,7 @@ func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the JavaScript dependencies to their latest versions"
+		entry = jsChangelogEntryDeps
 	}
 
 	modified := entities.InsertChangelogEntry(string(content), []string{entry})

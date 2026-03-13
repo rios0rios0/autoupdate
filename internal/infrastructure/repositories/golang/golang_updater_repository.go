@@ -32,6 +32,15 @@ const (
 	// dependencies are being refreshed.
 	branchGoVersionFmt = "chore/upgrade-go-%s"
 	branchGoDepsFmt    = "chore/upgrade-go-deps"
+
+	// Commit/PR messages and changelog entries used across remote and local modes.
+	goCommitMsgDeps      = "chore(deps): update Go module dependencies"
+	goChangelogEntryDeps = "- changed the Go module dependencies to their latest versions"
+
+	// Git provider names for auth setup.
+	providerAzureDevOps = "azuredevops"
+	providerGitHub      = "github"
+	providerGitLab      = "gitlab"
 )
 
 // UpdaterRepository implements repositories.UpdaterRepository for Go module dependencies.
@@ -177,11 +186,11 @@ func (u *UpdaterRepository) ApplyUpdates(
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the Go module dependencies to their latest versions"
+		entry = goChangelogEntryDeps
 	}
 	support.LocalChangelogUpdate(repoDir, []string{entry})
 
-	commitMsg := "chore(deps): update Go module dependencies"
+	commitMsg := goCommitMsgDeps
 	prTitle := commitMsg
 	if goVersionUpdated {
 		commitMsg = fmt.Sprintf(
@@ -239,11 +248,11 @@ func buildLocalGoScript(providerName string, hasConfigSH bool) string {
 	sb.WriteString("cp ~/.gitconfig \"$TEMP_GITCONFIG\" 2>/dev/null || true\n")
 
 	switch providerName {
-	case "azuredevops":
+	case providerAzureDevOps:
 		writeAzureDevOpsAuth(&sb)
-	case "github":
+	case providerGitHub:
 		writeGitHubAuth(&sb)
-	case "gitlab":
+	case providerGitLab:
 		writeGitLabAuth(&sb)
 	}
 
@@ -316,7 +325,7 @@ func openPullRequest(
 		targetBranch = "refs/heads/" + opts.TargetBranch
 	}
 
-	prTitle := "chore(deps): update Go module dependencies"
+	prTitle := goCommitMsgDeps
 	if result.GoVersionUpdated {
 		prTitle = fmt.Sprintf(
 			"chore(deps): upgraded Go version to `%s` and updated all dependencies",
@@ -416,7 +425,7 @@ func prepareChangelog(
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the Go module dependencies to their latest versions"
+		entry = goChangelogEntryDeps
 	}
 
 	modified := entities.InsertChangelogEntry(content, []string{entry})
@@ -583,11 +592,11 @@ func buildUpgradeScript(
 	sb.WriteString("cp ~/.gitconfig \"$TEMP_GITCONFIG\" 2>/dev/null || true\n")
 
 	switch params.ProviderName {
-	case "azuredevops":
+	case providerAzureDevOps:
 		writeAzureDevOpsAuth(&sb)
-	case "github":
+	case providerGitHub:
 		writeGitHubAuth(&sb)
-	case "gitlab":
+	case providerGitLab:
 		writeGitLabAuth(&sb)
 	}
 

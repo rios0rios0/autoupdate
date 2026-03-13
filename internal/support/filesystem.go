@@ -70,10 +70,10 @@ func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 	for _, c := range changes {
 		fullPath := filepath.Join(rootDir, c.Path)
 		dir := filepath.Dir(fullPath)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", c.Path, err)
 		}
-		if err := os.WriteFile(fullPath, []byte(c.Content), 0o644); err != nil {
+		if err := os.WriteFile(fullPath, []byte(c.Content), 0o600); err != nil {
 			return fmt.Errorf("failed to write %s: %w", c.Path, err)
 		}
 	}
@@ -83,7 +83,7 @@ func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 // LocalChangelogUpdate reads CHANGELOG.md from repoDir, inserts entries,
 // and writes it back if modified. Returns true if the file was updated.
 func LocalChangelogUpdate(repoDir string, entries []string) bool {
-	changelogPath := filepath.Join(repoDir, "CHANGELOG.md")
+	changelogPath := filepath.Clean(filepath.Join(repoDir, "CHANGELOG.md"))
 	data, err := os.ReadFile(changelogPath)
 	if err != nil {
 		logger.Warnf("Failed to read CHANGELOG.md: %v", err)
@@ -96,7 +96,12 @@ func LocalChangelogUpdate(repoDir string, entries []string) bool {
 		return false
 	}
 
-	if writeErr := os.WriteFile(changelogPath, []byte(modified), 0o644); writeErr != nil {
+	writeErr := os.WriteFile( //nolint:gosec // repoDir is a controlled internal path
+		changelogPath,
+		[]byte(modified),
+		0o600,
+	)
+	if writeErr != nil {
 		logger.Warnf("Failed to write CHANGELOG.md: %v", writeErr)
 		return false
 	}

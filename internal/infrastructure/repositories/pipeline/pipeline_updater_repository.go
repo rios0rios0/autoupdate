@@ -131,12 +131,12 @@ func (u *UpdaterRepository) ApplyUpdates(
 	latestVersions := fetchAllLatestVersions(ctx)
 	if len(latestVersions) == 0 {
 		logger.Warnf("[pipeline] Could not fetch any latest versions, skipping")
-		return nil, nil
+		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
 	upgrades, fileContents := localScanAndDetermineUpgrades(repoDir, latestVersions)
 	if len(upgrades) == 0 {
-		return nil, nil
+		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
 	logger.Infof("[pipeline] %s/%s: found %d version(s) to upgrade (local)",
@@ -181,7 +181,8 @@ func localScanAndDetermineUpgrades(
 	if ymlErr != nil {
 		logger.Warnf("[pipeline] Failed to walk .yml files: %v", ymlErr)
 	}
-	allFiles := append(yamlFiles, ymlFiles...)
+	allFiles := yamlFiles
+	allFiles = append(allFiles, ymlFiles...)
 
 	for _, relPath := range allFiles {
 		ci := classifyFile(relPath)
