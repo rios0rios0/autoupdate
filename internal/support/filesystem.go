@@ -83,7 +83,7 @@ func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 // LocalChangelogUpdate reads CHANGELOG.md from repoDir, inserts entries,
 // and writes it back if modified. Returns true if the file was updated.
 func LocalChangelogUpdate(repoDir string, entries []string) bool {
-	changelogPath := filepath.Join(repoDir, "CHANGELOG.md")
+	changelogPath := filepath.Clean(filepath.Join(repoDir, "CHANGELOG.md"))
 	data, err := os.ReadFile(changelogPath)
 	if err != nil {
 		logger.Warnf("Failed to read CHANGELOG.md: %v", err)
@@ -96,11 +96,12 @@ func LocalChangelogUpdate(repoDir string, entries []string) bool {
 		return false
 	}
 
-	if writeErr := os.WriteFile(
+	writeErr := os.WriteFile( //nolint:gosec // repoDir is a controlled internal path
 		changelogPath,
 		[]byte(modified),
 		0o600,
-	); writeErr != nil { //nolint:gosec // repoDir is a controlled internal path
+	)
+	if writeErr != nil {
 		logger.Warnf("Failed to write CHANGELOG.md: %v", writeErr)
 		return false
 	}
