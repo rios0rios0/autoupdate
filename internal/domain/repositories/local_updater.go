@@ -2,9 +2,14 @@ package repositories
 
 import (
 	"context"
+	"errors"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 )
+
+// ErrNoUpdatesNeeded is returned by ApplyUpdates when the repository
+// is already up to date and no changes are needed.
+var ErrNoUpdatesNeeded = errors.New("no updates needed")
 
 // LocalUpdater is an optional interface that UpdaterRepository implementations
 // can satisfy to participate in the centralized clone-based pipeline.

@@ -123,12 +123,12 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	allRefs := localScanAllDockerfiles(repoDir)
 	if len(allRefs) == 0 {
-		return nil, nil
+		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
 	upgrades := determineUpgrades(ctx, allRefs)
 	if len(upgrades) == 0 {
-		return nil, nil
+		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
 	logger.Infof("[dockerfile] %s/%s: found %d image(s) to upgrade (local)",

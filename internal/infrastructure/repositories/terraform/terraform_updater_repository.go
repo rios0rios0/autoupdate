@@ -117,19 +117,19 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
-	opts entities.UpdateOptions,
+	_ entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[terraform] Scanning local clone of %s/%s for Terraform dependencies",
 		repo.Organization, repo.Name)
 
 	allDeps := u.localScanAllDependencies(repoDir)
 	if len(allDeps) == 0 {
-		return nil, nil
+		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
 	upgrades := u.determineUpgrades(ctx, provider, repo, allDeps)
 	if len(upgrades) == 0 {
-		return nil, nil
+		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
 	logger.Infof("[terraform] %s/%s: found %d dependencies to upgrade (local)",
