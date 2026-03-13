@@ -33,6 +33,10 @@ const (
 	// Branch name patterns for JavaScript/Node.js updates.
 	branchNodeVersionFmt = "chore/upgrade-node-%s"
 	branchJSDepsFmt      = "chore/upgrade-js-deps"
+
+	// Commit/PR messages and changelog entries used across remote and local modes.
+	jsCommitMsgDeps      = "chore(deps): updated JavaScript dependencies"
+	jsChangelogEntryDeps = "- changed the JavaScript dependencies to their latest versions"
 )
 
 // UpdaterRepository implements repositories.UpdaterRepository for JavaScript/Node.js dependencies.
@@ -179,7 +183,7 @@ func openPullRequest(
 		targetBranch = "refs/heads/" + opts.TargetBranch
 	}
 
-	prTitle := "chore(deps): updated JavaScript dependencies"
+	prTitle := jsCommitMsgDeps
 	if result.NodeVersionUpdated {
 		prTitle = fmt.Sprintf(
 			"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
@@ -252,11 +256,11 @@ func (u *UpdaterRepository) ApplyUpdates(
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the JavaScript dependencies to their latest versions"
+		entry = jsChangelogEntryDeps
 	}
 	support.LocalChangelogUpdate(repoDir, []string{entry})
 
-	commitMsg := "chore(deps): updated JavaScript dependencies"
+	commitMsg := jsCommitMsgDeps
 	prTitle := commitMsg
 	if nodeVersionUpdated {
 		commitMsg = fmt.Sprintf(
@@ -481,7 +485,7 @@ func prepareChangelog(
 			vCtx.LatestVersion,
 		)
 	} else {
-		entry = "- changed the JavaScript dependencies to their latest versions"
+		entry = jsChangelogEntryDeps
 	}
 
 	modified := entities.InsertChangelogEntry(content, []string{entry})

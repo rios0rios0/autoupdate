@@ -141,7 +141,7 @@ func executeLocalUpgrade(
 	pythonVersionUpdated := strings.Contains(outputStr, "PYTHON_VERSION_UPDATED=true")
 
 	// --- Git Finalize (go-git) ---
-	commitMsg := "chore(deps): updated Python dependencies"
+	commitMsg := pyCommitMsgDeps
 	if pythonVersionUpdated {
 		commitMsg = fmt.Sprintf(
 			"chore(deps): upgraded Python to `%s` and updated all dependencies",
