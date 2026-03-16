@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- changed gitforge dependency to v0.6.0, picking up fixes for branch checkout with unstaged changes and GPG passphrase prompt in CI
+
 ## [0.9.0] - 2026-03-13
 
 ### Added
