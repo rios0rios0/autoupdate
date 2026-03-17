@@ -16,9 +16,11 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-03-17
+
 ### Fixed
 
-- fixed pipeline updater failing to fetch latest Java version (HTTP 404) by upgrading `langforge` to v0.4.0 which now uses the Amazon Corretto endpoint on endoflife.date
+- fixed pipeline updater failing to fetch latest Java version (HTTP 404) by upgrading `langforge` to `v0.4.0` which now uses the Amazon Corretto endpoint on `endoflife.date`
 
 ## [0.9.2] - 2026-03-17
 
