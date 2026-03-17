@@ -16,6 +16,11 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Fixed
+
+- fixed Go and JavaScript updaters running CHANGELOG updates and creating branches even when no dependency changes were detected
+- fixed pipeline updater proceeding with file writes and CHANGELOG updates when version replacements produced no actual file changes
+
 ## [0.9.3] - 2026-03-17
 
 ### Fixed

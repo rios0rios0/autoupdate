@@ -178,6 +178,11 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	goVersionUpdated := strings.Contains(string(output), "GO_VERSION_UPDATED=true")
 
+	// Return early if the upgrade script made no filesystem changes
+	if !support.HasUncommittedChanges(repoDir) {
+		return nil, repositories.ErrNoUpdatesNeeded
+	}
+
 	// Update CHANGELOG locally
 	var entry string
 	if goVersionUpdated {
