@@ -1,6 +1,7 @@
 package support
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -85,8 +86,8 @@ func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 // contains unstaged or untracked modifications. On error (e.g. git not
 // found, not a repo) it returns true to avoid false negatives that would
 // incorrectly skip updates.
-func HasUncommittedChanges(repoDir string) bool {
-	cmd := exec.Command("git", "status", "--porcelain")
+func HasUncommittedChanges(ctx context.Context, repoDir string) bool {
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
 	cmd.Dir = repoDir
 	output, err := cmd.Output()
 	if err != nil {
