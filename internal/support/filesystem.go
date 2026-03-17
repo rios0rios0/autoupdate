@@ -82,13 +82,16 @@ func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 }
 
 // HasUncommittedChanges returns true when the git working tree at repoDir
-// contains unstaged or untracked modifications.
+// contains unstaged or untracked modifications. On error (e.g. git not
+// found, not a repo) it returns true to avoid false negatives that would
+// incorrectly skip updates.
 func HasUncommittedChanges(repoDir string) bool {
 	cmd := exec.Command("git", "status", "--porcelain")
 	cmd.Dir = repoDir
 	output, err := cmd.Output()
 	if err != nil {
-		return false
+		logger.Warnf("Failed to check git status in %s: %v", repoDir, err)
+		return true
 	}
 	return len(strings.TrimSpace(string(output))) > 0
 }

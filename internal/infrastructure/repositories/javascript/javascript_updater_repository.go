@@ -242,6 +242,9 @@ func (u *UpdaterRepository) ApplyUpdates(
 	cmd.Env = env
 
 	output, cmdErr := cmd.CombinedOutput()
+	// Remove the script before checking worktree state so it does not
+	// appear as an untracked file in the git status check below.
+	_ = os.Remove(scriptPath)
 	if cmdErr != nil {
 		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, string(output))
 	}
