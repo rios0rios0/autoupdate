@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-03-17
+
 ### Added
 
 - added `exclude_forks` and `exclude_archived` settings to filter out fork and archived repositories during discovery
