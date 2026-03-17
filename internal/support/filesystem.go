@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -78,6 +79,18 @@ func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 		}
 	}
 	return nil
+}
+
+// HasUncommittedChanges returns true when the git working tree at repoDir
+// contains unstaged or untracked modifications.
+func HasUncommittedChanges(repoDir string) bool {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = repoDir
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return len(strings.TrimSpace(string(output))) > 0
 }
 
 // LocalChangelogUpdate reads CHANGELOG.md from repoDir, inserts entries,

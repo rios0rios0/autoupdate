@@ -248,6 +248,11 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	nodeVersionUpdated := strings.Contains(string(output), "NODE_VERSION_UPDATED=true")
 
+	// Return early if the upgrade script made no filesystem changes
+	if !support.HasUncommittedChanges(repoDir) {
+		return nil, repositories.ErrNoUpdatesNeeded
+	}
+
 	// Update CHANGELOG locally
 	var entry string
 	if nodeVersionUpdated {

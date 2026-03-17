@@ -143,6 +143,9 @@ func (u *UpdaterRepository) ApplyUpdates(
 		repo.Organization, repo.Name, len(upgrades))
 
 	fileChanges := applyUpgrades(upgrades, fileContents)
+	if len(fileChanges) == 0 {
+		return nil, repositories.ErrNoUpdatesNeeded
+	}
 	if err := support.WriteFileChanges(repoDir, fileChanges); err != nil {
 		return nil, err
 	}
