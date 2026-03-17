@@ -16,6 +16,8 @@ type ProviderConfig = configEntities.ProviderConfig
 type Settings struct {
 	Providers              []ProviderConfig         `yaml:"providers"`
 	Updaters               map[string]UpdaterConfig `yaml:"updaters"`
+	ExcludeForks           bool                     `yaml:"exclude_forks"`
+	ExcludeArchived        bool                     `yaml:"exclude_archived"`
 	GpgKeyPath             string                   `yaml:"gpg_key_path"`
 	GpgKeyPassphrase       string                   `yaml:"gpg_key_passphrase"`
 	GitHubAccessToken      string                   `yaml:"github_access_token"`

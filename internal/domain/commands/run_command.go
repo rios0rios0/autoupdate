@@ -125,6 +125,7 @@ func (it *RunCommand) processOrganization(
 		return 0, 0, 1
 	}
 
+	repos = filterRepositories(repos, settings)
 	logger.Infof("Found %d repositories in %q", len(repos), org)
 
 	totalPRs, totalRepos, totalErrors := 0, 0, 0
@@ -136,6 +137,31 @@ func (it *RunCommand) processOrganization(
 	}
 
 	return totalPRs, totalRepos, totalErrors
+}
+
+// filterRepositories removes repositories that match the exclusion criteria
+// defined in the settings (e.g. forks, archived repos).
+func filterRepositories(
+	repos []entities.Repository,
+	settings *entities.Settings,
+) []entities.Repository {
+	if !settings.ExcludeForks && !settings.ExcludeArchived {
+		return repos
+	}
+
+	filtered := make([]entities.Repository, 0, len(repos))
+	for _, repo := range repos {
+		if settings.ExcludeForks && repo.IsFork {
+			logger.Debugf("Skipping fork: %s/%s", repo.Organization, repo.Name)
+			continue
+		}
+		if settings.ExcludeArchived && repo.IsArchived {
+			logger.Debugf("Skipping archived repo: %s/%s", repo.Organization, repo.Name)
+			continue
+		}
+		filtered = append(filtered, repo)
+	}
+	return filtered
 }
 
 // applicableUpdater holds an updater and its resolved options.

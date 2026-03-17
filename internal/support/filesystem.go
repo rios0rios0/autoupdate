@@ -1,9 +1,11 @@
 package support
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -78,6 +80,21 @@ func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 		}
 	}
 	return nil
+}
+
+// HasUncommittedChanges returns true when the git working tree at repoDir
+// contains unstaged or untracked modifications. On error (e.g. git not
+// found, not a repo) it returns true to avoid false negatives that would
+// incorrectly skip updates.
+func HasUncommittedChanges(ctx context.Context, repoDir string) bool {
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	cmd.Dir = repoDir
+	output, err := cmd.Output()
+	if err != nil {
+		logger.Warnf("Failed to check git status in %s: %v", repoDir, err)
+		return true
+	}
+	return len(strings.TrimSpace(string(output))) > 0
 }
 
 // LocalChangelogUpdate reads CHANGELOG.md from repoDir, inserts entries,
