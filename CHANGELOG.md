@@ -16,6 +16,14 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- changed local mode to auto-stash uncommitted changes instead of refusing to run on dirty worktrees
+
+### Fixed
+
+- fixed Go dependency updater using deprecated `go get -u all` pattern that fails to detect updates in modern Go versions, replaced with `go get -u ./...`
+
 ## [0.10.0] - 2026-03-17
 
 ### Added

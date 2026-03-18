@@ -1,9 +1,9 @@
 package gitlocal
 
 import (
-	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -42,9 +42,10 @@ type LocalGitContext struct {
 }
 
 // NewLocalGitContext opens the repository at the given path and returns
-// a ready-to-use context.  The caller should use EnsureClean, then
+// a ready-to-use context.  The caller should use StashIfDirty, then
 // CreateBranch, run language-specific upgrades, and finally call
-// StageCommitAndPush.
+// StageCommitAndPush.  After the operation completes (or fails), use
+// RestoreStash to pop the stash if one was created.
 //
 // The resolver is used to resolve auth methods for pushing.  It may be
 // nil when push is not needed (e.g. in tests that only exercise local
@@ -68,16 +69,38 @@ func NewLocalGitContext(repoDir string, resolver PushAuthResolver) (*LocalGitCon
 	}, nil
 }
 
-// EnsureClean verifies that the working tree has no uncommitted changes.
-// Returns an error if the worktree is dirty.
-func (c *LocalGitContext) EnsureClean() error {
+// StashIfDirty checks if the worktree has uncommitted changes and
+// stashes them if so.  Returns true if a stash was created.  The
+// caller must call RestoreStash after the operation completes.
+func (c *LocalGitContext) StashIfDirty() (bool, error) {
 	clean, err := gitops.WorktreeIsClean(c.workTree)
 	if err != nil {
-		return fmt.Errorf("failed to check worktree status: %w", err)
+		return false, fmt.Errorf("failed to check worktree status: %w", err)
 	}
 
-	if !clean {
-		return errors.New("working tree has uncommitted changes, please commit or stash first")
+	if clean {
+		return false, nil
+	}
+
+	logger.Info("Uncommitted changes detected, stashing...")
+	cmd := exec.Command("git", "stash", "push", "--include-untracked", "-m", "autoupdate-auto-stash")
+	cmd.Dir = c.repoDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("failed to stash changes: %w\nOutput: %s", err, string(output))
+	}
+
+	return true, nil
+}
+
+// RestoreStash pops the most recent stash entry.  Should only be called
+// when StashIfDirty returned true.
+func (c *LocalGitContext) RestoreStash() error {
+	cmd := exec.Command("git", "stash", "pop")
+	cmd.Dir = c.repoDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to restore stash: %w\nOutput: %s", err, string(output))
 	}
 
 	return nil
