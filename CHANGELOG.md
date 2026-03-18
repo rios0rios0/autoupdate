@@ -16,18 +16,20 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-03-17
+
 ### Added
 
 - added `exclude_forks` and `exclude_archived` settings to filter out fork and archived repositories during discovery
 
 ### Changed
 
-- changed `gitforge` dependency from v0.6.2 to v0.7.0, which includes sanitized clone URL logging, `IsFork`/`IsArchived` fields on `Repository`, and improved org-to-user discovery fallback
+- changed `gitforge` dependency from `v0.6.2` to `v0.7.0`, which includes sanitized clone URL logging, `IsFork`/`IsArchived` fields on `Repository`, and improved org-to-user discovery fallback
 
 ### Fixed
 
-- fixed Go and JavaScript updaters running CHANGELOG updates and creating branches even when no dependency changes were detected
-- fixed pipeline updater proceeding with file writes and CHANGELOG updates when version replacements produced no actual file changes
+- fixed Go and JavaScript updaters running `CHANGELOG.md` updates and creating branches even when no dependency changes were detected
+- fixed pipeline updater proceeding with file writes and `CHANGELOG.md` updates when version replacements produced no actual file changes
 
 ## [0.9.3] - 2026-03-17
 
