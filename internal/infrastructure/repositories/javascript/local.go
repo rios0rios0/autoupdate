@@ -159,12 +159,19 @@ func executeLocalUpgrade(
 	if err != nil {
 		return nil, err
 	}
+	originalBranch, err := gitCtx.CurrentBranch()
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine current branch: %w", err)
+	}
 	stashed, stashErr := gitCtx.StashIfDirty()
 	if stashErr != nil {
 		return nil, stashErr
 	}
 	if stashed {
 		defer func() {
+			if checkoutErr := gitCtx.CheckoutBranch(originalBranch); checkoutErr != nil {
+				logger.Warnf("Failed to switch back to %s: %v", originalBranch, checkoutErr)
+			}
 			if restoreErr := gitCtx.RestoreStash(); restoreErr != nil {
 				logger.Warnf("Failed to restore stash: %v", restoreErr)
 			}
