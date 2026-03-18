@@ -18,11 +18,12 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Changed
 
-- changed local mode to auto-stash uncommitted changes instead of refusing to run on dirty worktrees
+- changed local mode to auto-stash uncommitted changes instead of refusing to run on dirty worktrees, restoring to the original branch after the upgrade completes
 
 ### Fixed
 
-- fixed Go dependency updater using deprecated `go get -u all` pattern that fails to detect updates in modern Go versions, replaced with `go get -u ./...`
+- fixed Go dependency updater using deprecated `go get -u all` pattern that fails to detect updates in modern Go versions, replaced with `go get -u -t ./...`
+- fixed local mode stash restore that could pop an unrelated stash entry or restore onto the wrong branch
 
 ## [0.10.0] - 2026-03-17
 

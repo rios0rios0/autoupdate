@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -39,6 +40,7 @@ type LocalGitContext struct {
 	workTree *git.Worktree
 	repoDir  string
 	resolver PushAuthResolver
+	stashRef string // commit hash of the stash entry created by StashIfDirty
 }
 
 // NewLocalGitContext opens the repository at the given path and returns
@@ -90,12 +92,48 @@ func (c *LocalGitContext) StashIfDirty() (bool, error) {
 		return false, fmt.Errorf("failed to stash changes: %w\nOutput: %s", err, string(output))
 	}
 
+	outputStr := string(output)
+	if !strings.Contains(outputStr, "Saved working directory") {
+		// git stash did not actually create a stash entry (CLI and go-git
+		// disagree on dirtiness).  Return false to avoid popping an
+		// unrelated stash later.
+		logger.Warn("git stash push did not create a stash entry, skipping stash restore")
+		return false, nil
+	}
+
+	// Record the stash ref so RestoreStash can verify it pops the right entry.
+	refCmd := exec.Command("git", "rev-parse", "stash@{0}")
+	refCmd.Dir = c.repoDir
+	refOut, refErr := refCmd.CombinedOutput()
+	if refErr != nil {
+		return false, fmt.Errorf("failed to read stash ref: %w\nOutput: %s", refErr, string(refOut))
+	}
+	c.stashRef = strings.TrimSpace(string(refOut))
+
 	return true, nil
 }
 
-// RestoreStash pops the most recent stash entry.  Should only be called
-// when StashIfDirty returned true.
+// RestoreStash pops the stash entry created by StashIfDirty.  It verifies
+// that stash@{0} still matches the recorded ref before popping, to avoid
+// restoring an unrelated stash entry.  Should only be called when
+// StashIfDirty returned true.
 func (c *LocalGitContext) RestoreStash() error {
+	if c.stashRef != "" {
+		refCmd := exec.Command("git", "rev-parse", "stash@{0}")
+		refCmd.Dir = c.repoDir
+		refOut, refErr := refCmd.CombinedOutput()
+		if refErr != nil {
+			return fmt.Errorf("failed to verify stash ref: %w\nOutput: %s", refErr, string(refOut))
+		}
+		currentRef := strings.TrimSpace(string(refOut))
+		if currentRef != c.stashRef {
+			return fmt.Errorf(
+				"stash@{0} ref changed (expected %s, got %s); refusing to pop wrong stash",
+				c.stashRef, currentRef,
+			)
+		}
+	}
+
 	cmd := exec.Command("git", "stash", "pop")
 	cmd.Dir = c.repoDir
 	output, err := cmd.CombinedOutput()
@@ -104,6 +142,21 @@ func (c *LocalGitContext) RestoreStash() error {
 	}
 
 	return nil
+}
+
+// CurrentBranch returns the short name of the currently checked-out branch.
+func (c *LocalGitContext) CurrentBranch() (string, error) {
+	head, err := c.repo.Head()
+	if err != nil {
+		return "", fmt.Errorf("failed to get HEAD: %w", err)
+	}
+	return head.Name().Short(), nil
+}
+
+// CheckoutBranch switches the worktree to an existing branch.
+func (c *LocalGitContext) CheckoutBranch(branchName string) error {
+	logger.Infof("Switching back to branch %s...", branchName)
+	return gitops.CheckoutBranch(c.workTree, branchName)
 }
 
 // CreateBranch creates a new branch from HEAD and switches to it.
