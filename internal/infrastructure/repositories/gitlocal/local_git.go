@@ -86,7 +86,9 @@ func (c *LocalGitContext) StashIfDirty() (bool, error) {
 	}
 
 	logger.Info("Uncommitted changes detected, stashing...")
-	cmd := exec.CommandContext(context.TODO(), "git", "stash", "push", "--include-untracked", "-m", "autoupdate-auto-stash")
+	cmd := exec.CommandContext(
+		context.TODO(), "git", "stash", "push", "--include-untracked", "-m", "autoupdate-auto-stash",
+	)
 	cmd.Dir = c.repoDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
