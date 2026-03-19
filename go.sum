@@ -91,6 +91,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/rios0rios0/gitforge v0.7.1-0.20260319032510-83f360e95cd9 h1:1jiKCSDWS4+Q0j2T8yChhNzKSbEaPWSXjoATC53Ckig=
 github.com/rios0rios0/gitforge v0.7.1-0.20260319032510-83f360e95cd9/go.mod h1:RVCIYZZsrmJ5tkXeqkrQIK4Y03Ig7vtRamm8GVDDDwI=
+github.com/rios0rios0/gitforge v0.7.1 h1:yi2yOIy+MQsek8+3ZA2LMOZMJZ2R8A2BzX00YmXVdKc=
+github.com/rios0rios0/gitforge v0.7.1/go.mod h1:0nzFdHqzg9iZimJpGUDLHplrOKV982YzPj+DZSSSfJw=
 github.com/rios0rios0/langforge v0.4.0 h1:ThhXUo//wreYuTbdBWhDepuQzsTC2216KupUgxaGdSc=
 github.com/rios0rios0/langforge v0.4.0/go.mod h1:p7jExZiPGkNmhst2/niCxXw/QofRMW+hp+MA2pn0eYQ=
 github.com/rios0rios0/testkit v0.1.1 h1:EIMz9S2fo+19ESdQ7FL8bUap0Xf7Z2zlbgV6gnuHtd4=
