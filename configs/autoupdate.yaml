@@ -18,17 +18,25 @@ providers:
   #   organizations:
   #     - "my-group"
 
+# All updaters are enabled by default with auto_complete disabled.
+# Users only need to override specific fields; omitted fields keep these defaults.
+# The entire updaters section can be omitted to use all defaults.
 updaters:
   terraform:
     enabled: true
     auto_complete: false
-    target_branch: "main"
   golang:
     enabled: true
-    target_branch: "main"
+    auto_complete: false
   python:
     enabled: true
-    target_branch: "main"
+    auto_complete: false
   javascript:
     enabled: true
-    target_branch: "main"
+    auto_complete: false
+  pipeline:
+    enabled: true
+    auto_complete: false
+  dockerfile:
+    enabled: true
+    auto_complete: false

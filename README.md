@@ -91,14 +91,15 @@ providers:
     organizations:
       - "my-group"
 
+# The updaters section is optional. All 6 updaters (terraform, golang,
+# python, javascript, pipeline, dockerfile) are enabled by default.
+# Default config is fetched from GitHub and merged with your overrides.
+# Only specify what you want to change:
 updaters:
   terraform:
-    enabled: true
-    auto_complete: false
-    target_branch: "main"
-  golang:
-    enabled: true
-    target_branch: "main"
+    auto_complete: true
+  python:
+    enabled: false
 ```
 
 ### Token Resolution

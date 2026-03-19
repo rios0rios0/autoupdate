@@ -226,7 +226,7 @@ func (it *RunCommand) collectApplicableUpdaters(
 			continue
 		}
 
-		if updaterCfg, ok := settings.Updaters[u.Name()]; ok && !updaterCfg.Enabled {
+		if updaterCfg, ok := settings.Updaters[u.Name()]; ok && !updaterCfg.IsEnabled() {
 			continue
 		}
 
@@ -241,7 +241,7 @@ func (it *RunCommand) collectApplicableUpdaters(
 			Verbose: runOpts.Verbose,
 		}
 		if updaterCfg, ok := settings.Updaters[u.Name()]; ok {
-			opts.AutoComplete = updaterCfg.AutoComplete
+			opts.AutoComplete = updaterCfg.IsAutoComplete()
 			if updaterCfg.TargetBranch != "" {
 				opts.TargetBranch = updaterCfg.TargetBranch
 			}
