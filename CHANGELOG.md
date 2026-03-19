@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-03-18
+
 ### Changed
 
 - changed local mode to auto-stash uncommitted changes instead of refusing to run on dirty worktrees, restoring to the original branch after the upgrade completes
