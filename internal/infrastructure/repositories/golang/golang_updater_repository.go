@@ -172,19 +172,24 @@ func (u *UpdaterRepository) ApplyUpdates(
 	)
 
 	output, cmdErr := cmd.CombinedOutput()
+	outputStr := string(output)
+	logger.Infof("[golang] Upgrade script output:\n%s", outputStr)
+
 	// Remove the script before checking worktree state so it does not
 	// appear as an untracked file in the git status check below.
 	_ = os.Remove(scriptPath)
 	if cmdErr != nil {
-		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, string(output))
+		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, outputStr)
 	}
 
-	goVersionUpdated := strings.Contains(string(output), "GO_VERSION_UPDATED=true")
+	goVersionUpdated := strings.Contains(outputStr, "GO_VERSION_UPDATED=true")
 
 	// Return early if the upgrade script made no filesystem changes
 	if !support.HasUncommittedChanges(ctx, repoDir) {
+		logger.Infof("[golang] No filesystem changes detected after upgrade script")
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
+	logger.Infof("[golang] Filesystem changes detected, proceeding with commit")
 
 	// Update CHANGELOG locally
 	var entry string

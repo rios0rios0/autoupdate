@@ -1,8 +1,10 @@
 package gitlocal
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
@@ -63,6 +65,27 @@ func CloneRepository(
 		tmpDir:        tmpDir,
 		defaultBranch: cleanBranch,
 		resolver:      resolver,
+	}, nil
+}
+
+// NewBatchGitContextFromLocal creates a BatchGitContext from an existing local
+// repository. This is intended for testing — production code uses CloneRepository.
+func NewBatchGitContextFromLocal(repoDir, defaultBranch string) (*BatchGitContext, error) {
+	repo, err := gitops.OpenRepo(repoDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repository at %s: %w", repoDir, err)
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get worktree: %w", err)
+	}
+
+	return &BatchGitContext{
+		repo:          repo,
+		workTree:      wt,
+		tmpDir:        repoDir,
+		defaultBranch: defaultBranch,
 	}, nil
 }
 
@@ -196,6 +219,31 @@ func (c *BatchGitContext) CommitSignedAndPush(
 	}
 
 	return true, nil
+}
+
+// StashChanges stashes all uncommitted changes (including untracked files)
+// so that a force-checkout can switch branches without losing them.
+func (c *BatchGitContext) StashChanges() error {
+	cmd := exec.CommandContext(
+		context.TODO(), "git", "stash", "push", "--include-untracked", "-m", "autoupdate-batch-stash",
+	)
+	cmd.Dir = c.tmpDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to stash changes: %w\nOutput: %s", err, string(output))
+	}
+	return nil
+}
+
+// PopStash restores the most recent stash entry.
+func (c *BatchGitContext) PopStash() error {
+	cmd := exec.CommandContext(context.TODO(), "git", "stash", "pop")
+	cmd.Dir = c.tmpDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to pop stash: %w\nOutput: %s", err, string(output))
+	}
+	return nil
 }
 
 // Close removes the temporary directory created during cloning.
