@@ -172,7 +172,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	)
 
 	output, cmdErr := cmd.CombinedOutput()
-	outputStr := string(output)
+	outputStr := support.RedactTokens(string(output), provider.AuthToken())
 	logger.Debugf("[golang] Upgrade script output:\n%s", outputStr)
 
 	// Remove the script before checking worktree state so it does not

@@ -51,7 +51,9 @@ func TestCreateBranchFromDefault_PreservesChangesWithStash(t *testing.T) {
 		require.NoError(t, os.WriteFile(trackedFile, []byte("upgraded content"), 0o600))
 
 		// when - stash before branch, pop after (the fix)
-		require.NoError(t, batchCtx.StashChanges())
+		stashed, stashErr := batchCtx.StashChanges()
+		require.NoError(t, stashErr)
+		assert.True(t, stashed, "StashChanges should indicate a stash was created")
 		require.NoError(t, batchCtx.CreateBranchFromDefault("chore/upgrade-test"))
 		require.NoError(t, batchCtx.PopStash())
 

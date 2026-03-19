@@ -28,6 +28,7 @@ type BatchGitContext struct {
 	tmpDir        string
 	defaultBranch string
 	resolver      PushAuthResolver
+	stashRef      string // set by StashChanges, verified by PopStash
 }
 
 // CloneRepository clones a remote repository into a temporary directory using
@@ -85,7 +86,7 @@ func NewBatchGitContextFromLocal(repoDir, defaultBranch string) (*BatchGitContex
 		repo:          repo,
 		workTree:      wt,
 		tmpDir:        repoDir,
-		defaultBranch: defaultBranch,
+		defaultBranch: strings.TrimPrefix(defaultBranch, "refs/heads/"),
 	}, nil
 }
 
@@ -224,27 +225,76 @@ func (c *BatchGitContext) CommitSignedAndPush(
 
 // StashChanges stashes all uncommitted changes (including untracked files)
 // so that a force-checkout can switch branches without losing them.
-func (c *BatchGitContext) StashChanges() error {
+// Returns true when a stash entry was actually created, false when the
+// worktree was already clean. The caller must only call PopStash when
+// this method returned true.
+func (c *BatchGitContext) StashChanges() (bool, error) {
 	cmd := exec.CommandContext(
 		context.TODO(), "git", "stash", "push", "--include-untracked", "-m", "autoupdate-batch-stash",
 	)
 	cmd.Dir = c.tmpDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to stash changes: %w\nOutput: %s", err, string(output))
+		return false, fmt.Errorf("failed to stash changes: %w\nOutput: %s", err, string(output))
 	}
-	return nil
+
+	outputStr := string(output)
+	if !strings.Contains(outputStr, "Saved working directory") {
+		return false, nil
+	}
+
+	// Record the stash ref so PopStash can verify it pops the right entry.
+	refCmd := exec.CommandContext(context.TODO(), "git", "rev-parse", "stash@{0}")
+	refCmd.Dir = c.tmpDir
+	refOut, refErr := refCmd.CombinedOutput()
+	if refErr != nil {
+		return false, fmt.Errorf("failed to read stash ref: %w\nOutput: %s", refErr, string(refOut))
+	}
+	c.stashRef = strings.TrimSpace(string(refOut))
+
+	return true, nil
 }
 
-// PopStash restores the most recent stash entry.
+// PopStash restores the stash entry created by StashChanges. It verifies
+// that stash@{0} still matches the recorded ref before popping, to avoid
+// restoring an unrelated stash entry.
 func (c *BatchGitContext) PopStash() error {
+	if c.stashRef != "" {
+		refCmd := exec.CommandContext(context.TODO(), "git", "rev-parse", "stash@{0}")
+		refCmd.Dir = c.tmpDir
+		refOut, refErr := refCmd.CombinedOutput()
+		if refErr != nil {
+			return fmt.Errorf("failed to verify stash ref: %w\nOutput: %s", refErr, string(refOut))
+		}
+		currentRef := strings.TrimSpace(string(refOut))
+		if currentRef != c.stashRef {
+			return fmt.Errorf(
+				"stash@{0} ref changed (expected %s, got %s); refusing to pop wrong stash",
+				c.stashRef, currentRef,
+			)
+		}
+	}
+
 	cmd := exec.CommandContext(context.TODO(), "git", "stash", "pop")
 	cmd.Dir = c.tmpDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to pop stash: %w\nOutput: %s", err, string(output))
 	}
+	c.stashRef = ""
 	return nil
+}
+
+// DropStash drops the stash entry created by StashChanges without applying it.
+// This is used on error paths to clean up leftover stash entries.
+func (c *BatchGitContext) DropStash() {
+	if c.stashRef == "" {
+		return
+	}
+	cmd := exec.CommandContext(context.TODO(), "git", "stash", "drop")
+	cmd.Dir = c.tmpDir
+	_ = cmd.Run()
+	c.stashRef = ""
 }
 
 // Close removes the temporary directory created during cloning.
