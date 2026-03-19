@@ -200,6 +200,7 @@ func (c *BatchGitContext) CommitSignedAndPush(
 		settings.GpgKeyPath,
 		settings.GpgKeyPassphrase,
 		"autoupdate",
+		userConfig.SSHProgram,
 	)
 	if err != nil {
 		return false, fmt.Errorf("failed to resolve commit signer: %w", err)
