@@ -1,6 +1,7 @@
 package gitlocal
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -85,7 +86,7 @@ func (c *LocalGitContext) StashIfDirty() (bool, error) {
 	}
 
 	logger.Info("Uncommitted changes detected, stashing...")
-	cmd := exec.Command("git", "stash", "push", "--include-untracked", "-m", "autoupdate-auto-stash")
+	cmd := exec.CommandContext(context.TODO(), "git", "stash", "push", "--include-untracked", "-m", "autoupdate-auto-stash")
 	cmd.Dir = c.repoDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -102,7 +103,7 @@ func (c *LocalGitContext) StashIfDirty() (bool, error) {
 	}
 
 	// Record the stash ref so RestoreStash can verify it pops the right entry.
-	refCmd := exec.Command("git", "rev-parse", "stash@{0}")
+	refCmd := exec.CommandContext(context.TODO(), "git", "rev-parse", "stash@{0}")
 	refCmd.Dir = c.repoDir
 	refOut, refErr := refCmd.CombinedOutput()
 	if refErr != nil {
@@ -119,7 +120,7 @@ func (c *LocalGitContext) StashIfDirty() (bool, error) {
 // StashIfDirty returned true.
 func (c *LocalGitContext) RestoreStash() error {
 	if c.stashRef != "" {
-		refCmd := exec.Command("git", "rev-parse", "stash@{0}")
+		refCmd := exec.CommandContext(context.TODO(), "git", "rev-parse", "stash@{0}")
 		refCmd.Dir = c.repoDir
 		refOut, refErr := refCmd.CombinedOutput()
 		if refErr != nil {
@@ -134,7 +135,7 @@ func (c *LocalGitContext) RestoreStash() error {
 		}
 	}
 
-	cmd := exec.Command("git", "stash", "pop")
+	cmd := exec.CommandContext(context.TODO(), "git", "stash", "pop")
 	cmd.Dir = c.repoDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
