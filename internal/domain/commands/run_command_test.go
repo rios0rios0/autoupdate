@@ -235,6 +235,62 @@ func TestRunCommandExecute(t *testing.T) {
 		assert.Empty(t, updaterSpy.CreatePRsCalls)
 	})
 
+	t.Run("should not skip updater when enabled is omitted from config", func(t *testing.T) {
+		// given
+		repo := entitybuilders.NewRepositoryBuilder().
+			WithID("repo-1").
+			WithName("test-repo").
+			WithOrganization("test-org").
+			WithDefaultBranch("refs/heads/main").
+			BuildRepository()
+
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithProviderName("github").
+			WithToken("test-token").
+			WithRepositories([]entities.Repository{repo}).
+			BuildSpy()
+
+		updaterSpy := doubles.NewSpyUpdaterRepositoryBuilder().
+			WithUpdaterName("terraform").
+			WithDetectResult(true).
+			WithPRs([]entities.PullRequest{{ID: 42, Title: "Update dep", URL: "https://example.com/pr/42"}}).
+			BuildSpy()
+
+		providerRegistry := infraRepos.NewProviderRegistry()
+		providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
+			return spy
+		})
+
+		updaterRegistry := infraRepos.NewUpdaterRegistry()
+		updaterRegistry.Register(updaterSpy)
+
+		cmd := commands.NewRunCommand(providerRegistry, updaterRegistry)
+
+		settings := entitybuilders.NewSettingsBuilder().
+			WithProviders([]entities.ProviderConfig{
+				entitybuilders.NewProviderConfigBuilder().
+					WithType("github").
+					WithToken("test-token").
+					WithOrganizations([]string{"test-org"}).
+					BuildProviderConfig(),
+			}).
+			WithUpdaters(map[string]entities.UpdaterConfig{
+				"terraform": entitybuilders.NewUpdaterConfigBuilder().
+					WithTargetBranch("main").
+					BuildUpdaterConfig(),
+			}).
+			BuildSettings()
+		opts := commands.RunOptions{}
+
+		// when
+		err := cmd.Execute(context.Background(), settings, opts)
+
+		// then
+		require.NoError(t, err)
+		assert.Len(t, updaterSpy.CreatePRsCalls, 1)
+		assert.Equal(t, "test-repo", updaterSpy.CreatePRsCalls[0].Repo.Name)
+	})
+
 	t.Run("should respect UpdaterName filter", func(t *testing.T) {
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().

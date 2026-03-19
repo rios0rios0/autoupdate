@@ -226,7 +226,7 @@ func (it *RunCommand) collectApplicableUpdaters(
 			continue
 		}
 
-		if updaterCfg, ok := settings.Updaters[u.Name()]; ok && !updaterCfg.Enabled {
+		if updaterCfg, ok := settings.Updaters[u.Name()]; ok && !updaterCfg.IsEnabled() {
 			continue
 		}
 

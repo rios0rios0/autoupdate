@@ -28,9 +28,15 @@ type Settings struct {
 
 // UpdaterConfig holds per-updater settings.
 type UpdaterConfig struct {
-	Enabled      bool   `yaml:"enabled"`
+	Enabled      *bool  `yaml:"enabled"`
 	AutoComplete bool   `yaml:"auto_complete"`
 	TargetBranch string `yaml:"target_branch"`
+}
+
+// IsEnabled returns whether the updater is enabled.
+// When Enabled is nil (not set in config), it defaults to true.
+func (c UpdaterConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
 }
 
 // NewSettings reads and parses a configuration file, expanding environment variables

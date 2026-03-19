@@ -93,12 +93,13 @@ providers:
 
 updaters:
   terraform:
-    enabled: true
     auto_complete: false
-    target_branch: "main"
+    target_branch: 'main'
   golang:
-    enabled: true
-    target_branch: "main"
+    target_branch: 'main'
+  # enabled defaults to true; set to false to disable:
+  # python:
+  #   enabled: false
 ```
 
 ### Token Resolution
