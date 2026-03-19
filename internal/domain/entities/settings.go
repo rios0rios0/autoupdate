@@ -3,11 +3,17 @@ package entities
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"strings"
 
 	configEntities "github.com/rios0rios0/gitforge/pkg/config/domain/entities"
 	"gopkg.in/yaml.v3"
 )
+
+// DefaultConfigURL is the URL to the default autoupdate configuration file.
+const DefaultConfigURL = "https://raw.githubusercontent.com/rios0rios0/autoupdate/" +
+	"main/configs/autoupdate.yaml"
 
 // ProviderConfig is a type alias for gitforge's ProviderConfig, preserving backward compatibility.
 type ProviderConfig = configEntities.ProviderConfig
@@ -28,9 +34,21 @@ type Settings struct {
 
 // UpdaterConfig holds per-updater settings.
 type UpdaterConfig struct {
-	Enabled      bool   `yaml:"enabled"`
-	AutoComplete bool   `yaml:"auto_complete"`
+	Enabled      *bool  `yaml:"enabled"`
+	AutoComplete *bool  `yaml:"auto_complete"`
 	TargetBranch string `yaml:"target_branch"`
+}
+
+// IsEnabled returns whether the updater is enabled.
+// When Enabled is nil (not set in config), it defaults to true.
+func (c UpdaterConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
+}
+
+// IsAutoComplete returns whether auto-complete is enabled.
+// When AutoComplete is nil (not set in config), it defaults to false.
+func (c UpdaterConfig) IsAutoComplete() bool {
+	return c.AutoComplete != nil && *c.AutoComplete
 }
 
 // NewSettings reads and parses a configuration file, expanding environment variables
@@ -71,6 +89,19 @@ func NewSettings(path string) (*Settings, error) {
 	return &settings, nil
 }
 
+// DecodeSettings decodes YAML data into a Settings struct.
+// When strict is true, unknown fields cause an error (user config).
+// When strict is false, unknown fields are ignored (default config).
+func DecodeSettings(data []byte, strict bool) (*Settings, error) {
+	var settings Settings
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	decoder.KnownFields(strict)
+	if err := decoder.Decode(&settings); err != nil {
+		return nil, fmt.Errorf("failed to decode settings: %w", err)
+	}
+	return &settings, nil
+}
+
 // ValidateSettings checks for required configuration values.
 func ValidateSettings(settings *Settings) error {
 	if len(settings.Providers) == 0 {
@@ -96,4 +127,37 @@ func ValidateSettings(settings *Settings) error {
 	}
 
 	return nil
+}
+
+// MergeUpdatersConfig deep-merges user updater overrides into defaults.
+// For each updater: nil pointer fields in the override keep the default value;
+// non-nil pointer fields replace the default. Non-zero string fields replace defaults.
+// New updater names not present in defaults are added wholesale.
+func MergeUpdatersConfig(
+	defaults, overrides map[string]UpdaterConfig,
+) map[string]UpdaterConfig {
+	result := make(map[string]UpdaterConfig, len(defaults))
+	maps.Copy(result, defaults)
+
+	for name, override := range overrides {
+		base, exists := result[name]
+		if !exists {
+			result[name] = override
+			continue
+		}
+
+		if override.Enabled != nil {
+			base.Enabled = override.Enabled
+		}
+		if override.AutoComplete != nil {
+			base.AutoComplete = override.AutoComplete
+		}
+		if override.TargetBranch != "" {
+			base.TargetBranch = override.TargetBranch
+		}
+
+		result[name] = base
+	}
+
+	return result
 }
