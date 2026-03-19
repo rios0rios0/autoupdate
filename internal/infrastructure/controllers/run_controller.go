@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 
-	configHelpers "github.com/rios0rios0/gitforge/pkg/config/domain/helpers"
 	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -47,23 +46,7 @@ func (it *RunController) Execute(cmd *cobra.Command, _ []string) {
 	orgOverride, _ := cmd.Flags().GetString("org")
 	updaterFilter, _ := cmd.Flags().GetString("updater")
 
-	// Load configuration
-	cfgPath := configPath
-	if cfgPath == "" {
-		var err error
-		cfgPath, err = configHelpers.FindConfigFile("autoupdate")
-		if err != nil {
-			logger.Errorf(
-				"no config file found: %v\nSpecify one with --config or create autoupdate.yaml",
-				err,
-			)
-			return
-		}
-	}
-
-	logger.Infof("Using config file: %s", cfgPath)
-
-	settings, err := entities.NewSettings(cfgPath)
+	settings, err := findReadAndValidateConfig(configPath)
 	if err != nil {
 		logger.Errorf("failed to load config: %v", err)
 		return
@@ -87,6 +70,6 @@ func (it *RunController) AddFlags(cmd *cobra.Command) {
 	cmd.Flags().String("provider", "", "Only process this provider (github, gitlab, azuredevops)")
 	cmd.Flags().String("org", "", "Only process this organization/group")
 	cmd.Flags().String("updater", "",
-		"Only run this updater (terraform, golang, python, javascript)",
+		"Only run this updater (terraform, golang, python, javascript, pipeline, dockerfile)",
 	)
 }
