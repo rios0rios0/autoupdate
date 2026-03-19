@@ -11,7 +11,7 @@ import (
 type UpdaterConfigBuilder struct {
 	*testkit.BaseBuilder
 	enabled      *bool
-	autoComplete bool
+	autoComplete *bool
 	targetBranch string
 }
 
@@ -20,7 +20,7 @@ func NewUpdaterConfigBuilder() *UpdaterConfigBuilder {
 	return &UpdaterConfigBuilder{
 		BaseBuilder:  testkit.NewBaseBuilder(),
 		enabled:      nil,
-		autoComplete: false,
+		autoComplete: nil,
 		targetBranch: "",
 	}
 }
@@ -33,7 +33,7 @@ func (b *UpdaterConfigBuilder) WithEnabled(enabled bool) *UpdaterConfigBuilder {
 
 // WithAutoComplete sets the auto-complete flag.
 func (b *UpdaterConfigBuilder) WithAutoComplete(autoComplete bool) *UpdaterConfigBuilder {
-	b.autoComplete = autoComplete
+	b.autoComplete = &autoComplete
 	return b
 }
 
@@ -61,7 +61,7 @@ func (b *UpdaterConfigBuilder) BuildUpdaterConfig() entities.UpdaterConfig {
 func (b *UpdaterConfigBuilder) Reset() testkit.Builder {
 	b.BaseBuilder.Reset()
 	b.enabled = nil
-	b.autoComplete = false
+	b.autoComplete = nil
 	b.targetBranch = ""
 	return b
 }
@@ -73,10 +73,15 @@ func (b *UpdaterConfigBuilder) Clone() testkit.Builder {
 		v := *b.enabled
 		clonedEnabled = &v
 	}
+	var clonedAutoComplete *bool
+	if b.autoComplete != nil {
+		v := *b.autoComplete
+		clonedAutoComplete = &v
+	}
 	return &UpdaterConfigBuilder{
 		BaseBuilder:  b.BaseBuilder.Clone().(*testkit.BaseBuilder),
 		enabled:      clonedEnabled,
-		autoComplete: b.autoComplete,
+		autoComplete: clonedAutoComplete,
 		targetBranch: b.targetBranch,
 	}
 }
