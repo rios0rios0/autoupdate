@@ -256,7 +256,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	output, cmdErr := cmd.CombinedOutput()
 	outputStr := string(output)
-	logger.Infof("[python] Upgrade script output:\n%s", outputStr)
+	logger.Debugf("[python] Upgrade script output:\n%s", outputStr)
 
 	if cmdErr != nil {
 		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, outputStr)
