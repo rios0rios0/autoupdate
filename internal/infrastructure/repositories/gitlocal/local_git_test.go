@@ -50,10 +50,10 @@ func TestNewLocalGitContext(t *testing.T) {
 	})
 }
 
-func TestEnsureClean(t *testing.T) {
+func TestStashIfDirty(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should succeed when worktree is clean", func(t *testing.T) {
+	t.Run("should return false when worktree is clean", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -62,27 +62,91 @@ func TestEnsureClean(t *testing.T) {
 		require.NoError(t, err)
 
 		// when
-		err = ctx.EnsureClean()
+		stashed, err := ctx.StashIfDirty()
 
 		// then
 		require.NoError(t, err)
+		assert.False(t, stashed)
 	})
 
-	t.Run("should return error when worktree has uncommitted changes", func(t *testing.T) {
+	t.Run("should return true and stash when worktree has untracked files", func(t *testing.T) {
 		t.Parallel()
 
 		// given
 		repoDir := createTestRepoWithCommit(t)
-		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "dirty.txt"), []byte("dirty"), 0o600))
+		dirtyFile := filepath.Join(repoDir, "dirty.txt")
+		require.NoError(t, os.WriteFile(dirtyFile, []byte("dirty"), 0o600))
 		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
 		require.NoError(t, err)
 
 		// when
-		err = ctx.EnsureClean()
+		stashed, err := ctx.StashIfDirty()
 
 		// then
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "uncommitted changes")
+		require.NoError(t, err)
+		assert.True(t, stashed)
+
+		// verify the dirty file was stashed (no longer in worktree)
+		_, statErr := os.Stat(dirtyFile)
+		assert.True(t, os.IsNotExist(statErr), "dirty file should have been stashed")
+	})
+
+	t.Run("should return true and stash when worktree has modified tracked files", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := createTestRepoWithCommit(t)
+		trackedFile := filepath.Join(repoDir, "README.md")
+		require.NoError(t, os.WriteFile(trackedFile, []byte("modified content"), 0o600))
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
+		require.NoError(t, err)
+
+		// when
+		stashed, err := ctx.StashIfDirty()
+
+		// then
+		require.NoError(t, err)
+		assert.True(t, stashed)
+
+		// verify the tracked file was reverted to its committed state
+		content, readErr := os.ReadFile(trackedFile)
+		require.NoError(t, readErr)
+		assert.Equal(t, "# Test", string(content), "tracked file should be reverted after stash")
+
+		// verify restore brings the modification back
+		require.NoError(t, ctx.RestoreStash())
+		content, readErr = os.ReadFile(trackedFile)
+		require.NoError(t, readErr)
+		assert.Equal(t, "modified content", string(content), "tracked file should be restored after pop")
+	})
+}
+
+func TestRestoreStash(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should restore stashed changes", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := createTestRepoWithCommit(t)
+		dirtyFile := filepath.Join(repoDir, "dirty.txt")
+		require.NoError(t, os.WriteFile(dirtyFile, []byte("dirty"), 0o600))
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
+		require.NoError(t, err)
+		stashed, err := ctx.StashIfDirty()
+		require.NoError(t, err)
+		require.True(t, stashed)
+
+		// when
+		err = ctx.RestoreStash()
+
+		// then
+		require.NoError(t, err)
+
+		// verify the dirty file was restored
+		content, readErr := os.ReadFile(dirtyFile)
+		require.NoError(t, readErr)
+		assert.Equal(t, "dirty", string(content))
 	})
 }
 
