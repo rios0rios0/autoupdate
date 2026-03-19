@@ -348,8 +348,26 @@ func (it *RunCommand) runLocalUpdater(
 		return nil, 0
 	}
 
+	// CreateBranchFromDefault uses a force-checkout (go-git) which discards
+	// uncommitted working-tree changes.  The upgrade script already modified
+	// go.mod/go.sum on the default branch, so we must stash those changes
+	// before the branch switch and pop them on the new branch.
+	logger.Infof("[%s] Stashing upgrade changes before branch switch to %s", name, result.BranchName)
+	if stashErr := batchCtx.StashChanges(); stashErr != nil {
+		logger.Errorf("[%s] Failed to stash changes before branch switch: %v", name, stashErr)
+		resetWorktree(batchCtx, name)
+		return nil, 1
+	}
+
 	if branchErr := batchCtx.CreateBranchFromDefault(result.BranchName); branchErr != nil {
 		logger.Errorf("[%s] Failed to create branch %s: %v", name, result.BranchName, branchErr)
+		resetWorktree(batchCtx, name)
+		return nil, 1
+	}
+
+	logger.Infof("[%s] Restoring upgrade changes on branch %s", name, result.BranchName)
+	if popErr := batchCtx.PopStash(); popErr != nil {
+		logger.Errorf("[%s] Failed to pop stash after branch switch: %v", name, popErr)
 		resetWorktree(batchCtx, name)
 		return nil, 1
 	}
