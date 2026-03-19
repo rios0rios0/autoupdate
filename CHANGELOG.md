@@ -20,6 +20,12 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 - changed the Go module dependencies to their latest versions
 
+### Fixed
+
+- fixed batch mode silently losing upgrade changes because `CreateBranchFromDefault` force-checkout wiped uncommitted `go.mod`/`go.sum` modifications
+- fixed batch mode stash/pop safety by tracking whether a stash was created and verifying the stash ref before popping
+- fixed potential auth token leak in upgrade script debug logs by redacting tokens from output
+
 ## [0.10.1] - 2026-03-18
 
 ### Changed
@@ -30,7 +36,6 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 - fixed Go dependency updater using deprecated `go get -u all` pattern that fails to detect updates in modern Go versions, replaced with `go get -u -t ./...`
 - fixed local mode stash restore that could pop an unrelated stash entry or restore onto the wrong branch
-- fixed batch mode silently losing upgrade changes because `CreateBranchFromDefault` force-checkout wiped uncommitted `go.mod`/`go.sum` modifications
 
 ## [0.10.0] - 2026-03-17
 
