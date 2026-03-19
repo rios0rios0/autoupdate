@@ -255,11 +255,14 @@ func (u *UpdaterRepository) ApplyUpdates(
 	cmd.Env = env
 
 	output, cmdErr := cmd.CombinedOutput()
+	outputStr := string(output)
+	logger.Debugf("[python] Upgrade script output:\n%s", outputStr)
+
 	if cmdErr != nil {
-		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, string(output))
+		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, outputStr)
 	}
 
-	pyVersionUpdated := strings.Contains(string(output), "PYTHON_VERSION_UPDATED=true")
+	pyVersionUpdated := strings.Contains(outputStr, "PYTHON_VERSION_UPDATED=true")
 
 	// Update CHANGELOG locally
 	var entry string

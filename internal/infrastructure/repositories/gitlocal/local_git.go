@@ -249,6 +249,7 @@ func (c *LocalGitContext) StageCommitAndPush(
 		"",
 		os.Getenv("GPG_PASSPHRASE"),
 		"autoupdate",
+		userConfig.SSHProgram,
 	)
 	if err != nil {
 		return false, fmt.Errorf("failed to resolve commit signer: %w", err)

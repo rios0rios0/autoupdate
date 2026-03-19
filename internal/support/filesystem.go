@@ -82,6 +82,18 @@ func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 	return nil
 }
 
+// RedactTokens replaces occurrences of the given tokens with "[REDACTED]"
+// in the input string. This prevents auth tokens from leaking into logs
+// or error messages when script output is captured.
+func RedactTokens(input string, tokens ...string) string {
+	for _, token := range tokens {
+		if token != "" {
+			input = strings.ReplaceAll(input, token, "[REDACTED]")
+		}
+	}
+	return input
+}
+
 // HasUncommittedChanges returns true when the git working tree at repoDir
 // contains unstaged or untracked modifications. On error (e.g. git not
 // found, not a repo) it returns true to avoid false negatives that would
