@@ -28,6 +28,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - fixed the pipeline updater replacing `displayName` instead of `versionSpec` in Azure DevOps pipeline files when both contained the same version string
 - fixed stale temporary directories and changelog files not being cleaned up after process termination
 - fixed Terraform, Dockerfile, and Pipeline updaters generating changelog entries without backticks around code identifiers and version numbers, violating the CHANGELOG formatting standard
+- fixed the Terraform updater using non-production tags by validating that upgrade targets appear in the dependency repo's CHANGELOG.md
 
 ### Changed
 

@@ -282,23 +282,23 @@ func (u *UpdaterRepository) determineUpgrades(
 	repo entities.Repository,
 	allDeps []depWithContent,
 ) []upgradeTask {
-	moduleVersions := make(map[string][]string)
+	moduleVersions := make(map[string]resolvedSource)
 	for _, dc := range allDeps {
 		src := dc.Dependency.Source
 		if _, ok := moduleVersions[src]; ok {
 			continue
 		}
-		tags := resolveTagsForSource(ctx, provider, repo, src)
-		moduleVersions[src] = tags
+		tags, depRepo := resolveTagsForSource(ctx, provider, repo, src)
+		moduleVersions[src] = resolvedSource{tags: tags, depRepo: depRepo}
 	}
 
 	var upgrades []upgradeTask
 	for _, dc := range allDeps {
-		tags := moduleVersions[dc.Dependency.Source]
-		if len(tags) == 0 {
+		resolved := moduleVersions[dc.Dependency.Source]
+		if len(resolved.tags) == 0 {
 			continue
 		}
-		latestVersion := tags[0]
+		latestVersion := findLatestChangelogVersion(ctx, provider, resolved.depRepo, resolved.tags)
 		if dc.Dependency.CurrentVer == latestVersion {
 			continue
 		}
@@ -696,35 +696,91 @@ func buildSourceWithVersion(source, version string) string {
 
 // --- tag resolution ---
 
+// resolvedSource holds the tags and the repository entity for a dependency source.
+type resolvedSource struct {
+	tags    []string
+	depRepo *entities.Repository
+}
+
 func resolveTagsForSource(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	currentRepo entities.Repository,
 	source string,
-) []string {
+) ([]string, *entities.Repository) {
 	repoName := extractRepoName(source)
 	if repoName == "" {
-		return nil
+		return nil, nil
 	}
 
 	allRepos, err := provider.DiscoverRepositories(
 		ctx, currentRepo.Organization,
 	)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 
 	for _, r := range allRepos {
 		if r.Name == repoName {
 			tags, tagsErr := provider.GetTags(ctx, r)
 			if tagsErr != nil {
-				return nil
+				return nil, nil
 			}
-			return tags
+			return tags, &r
 		}
 	}
 
-	return nil
+	return nil, nil
+}
+
+// versionHeadingRegex matches Keep-a-Changelog version headings like ## [1.2.3].
+var versionHeadingRegex = regexp.MustCompile(`(?m)^\s*##\s*\[([^\]]+)\]`)
+
+// extractChangelogVersions parses a CHANGELOG.md and returns the set of
+// version strings that appear as release headings (e.g., ## [1.2.3]).
+func extractChangelogVersions(content string) map[string]bool {
+	versions := make(map[string]bool)
+	for _, match := range versionHeadingRegex.FindAllStringSubmatch(content, -1) {
+		if match[1] != "Unreleased" {
+			versions[match[1]] = true
+		}
+	}
+	return versions
+}
+
+// findLatestChangelogVersion iterates through tags (sorted descending by
+// semver) and returns the first one documented in the dependency repo's
+// CHANGELOG.md. Falls back to tags[0] when no changelog exists or no tags
+// match, to avoid breaking repos that don't follow the changelog convention.
+func findLatestChangelogVersion(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	depRepo *entities.Repository,
+	tags []string,
+) string {
+	if depRepo == nil || !provider.HasFile(ctx, *depRepo, "CHANGELOG.md") {
+		return tags[0]
+	}
+
+	content, err := provider.GetFileContent(ctx, *depRepo, "CHANGELOG.md")
+	if err != nil {
+		logger.Warnf("[terraform] Failed to read CHANGELOG.md from %s: %v", depRepo.Name, err)
+		return tags[0]
+	}
+
+	versions := extractChangelogVersions(content)
+	if len(versions) == 0 {
+		return tags[0]
+	}
+
+	for _, tag := range tags {
+		if versions[tag] {
+			return tag
+		}
+	}
+
+	logger.Warnf("[terraform] No tags from %s match any CHANGELOG version, using latest tag", depRepo.Name)
+	return tags[0]
 }
 
 // --- PR text generation ---
