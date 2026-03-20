@@ -146,6 +146,9 @@ func cloneAndUpgrade(
 	pkgMgr string,
 ) (*upgradeResult, error) {
 	changelogFile := prepareChangelog(ctx, provider, repo, vCtx)
+	if changelogFile != "" {
+		defer os.Remove(changelogFile)
+	}
 
 	cloneURL := provider.CloneURL(repo)
 	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")

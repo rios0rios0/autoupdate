@@ -489,6 +489,20 @@ func truncateToGranularity(latest, reference string) string {
 	return strings.Join(latestParts[:len(refParts)], ".")
 }
 
+// --- string helpers ---
+
+// replaceLastOccurrence replaces only the last occurrence of old in s with replacement.
+// This is used instead of [strings.Replace] to ensure multi-line regex matches
+// replace the version in the actual config key (e.g. versionSpec) rather than
+// in a preceding label (e.g. displayName).
+func replaceLastOccurrence(s, old, replacement string) string {
+	idx := strings.LastIndex(s, old)
+	if idx < 0 {
+		return s
+	}
+	return s[:idx] + replacement + s[idx+len(old):]
+}
+
 // --- upgrade application ---
 
 // applyUpgrades applies version replacements to file contents.
@@ -502,7 +516,7 @@ func applyUpgrades(upgrades []upgradeTask, fileContents map[string]string) []ent
 			continue
 		}
 
-		newMatch := strings.Replace(up.match.FullMatch, up.match.CurrentVer, up.newVersion, 1)
+		newMatch := replaceLastOccurrence(up.match.FullMatch, up.match.CurrentVer, up.newVersion)
 		content = strings.Replace(content, up.match.FullMatch, newMatch, 1)
 		modified[up.match.FilePath] = content
 	}

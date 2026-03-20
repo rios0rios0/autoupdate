@@ -22,6 +22,12 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - added `MergeUpdatersConfig()` function for field-level deep merge of updater configurations
 - added `DecodeSettings()` function for parsing YAML settings with optional strict mode
 
+### Fixed
+
+- fixed the Python updater creating empty PRs when the upgrade script did not modify any files
+- fixed the pipeline updater replacing `displayName` instead of `versionSpec` in Azure DevOps pipeline files when both contained the same version string
+- fixed stale temporary directories and changelog files not being cleaned up after process termination
+
 ### Changed
 
 - changed `UpdaterConfig.Enabled` field to default to `true` when omitted from config, preventing updaters from being silently disabled when only `target_branch` or `auto_complete` is set

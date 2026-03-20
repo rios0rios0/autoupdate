@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
@@ -301,5 +302,19 @@ func (c *BatchGitContext) DropStash() {
 func (c *BatchGitContext) Close() {
 	if c.tmpDir != "" {
 		_ = os.RemoveAll(c.tmpDir)
+	}
+}
+
+// CleanupStaleTempDirs removes leftover autoupdate temporary directories and
+// files from the OS temp dir. These accumulate when the process is killed
+// (SIGKILL, OOM) before deferred cleanup can run.
+func CleanupStaleTempDirs() {
+	tmpDir := os.TempDir()
+	for _, pattern := range []string{"autoupdate-batch-*", "autoupdate-local-*", "changelog-*.md"} {
+		matches, _ := filepath.Glob(filepath.Join(tmpDir, pattern))
+		for _, m := range matches {
+			logger.Debugf("Cleaning up stale temp path: %s", m)
+			_ = os.RemoveAll(m)
+		}
 	}
 }
