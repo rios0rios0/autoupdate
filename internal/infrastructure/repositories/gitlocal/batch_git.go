@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	gitconfig "github.com/go-git/go-git/v5/config"
@@ -305,14 +306,35 @@ func (c *BatchGitContext) Close() {
 	}
 }
 
+// staleTempThreshold is the minimum age a temp path must have before it is
+// considered stale. This prevents concurrent autoupdate runs from deleting
+// each other's active temporary directories.
+const staleTempThreshold = 30 * time.Minute
+
 // CleanupStaleTempDirs removes leftover autoupdate temporary directories and
 // files from the OS temp dir. These accumulate when the process is killed
-// (SIGKILL, OOM) before deferred cleanup can run.
+// (SIGKILL, OOM) before deferred cleanup can run. Only paths older than
+// staleTempThreshold are removed to avoid interfering with concurrent runs.
 func CleanupStaleTempDirs() {
 	tmpDir := os.TempDir()
-	for _, pattern := range []string{"autoupdate-batch-*", "autoupdate-local-*", "changelog-*.md"} {
+	cutoff := time.Now().Add(-staleTempThreshold)
+
+	for _, pattern := range []string{
+		"autoupdate-batch-*",
+		"autoupdate-local-*",
+		"autoupdate-go-*",
+		"autoupdate-js-*",
+		"autoupdate-js-local-*",
+		"autoupdate-python-*",
+		"autoupdate-python-local-*",
+		"autoupdate-changelog-*.md",
+	} {
 		matches, _ := filepath.Glob(filepath.Join(tmpDir, pattern))
 		for _, m := range matches {
+			info, err := os.Stat(m)
+			if err != nil || info.ModTime().After(cutoff) {
+				continue
+			}
 			logger.Debugf("Cleaning up stale temp path: %s", m)
 			_ = os.RemoveAll(m)
 		}
