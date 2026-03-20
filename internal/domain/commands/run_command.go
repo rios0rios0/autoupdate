@@ -57,6 +57,8 @@ func (it *RunCommand) Execute(
 		logger.SetLevel(logger.DebugLevel)
 	}
 
+	gitlocal.CleanupStaleTempDirs()
+
 	totalPRs := 0
 	totalRepos := 0
 	totalErrors := 0

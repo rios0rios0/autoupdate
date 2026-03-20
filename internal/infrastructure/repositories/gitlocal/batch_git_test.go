@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/stretchr/testify/assert"
@@ -68,6 +69,43 @@ func TestCreateBranchFromDefault_PreservesChangesWithStash(t *testing.T) {
 		head, err := repo.Head()
 		require.NoError(t, err)
 		assert.Equal(t, "refs/heads/chore/upgrade-test", head.Name().String())
+	})
+}
+
+func TestCleanupStaleTempDirs(t *testing.T) {
+	// Not parallel: t.Setenv modifies process-wide env vars and the function
+	// under test operates on the OS temp directory.
+
+	t.Run("should remove stale autoupdate temp directories and changelog files", func(t *testing.T) {
+		// given — scope os.TempDir() to a test-owned directory so we don't
+		// interfere with other tests or processes on the same machine.
+		tempBase := t.TempDir()
+		t.Setenv("TMPDIR", tempBase)
+
+		batchDir, err := os.MkdirTemp("", "autoupdate-batch-*")
+		require.NoError(t, err)
+		localDir, err := os.MkdirTemp("", "autoupdate-local-*")
+		require.NoError(t, err)
+		changelogFile, err := os.CreateTemp("", "autoupdate-changelog-*.md")
+		require.NoError(t, err)
+		_ = changelogFile.Close()
+
+		// Backdate the paths so they exceed the stale threshold
+		past := time.Now().Add(-time.Hour)
+		require.NoError(t, os.Chtimes(batchDir, past, past))
+		require.NoError(t, os.Chtimes(localDir, past, past))
+		require.NoError(t, os.Chtimes(changelogFile.Name(), past, past))
+
+		// when
+		gitlocal.CleanupStaleTempDirs()
+
+		// then
+		_, statErr := os.Stat(batchDir)
+		assert.True(t, os.IsNotExist(statErr))
+		_, statErr = os.Stat(localDir)
+		assert.True(t, os.IsNotExist(statErr))
+		_, statErr = os.Stat(changelogFile.Name())
+		assert.True(t, os.IsNotExist(statErr))
 	})
 }
 
