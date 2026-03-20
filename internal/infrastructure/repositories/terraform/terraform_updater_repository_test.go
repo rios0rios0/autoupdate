@@ -88,6 +88,56 @@ func TestFindLatestChangelogVersion(t *testing.T) {
 		assert.Equal(t, "6.15.0", result)
 	})
 
+	t.Run("should match v-prefixed tags against changelog headings without v prefix", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		changelog := `# Changelog
+
+## [Unreleased]
+
+## [6.15.0] - 2026-03-15
+
+## [6.14.0] - 2026-03-01
+`
+		depRepo := entities.Repository{Organization: "org", Name: "app"}
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
+			WithFileContents(map[string]string{"CHANGELOG.md": changelog}).
+			BuildSpy()
+		tags := []string{"v6.16.0", "v6.15.0", "v6.14.0"}
+
+		// when
+		result := terraform.FindLatestChangelogVersion(t.Context(), provider, &depRepo, tags)
+
+		// then
+		assert.Equal(t, "v6.15.0", result)
+	})
+
+	t.Run("should match plain tags against v-prefixed changelog headings", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		changelog := `# Changelog
+
+## [Unreleased]
+
+## [v6.15.0] - 2026-03-15
+`
+		depRepo := entities.Repository{Organization: "org", Name: "app"}
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
+			WithFileContents(map[string]string{"CHANGELOG.md": changelog}).
+			BuildSpy()
+		tags := []string{"6.16.0", "6.15.0"}
+
+		// when
+		result := terraform.FindLatestChangelogVersion(t.Context(), provider, &depRepo, tags)
+
+		// then
+		assert.Equal(t, "6.15.0", result)
+	})
+
 	t.Run("should fall back to tags[0] when dependency repo has no changelog", func(t *testing.T) {
 		t.Parallel()
 
