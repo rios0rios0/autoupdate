@@ -289,7 +289,11 @@ func (u *UpdaterRepository) determineUpgrades(
 			continue
 		}
 		tags, depRepo := resolveTagsForSource(ctx, provider, repo, src)
-		moduleVersions[src] = resolvedSource{tags: tags, depRepo: depRepo}
+		var latest string
+		if len(tags) > 0 {
+			latest = findLatestChangelogVersion(ctx, provider, depRepo, tags)
+		}
+		moduleVersions[src] = resolvedSource{tags: tags, depRepo: depRepo, latestVersion: latest}
 	}
 
 	var upgrades []upgradeTask
@@ -298,7 +302,7 @@ func (u *UpdaterRepository) determineUpgrades(
 		if len(resolved.tags) == 0 {
 			continue
 		}
-		latestVersion := findLatestChangelogVersion(ctx, provider, resolved.depRepo, resolved.tags)
+		latestVersion := resolved.latestVersion
 		if dc.Dependency.CurrentVer == latestVersion {
 			continue
 		}
@@ -696,10 +700,13 @@ func buildSourceWithVersion(source, version string) string {
 
 // --- tag resolution ---
 
-// resolvedSource holds the tags and the repository entity for a dependency source.
+// resolvedSource holds the tags, the repository entity, and the changelog-validated
+// latest version for a dependency source. The latestVersion is computed once per
+// unique source to avoid repeated CHANGELOG API calls.
 type resolvedSource struct {
-	tags    []string
-	depRepo *entities.Repository
+	tags          []string
+	depRepo       *entities.Repository
+	latestVersion string
 }
 
 func resolveTagsForSource(
@@ -736,13 +743,20 @@ func resolveTagsForSource(
 // versionHeadingRegex matches Keep-a-Changelog version headings like ## [1.2.3].
 var versionHeadingRegex = regexp.MustCompile(`(?m)^\s*##\s*\[([^\]]+)\]`)
 
+// stripVersionPrefix removes a leading "v" or "V" prefix from a version string
+// so that tags like "v1.2.3" and changelog headings like "1.2.3" can be
+// compared consistently.
+func stripVersionPrefix(v string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(v, "v"), "V")
+}
+
 // extractChangelogVersions parses a CHANGELOG.md and returns the set of
-// version strings that appear as release headings (e.g., ## [1.2.3]).
+// normalized version strings that appear as release headings (e.g., ## [1.2.3]).
 func extractChangelogVersions(content string) map[string]bool {
 	versions := make(map[string]bool)
 	for _, match := range versionHeadingRegex.FindAllStringSubmatch(content, -1) {
 		if match[1] != "Unreleased" {
-			versions[match[1]] = true
+			versions[stripVersionPrefix(match[1])] = true
 		}
 	}
 	return versions
@@ -774,7 +788,7 @@ func findLatestChangelogVersion(
 	}
 
 	for _, tag := range tags {
-		if versions[tag] {
+		if versions[stripVersionPrefix(tag)] {
 			return tag
 		}
 	}
