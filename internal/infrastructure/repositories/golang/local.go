@@ -190,6 +190,9 @@ func runLanguageUpgradeScript(
 	opts LocalUpgradeOptions,
 ) (string, error) {
 	changelogFile := prepareLocalChangelog(repoDir, vCtx)
+	if changelogFile != "" {
+		defer os.Remove(changelogFile)
+	}
 
 	goBinary, err := findGoBinary()
 	if err != nil {

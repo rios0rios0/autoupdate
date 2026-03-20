@@ -254,6 +254,77 @@ func TestTruncateToGranularity(t *testing.T) {
 	})
 }
 
+func TestReplaceLastOccurrence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should replace only the last occurrence of the substring", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		s := "version 3.12 and version 3.12"
+
+		// when
+		result := pipeline.ReplaceLastOccurrence(s, "3.12", "3.13")
+
+		// then
+		assert.Equal(t, "version 3.12 and version 3.13", result)
+	})
+
+	t.Run("should replace the only occurrence when there is one", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		s := "versionSpec: '3.12'"
+
+		// when
+		result := pipeline.ReplaceLastOccurrence(s, "3.12", "3.13")
+
+		// then
+		assert.Equal(t, "versionSpec: '3.13'", result)
+	})
+
+	t.Run("should return original string when substring not found", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		s := "no match here"
+
+		// when
+		result := pipeline.ReplaceLastOccurrence(s, "3.12", "3.13")
+
+		// then
+		assert.Equal(t, "no match here", result)
+	})
+}
+
+func TestApplyUpgrades(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should replace versionSpec not displayName when both contain the same version", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `- task: UsePythonVersion@2
+  displayName: 'Install Python 3.12'
+  inputs:
+    versionSpec: '3.12'
+`
+		fullMatch := "UsePythonVersion@2\n  displayName: 'Install Python 3.12'\n  inputs:\n    versionSpec: '3.12'"
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-pipelines.yml", fullMatch),
+		}
+		fileContents := map[string]string{"azure-pipelines.yml": content}
+
+		// when
+		changes := pipeline.ApplyUpgrades(upgrades, fileContents)
+
+		// then
+		require.Len(t, changes, 1)
+		assert.Contains(t, changes[0].Content, "displayName: 'Install Python 3.12'")
+		assert.Contains(t, changes[0].Content, "versionSpec: '3.13'")
+	})
+}
+
 func TestIsExactVersion(t *testing.T) {
 	t.Parallel()
 

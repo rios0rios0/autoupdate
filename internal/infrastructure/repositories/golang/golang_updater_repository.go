@@ -301,6 +301,9 @@ func cloneAndUpgrade(
 ) (*upgradeResult, bool, error) {
 	hasConfigSH := provider.HasFile(ctx, repo, "config.sh")
 	changelogFile := prepareChangelog(ctx, provider, repo, vCtx)
+	if changelogFile != "" {
+		defer os.Remove(changelogFile)
+	}
 
 	cloneURL := provider.CloneURL(repo)
 	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")

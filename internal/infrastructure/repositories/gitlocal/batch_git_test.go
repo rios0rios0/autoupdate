@@ -71,6 +71,34 @@ func TestCreateBranchFromDefault_PreservesChangesWithStash(t *testing.T) {
 	})
 }
 
+func TestCleanupStaleTempDirs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should remove stale autoupdate temp directories and changelog files", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		batchDir, err := os.MkdirTemp("", "autoupdate-batch-*")
+		require.NoError(t, err)
+		localDir, err := os.MkdirTemp("", "autoupdate-local-*")
+		require.NoError(t, err)
+		changelogFile, err := os.CreateTemp("", "changelog-*.md")
+		require.NoError(t, err)
+		_ = changelogFile.Close()
+
+		// when
+		gitlocal.CleanupStaleTempDirs()
+
+		// then
+		_, statErr := os.Stat(batchDir)
+		assert.True(t, os.IsNotExist(statErr))
+		_, statErr = os.Stat(localDir)
+		assert.True(t, os.IsNotExist(statErr))
+		_, statErr = os.Stat(changelogFile.Name())
+		assert.True(t, os.IsNotExist(statErr))
+	})
+}
+
 // newBatchGitContext creates a BatchGitContext from a local repo for testing.
 func newBatchGitContext(t *testing.T, repoDir string) *gitlocal.BatchGitContext {
 	t.Helper()

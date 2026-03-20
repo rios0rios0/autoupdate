@@ -137,6 +137,9 @@ func cloneAndUpgrade(
 	vCtx *versionContext,
 ) (*upgradeResult, error) {
 	changelogFile := prepareChangelog(ctx, provider, repo, vCtx)
+	if changelogFile != "" {
+		defer os.Remove(changelogFile)
+	}
 	hasRequirements := provider.HasFile(ctx, repo, "requirements.txt")
 	hasPyproject := provider.HasFile(ctx, repo, "pyproject.toml")
 
@@ -263,6 +266,12 @@ func (u *UpdaterRepository) ApplyUpdates(
 	}
 
 	pyVersionUpdated := strings.Contains(outputStr, "PYTHON_VERSION_UPDATED=true")
+
+	// Return early if the upgrade script made no filesystem changes
+	if !support.HasUncommittedChanges(ctx, repoDir) {
+		logger.Infof("[python] No filesystem changes detected after upgrade script")
+		return nil, repositories.ErrNoUpdatesNeeded
+	}
 
 	// Update CHANGELOG locally
 	var entry string

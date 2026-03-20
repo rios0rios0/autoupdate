@@ -28,6 +28,29 @@ func NewUpgradeTask(language, currentVer, newVersion string) UpgradeTask {
 	}
 }
 
+// NewUpgradeTaskWithFullMatch creates an upgradeTask with a custom FullMatch for testing.
+func NewUpgradeTaskWithFullMatch(language, currentVer, newVersion, filePath, fullMatch string) UpgradeTask {
+	return upgradeTask{
+		match: versionMatch{
+			Language:   language,
+			CurrentVer: currentVer,
+			FullMatch:  fullMatch,
+			FilePath:   filePath,
+		},
+		newVersion: newVersion,
+	}
+}
+
+// ReplaceLastOccurrence is exported for testing.
+func ReplaceLastOccurrence(s, old, replacement string) string {
+	return replaceLastOccurrence(s, old, replacement)
+}
+
+// ApplyUpgrades is exported for testing.
+func ApplyUpgrades(upgrades []UpgradeTask, fileContents map[string]string) []entities.FileChange {
+	return applyUpgrades(upgrades, fileContents)
+}
+
 // AppendChangelogEntry is exported for testing.
 func AppendChangelogEntry(
 	ctx context.Context,

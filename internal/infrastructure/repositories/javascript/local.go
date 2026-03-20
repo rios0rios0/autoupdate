@@ -226,6 +226,9 @@ func runLanguageUpgradeScript(
 	opts LocalUpgradeOptions,
 ) (string, error) {
 	changelogFile := prepareLocalChangelog(repoDir, vCtx)
+	if changelogFile != "" {
+		defer os.Remove(changelogFile)
+	}
 
 	params := localUpgradeParams{
 		BranchName:     vCtx.BranchName,
