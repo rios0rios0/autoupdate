@@ -142,7 +142,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	entries := make([]string, 0, len(upgrades))
 	for _, up := range upgrades {
 		entries = append(entries, fmt.Sprintf(
-			"- changed the Docker base image %s from %s to %s",
+			"- changed the Docker base image `%s` from `%s` to `%s`",
 			up.parsed.FullName(), up.dep.CurrentVer, up.newTag,
 		))
 	}
@@ -515,7 +515,7 @@ func appendChangelogEntry(
 	entries := make([]string, 0, len(upgrades))
 	for _, up := range upgrades {
 		entries = append(entries, fmt.Sprintf(
-			"- changed the Docker base image %s from %s to %s",
+			"- changed the Docker base image `%s` from `%s` to `%s`",
 			up.parsed.FullName(), up.dep.CurrentVer, up.newTag,
 		))
 	}

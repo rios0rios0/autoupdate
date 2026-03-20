@@ -153,7 +153,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	entries := make([]string, 0, len(upgrades))
 	for _, up := range upgrades {
 		entries = append(entries, fmt.Sprintf(
-			"- changed the %s pipeline version from %s to %s",
+			"- changed the %s pipeline version from `%s` to `%s`",
 			up.match.Language, up.match.CurrentVer, up.newVersion,
 		))
 	}
@@ -648,7 +648,7 @@ func appendChangelogEntry(
 	entries := make([]string, 0, len(upgrades))
 	for _, up := range upgrades {
 		entries = append(entries, fmt.Sprintf(
-			"- changed the %s pipeline version from %s to %s",
+			"- changed the %s pipeline version from `%s` to `%s`",
 			up.match.Language, up.match.CurrentVer, up.newVersion,
 		))
 	}
