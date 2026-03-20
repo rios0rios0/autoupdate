@@ -1,5 +1,12 @@
 package dockerfile
 
+import (
+	"context"
+
+	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+)
+
 // ParseTag is exported for testing.
 func ParseTag(tag string) (string, string, int, bool) {
 	return parseTag(tag)
@@ -44,4 +51,27 @@ type ParsedImageRef = parsedImageRef
 // IsDockerHubImage is exported for testing.
 func IsDockerHubImage(imageName string) bool {
 	return isDockerHubImage(imageName)
+}
+
+// UpgradeTask is exported for testing.
+type UpgradeTask = upgradeTask
+
+// NewUpgradeTask creates an upgradeTask for testing.
+func NewUpgradeTask(imageName, currentVer, newTag string) UpgradeTask {
+	return upgradeTask{
+		dep:    entities.Dependency{Name: imageName, CurrentVer: currentVer},
+		newTag: newTag,
+		parsed: &parsedImageRef{Image: imageName},
+	}
+}
+
+// AppendChangelogEntry is exported for testing.
+func AppendChangelogEntry(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+	upgrades []upgradeTask,
+	fileChanges []entities.FileChange,
+) []entities.FileChange {
+	return appendChangelogEntry(ctx, provider, repo, upgrades, fileChanges)
 }
