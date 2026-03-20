@@ -146,6 +146,9 @@ func cloneAndUpgrade(
 	pkgMgr string,
 ) (*upgradeResult, error) {
 	changelogFile := prepareChangelog(ctx, provider, repo, vCtx)
+	if changelogFile != "" {
+		defer os.Remove(changelogFile)
+	}
 
 	cloneURL := provider.CloneURL(repo)
 	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
@@ -506,7 +509,7 @@ func prepareChangelog(
 		return ""
 	}
 
-	tmpFile, writeErr := os.CreateTemp("", "changelog-*.md")
+	tmpFile, writeErr := os.CreateTemp("", "autoupdate-changelog-*.md")
 	if writeErr != nil {
 		logger.Warnf("[javascript] Failed to create temp changelog file: %v", writeErr)
 		return ""

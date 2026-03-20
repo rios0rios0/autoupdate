@@ -226,6 +226,9 @@ func runLanguageUpgradeScript(
 	opts LocalUpgradeOptions,
 ) (string, error) {
 	changelogFile := prepareLocalChangelog(repoDir, vCtx)
+	if changelogFile != "" {
+		defer os.Remove(changelogFile)
+	}
 
 	params := localUpgradeParams{
 		BranchName:     vCtx.BranchName,
@@ -380,7 +383,7 @@ func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
 		return ""
 	}
 
-	tmpFile, writeErr := os.CreateTemp("", "changelog-*.md")
+	tmpFile, writeErr := os.CreateTemp("", "autoupdate-changelog-*.md")
 	if writeErr != nil {
 		logger.Warnf("[javascript] Failed to create temp changelog file: %v", writeErr)
 		return ""

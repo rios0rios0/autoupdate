@@ -137,6 +137,9 @@ func cloneAndUpgrade(
 	vCtx *versionContext,
 ) (*upgradeResult, error) {
 	changelogFile := prepareChangelog(ctx, provider, repo, vCtx)
+	if changelogFile != "" {
+		defer os.Remove(changelogFile)
+	}
 	hasRequirements := provider.HasFile(ctx, repo, "requirements.txt")
 	hasPyproject := provider.HasFile(ctx, repo, "pyproject.toml")
 
@@ -262,7 +265,16 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, outputStr)
 	}
 
+	// Remove the script before checking worktree state so it does not
+	// appear as an untracked file in the git status check below.
+	_ = os.Remove(scriptPath)
 	pyVersionUpdated := strings.Contains(outputStr, "PYTHON_VERSION_UPDATED=true")
+
+	// Return early if the upgrade script made no filesystem changes
+	if !support.HasUncommittedChanges(ctx, repoDir) {
+		logger.Infof("[python] No filesystem changes detected after upgrade script")
+		return nil, repositories.ErrNoUpdatesNeeded
+	}
 
 	// Update CHANGELOG locally
 	var entry string
@@ -480,7 +492,7 @@ func prepareChangelog(
 		return ""
 	}
 
-	tmpFile, writeErr := os.CreateTemp("", "changelog-*.md")
+	tmpFile, writeErr := os.CreateTemp("", "autoupdate-changelog-*.md")
 	if writeErr != nil {
 		logger.Warnf("[python] Failed to create temp changelog file: %v", writeErr)
 		return ""
