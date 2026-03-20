@@ -28,6 +28,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - changed `UpdaterConfig.AutoComplete` field from `bool` to `*bool` for proper field-level merge support
 - changed the default `configs/autoupdate.yaml` to include all 6 registered updaters with sensible defaults
 
+### Fixed
+
+- fixed Terraform, Dockerfile, and Pipeline updaters generating changelog entries without backticks around code identifiers and version numbers, violating the CHANGELOG formatting standard
+
 ## [0.10.2] - 2026-03-19
 
 ### Changed

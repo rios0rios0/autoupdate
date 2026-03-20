@@ -178,6 +178,38 @@ jobs:
 	})
 }
 
+func TestAppendChangelogEntry(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should wrap language and versions in backticks in changelog entry", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		changelog := `# Changelog
+
+## [Unreleased]
+
+## [1.0.0] - 2026-01-01
+`
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
+			WithFileContents(map[string]string{"CHANGELOG.md": changelog}).
+			BuildSpy()
+		repo := entities.Repository{Organization: "org", Name: "repo"}
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTask("Go", "1.20.0", "1.21.0"),
+		}
+
+		// when
+		result := pipeline.AppendChangelogEntry(t.Context(), provider, repo, upgrades, nil)
+
+		// then
+		require.Len(t, result, 1)
+		assert.Equal(t, "CHANGELOG.md", result[0].Path)
+		assert.Contains(t, result[0].Content, "- changed the Go pipeline version from `1.20.0` to `1.21.0`")
+	})
+}
+
 func TestTruncateToGranularity(t *testing.T) {
 	t.Parallel()
 

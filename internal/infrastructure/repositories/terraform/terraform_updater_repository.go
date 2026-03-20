@@ -147,7 +147,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 			label = "container image"
 		}
 		entries = append(entries, fmt.Sprintf(
-			"- changed the %s %s from %s to %s",
+			"- changed the %s `%s` from `%s` to `%s`",
 			label, extractRepoName(up.dep.Source), up.dep.CurrentVer, up.newVersion,
 		))
 	}
@@ -796,7 +796,7 @@ func appendChangelogEntry(
 			label = "container image"
 		}
 		entries = append(entries, fmt.Sprintf(
-			"- changed the %s %s from %s to %s",
+			"- changed the %s `%s` from `%s` to `%s`",
 			label, extractRepoName(up.dep.Source), up.dep.CurrentVer, up.newVersion,
 		))
 	}
