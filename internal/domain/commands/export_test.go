@@ -1,3 +1,5 @@
+//go:build unit
+
 package commands
 
 // ParseRemoteURL exports parseRemoteURL for testing.
