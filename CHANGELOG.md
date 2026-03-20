@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-03-20
+
 ### Added
 
 - added default config download and merge for the `updaters` section, following the autobump pattern of fetching defaults from GitHub and merging user overrides on top
