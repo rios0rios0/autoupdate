@@ -35,6 +35,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - changed `UpdaterConfig.Enabled` field to default to `true` when omitted from config, preventing updaters from being silently disabled when only `target_branch` or `auto_complete` is set
 - changed `UpdaterConfig.AutoComplete` field from `bool` to `*bool` for proper field-level merge support
 - changed the default `configs/autoupdate.yaml` to include all 6 registered updaters with sensible defaults
+- changed the Go module dependencies to their latest versions
 
 ## [0.10.2] - 2026-03-19
 
