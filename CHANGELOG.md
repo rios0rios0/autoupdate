@@ -16,11 +16,20 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-03-22
+
 ### Added
 
 - added default config download and merge for the `updaters` section, following the autobump pattern of fetching defaults from GitHub and merging user overrides on top
 - added `MergeUpdatersConfig()` function for field-level deep merge of updater configurations
 - added `DecodeSettings()` function for parsing YAML settings with optional strict mode
+
+### Changed
+
+- changed `UpdaterConfig.Enabled` field to default to `true` when omitted from config, preventing updaters from being silently disabled when only `target_branch` or `auto_complete` is set
+- changed `UpdaterConfig.AutoComplete` field from `bool` to `*bool` for proper field-level merge support
+- changed the default `configs/autoupdate.yaml` to include all 6 registered updaters with sensible defaults
+- changed the Go module dependencies to their latest versions
 
 ### Fixed
 
@@ -29,13 +38,6 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - fixed stale temporary directories and changelog files not being cleaned up after process termination
 - fixed Terraform, Dockerfile, and Pipeline updaters generating changelog entries without backticks around code identifiers and version numbers, violating the CHANGELOG formatting standard
 - fixed the Terraform updater using non-production tags by validating that upgrade targets appear in the dependency repo's CHANGELOG.md
-
-### Changed
-
-- changed `UpdaterConfig.Enabled` field to default to `true` when omitted from config, preventing updaters from being silently disabled when only `target_branch` or `auto_complete` is set
-- changed `UpdaterConfig.AutoComplete` field from `bool` to `*bool` for proper field-level merge support
-- changed the default `configs/autoupdate.yaml` to include all 6 registered updaters with sensible defaults
-- changed the Go module dependencies to their latest versions
 
 ## [0.10.2] - 2026-03-19
 
