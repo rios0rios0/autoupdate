@@ -16,6 +16,11 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Fixed
+
+- fixed the Python updater creating PRs without real dependency changes due to `pip freeze` capturing `file://` local path references from temp clone directories
+- fixed the pipeline updater leaving stale version numbers in `displayName` fields when updating `versionSpec` in CI/CD pipeline files
+
 ## [0.11.0] - 2026-03-22
 
 ### Added
