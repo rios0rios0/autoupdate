@@ -660,7 +660,7 @@ func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 			"    pip install --upgrade -r requirements.txt 2>&1 || echo \"WARNING: pip upgrade had some errors\"\n\n",
 		)
 		sb.WriteString("    echo \"Freezing updated requirements...\"\n")
-		sb.WriteString("    pip freeze | grep -v '@ file://' > requirements.txt\n")
+		sb.WriteString("    pip freeze | sed '/@\\s*file:\\/\\//d' > requirements.txt\n")
 		sb.WriteString("fi\n\n")
 	}
 
@@ -672,7 +672,7 @@ func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 			"    pip install --upgrade . 2>&1 || echo \"WARNING: pip install --upgrade . had some errors\"\n",
 		)
 		sb.WriteString("    if [ -f \"requirements.txt\" ]; then\n")
-		sb.WriteString("        pip freeze | grep -v '@ file://' > requirements.txt\n")
+		sb.WriteString("        pip freeze | sed '/@\\s*file:\\/\\//d' > requirements.txt\n")
 		sb.WriteString("    fi\n")
 		sb.WriteString("fi\n\n")
 	}
