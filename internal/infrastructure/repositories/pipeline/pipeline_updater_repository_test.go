@@ -300,7 +300,7 @@ func TestReplaceLastOccurrence(t *testing.T) {
 func TestApplyUpgrades(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should replace versionSpec not displayName when both contain the same version", func(t *testing.T) {
+	t.Run("should replace versionSpec and strip version from displayName", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -320,7 +320,8 @@ func TestApplyUpgrades(t *testing.T) {
 
 		// then
 		require.Len(t, changes, 1)
-		assert.Contains(t, changes[0].Content, "displayName: 'Install Python 3.12'")
+		assert.Contains(t, changes[0].Content, "displayName: 'Install Python'")
+		assert.NotContains(t, changes[0].Content, "displayName: 'Install Python 3.12'")
 		assert.Contains(t, changes[0].Content, "versionSpec: '3.13'")
 	})
 }

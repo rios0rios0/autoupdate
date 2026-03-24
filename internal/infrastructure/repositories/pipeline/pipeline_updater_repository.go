@@ -503,6 +503,16 @@ func replaceLastOccurrence(s, old, replacement string) string {
 	return s[:idx] + replacement + s[idx+len(old):]
 }
 
+// stripDisplayNameVersion removes the version number from displayName lines
+// within a matched task block. For example, "displayName: '🐍 Use Python 3.12'"
+// becomes "displayName: '🐍 Use Python'".
+func stripDisplayNameVersion(s, version string) string {
+	pattern := regexp.MustCompile(
+		`(displayName:\s*['"][^'"]*?)\s+` + regexp.QuoteMeta(version) + `([^'"]*['"])`,
+	)
+	return pattern.ReplaceAllString(s, "${1}${2}")
+}
+
 // --- upgrade application ---
 
 // applyUpgrades applies version replacements to file contents.
@@ -517,6 +527,7 @@ func applyUpgrades(upgrades []upgradeTask, fileContents map[string]string) []ent
 		}
 
 		newMatch := replaceLastOccurrence(up.match.FullMatch, up.match.CurrentVer, up.newVersion)
+		newMatch = stripDisplayNameVersion(newMatch, up.match.CurrentVer)
 		content = strings.Replace(content, up.match.FullMatch, newMatch, 1)
 		modified[up.match.FilePath] = content
 	}
