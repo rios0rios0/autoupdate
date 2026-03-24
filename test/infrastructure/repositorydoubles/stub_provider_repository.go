@@ -132,6 +132,8 @@ func (p *SpyProviderRepository) PullRequestExists(
 	return p.PRExistsResult, p.PRExistsErr
 }
 
+func (p *SpyProviderRepository) SSHCloneURL(_ entities.Repository, _ string) string { return "" }
+
 func (p *SpyProviderRepository) CloneURL(repo entities.Repository) string {
 	if repo.RemoteURL != "" {
 		return repo.RemoteURL
@@ -147,7 +149,8 @@ var _ repositories.ProviderRepository = (*DummyProviderRepository)(nil)
 func (d *DummyProviderRepository) Name() string                              { return "dummy" }
 func (d *DummyProviderRepository) MatchesURL(_ string) bool                  { return false }
 func (d *DummyProviderRepository) AuthToken() string                         { return "" }
-func (d *DummyProviderRepository) CloneURL(_ entities.Repository) string     { return "" }
+func (d *DummyProviderRepository) CloneURL(_ entities.Repository) string                { return "" }
+func (d *DummyProviderRepository) SSHCloneURL(_ entities.Repository, _ string) string   { return "" }
 
 func (d *DummyProviderRepository) DiscoverRepositories(
 	_ context.Context, _ string,

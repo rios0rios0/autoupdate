@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- changed the Go module dependencies to their latest versions
+
 ### Fixed
 
 - fixed the Python updater creating PRs without real dependency changes due to `pip freeze` capturing `file://` local path references from temp clone directories
