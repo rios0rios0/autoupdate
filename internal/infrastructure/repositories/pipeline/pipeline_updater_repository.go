@@ -86,9 +86,9 @@ type actionTagCache map[string][]string
 // actionUsesPattern matches GitHub Action references in workflow files.
 // Captures: (1) owner, (2) repo, (3) ref.
 // Requires a v-prefix on the ref to skip SHA pins and branch refs.
-// Uses a multiline flag with end-of-line anchor to avoid matching reusable workflow paths.
+// Allows optional quotes around the action string and an optional trailing inline comment.
 var actionUsesPattern = regexp.MustCompile(
-	`(?m)uses:\s+([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)@(v\d+(?:\.\d+(?:\.\d+)?)?)\s*$`,
+	`(?m)uses:\s+['"]?([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)@(v\d+(?:\.\d+(?:\.\d+)?)?)['"]?(?:\s+#.*)?$`,
 )
 
 // UpdaterRepository implements repositories.UpdaterRepository for CI/CD pipeline files.
@@ -684,16 +684,9 @@ func findActionUpgradesInFile(
 	cache actionTagCache,
 ) []upgradeTask {
 	refs := scanFileForActions(content, filePath)
-	seen := make(map[string]bool)
 	var tasks []upgradeTask
 
 	for _, ref := range refs {
-		key := ref.Owner + "/" + ref.Repo + "@" + ref.CurrentRef
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-
 		tags := resolveActionTags(ctx, provider, ref.Owner, ref.Repo, cache)
 		up := determineActionUpgrade(ref, tags)
 		if up == nil {

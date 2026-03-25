@@ -400,6 +400,50 @@ func TestScanFileForActions(t *testing.T) {
 		assert.Empty(t, refs)
 	})
 
+	t.Run("should detect single-quoted action references", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "    - uses: 'actions/checkout@v4'\n"
+
+		// when
+		refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
+
+		// then
+		require.Len(t, refs, 1)
+		assert.Equal(t, "actions", refs[0].Owner)
+		assert.Equal(t, "checkout", refs[0].Repo)
+		assert.Equal(t, "v4", refs[0].CurrentRef)
+	})
+
+	t.Run("should detect double-quoted action references", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "    - uses: \"actions/checkout@v4\"\n"
+
+		// when
+		refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
+
+		// then
+		require.Len(t, refs, 1)
+		assert.Equal(t, "v4", refs[0].CurrentRef)
+	})
+
+	t.Run("should detect action references with trailing inline comment", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "    - uses: actions/checkout@v4 # pinned to v4\n"
+
+		// when
+		refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
+
+		// then
+		require.Len(t, refs, 1)
+		assert.Equal(t, "v4", refs[0].CurrentRef)
+	})
+
 	t.Run("should detect multiple actions in one file", func(t *testing.T) {
 		t.Parallel()
 
@@ -669,7 +713,7 @@ func TestFindActionUpgradesInFile(t *testing.T) {
 		assert.Contains(t, cache, "actions/checkout")
 	})
 
-	t.Run("should deduplicate same action reference in one file", func(t *testing.T) {
+	t.Run("should emit one task per occurrence for duplicate action refs", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -692,7 +736,7 @@ func TestFindActionUpgradesInFile(t *testing.T) {
 		)
 
 		// then
-		assert.Len(t, tasks, 1)
+		assert.Len(t, tasks, 2)
 	})
 }
 
