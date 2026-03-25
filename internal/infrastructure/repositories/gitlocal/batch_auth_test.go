@@ -213,8 +213,10 @@ func (s *stubLocalGitAuthProvider) Name() string             { return "stub" }
 func (s *stubLocalGitAuthProvider) MatchesURL(_ string) bool { return true }
 func (s *stubLocalGitAuthProvider) AuthToken() string        { return "" }
 
-func (s *stubLocalGitAuthProvider) CloneURL(_ globalEntities.Repository) string                { return "" }
-func (s *stubLocalGitAuthProvider) SSHCloneURL(_ globalEntities.Repository, _ string) string   { return "" }
+func (s *stubLocalGitAuthProvider) CloneURL(_ globalEntities.Repository) string { return "" }
+func (s *stubLocalGitAuthProvider) SSHCloneURL(_ globalEntities.Repository, _ string) string {
+	return ""
+}
 
 func (s *stubLocalGitAuthProvider) DiscoverRepositories(
 	_ context.Context, _ string,

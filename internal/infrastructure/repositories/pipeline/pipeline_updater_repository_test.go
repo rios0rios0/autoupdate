@@ -326,6 +326,400 @@ func TestApplyUpgrades(t *testing.T) {
 	})
 }
 
+func TestScanFileForActions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should detect major version action references", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "    - uses: actions/checkout@v4\n"
+
+		// when
+		refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
+
+		// then
+		require.Len(t, refs, 1)
+		assert.Equal(t, "actions", refs[0].Owner)
+		assert.Equal(t, "checkout", refs[0].Repo)
+		assert.Equal(t, "v4", refs[0].CurrentRef)
+		assert.Equal(t, pipeline.RefStyleMajor, refs[0].RefStyle)
+	})
+
+	t.Run("should detect full semver action references", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "    - uses: actions/setup-go@v5.1.2\n"
+
+		// when
+		refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
+
+		// then
+		require.Len(t, refs, 1)
+		assert.Equal(t, "v5.1.2", refs[0].CurrentRef)
+		assert.Equal(t, pipeline.RefStyleSemver, refs[0].RefStyle)
+	})
+
+	t.Run("should skip SHA-pinned actions", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "    - uses: actions/checkout@abc123def456789012345678901234567890abcd\n"
+
+		// when
+		refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
+
+		// then
+		assert.Empty(t, refs)
+	})
+
+	t.Run("should skip branch-pinned actions", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "    - uses: actions/checkout@main\n"
+
+		// when
+		refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
+
+		// then
+		assert.Empty(t, refs)
+	})
+
+	t.Run("should skip reusable workflow references", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "    uses: rios0rios0/pipelines/.github/workflows/go-binary.yaml@main\n"
+
+		// when
+		refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
+
+		// then
+		assert.Empty(t, refs)
+	})
+
+	t.Run("should detect multiple actions in one file", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `steps:
+  - uses: actions/checkout@v4
+  - uses: actions/setup-go@v5
+  - uses: docker/build-push-action@v6
+`
+
+		// when
+		refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
+
+		// then
+		assert.Len(t, refs, 3)
+		assert.Equal(t, "actions", refs[0].Owner)
+		assert.Equal(t, "checkout", refs[0].Repo)
+		assert.Equal(t, "actions", refs[1].Owner)
+		assert.Equal(t, "setup-go", refs[1].Repo)
+		assert.Equal(t, "docker", refs[2].Owner)
+		assert.Equal(t, "build-push-action", refs[2].Repo)
+	})
+}
+
+func TestClassifyRefStyle(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should classify major-only ref", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.ClassifyRefStyle("v4")
+
+		// then
+		assert.Equal(t, pipeline.RefStyleMajor, result)
+	})
+
+	t.Run("should classify two-part ref as semver", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.ClassifyRefStyle("v4.1")
+
+		// then
+		assert.Equal(t, pipeline.RefStyleSemver, result)
+	})
+
+	t.Run("should classify three-part ref as semver", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.ClassifyRefStyle("v4.1.2")
+
+		// then
+		assert.Equal(t, pipeline.RefStyleSemver, result)
+	})
+}
+
+func TestNormalizeActionVersion(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should expand major-only to three parts", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.NormalizeActionVersion("v4")
+
+		// then
+		assert.Equal(t, "v4.0.0", result)
+	})
+
+	t.Run("should expand two-part to three parts", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.NormalizeActionVersion("v4.1")
+
+		// then
+		assert.Equal(t, "v4.1.0", result)
+	})
+
+	t.Run("should keep three-part version as is", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.NormalizeActionVersion("v4.1.2")
+
+		// then
+		assert.Equal(t, "v4.1.2", result)
+	})
+
+	t.Run("should add v prefix when missing", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.NormalizeActionVersion("4.1.2")
+
+		// then
+		assert.Equal(t, "v4.1.2", result)
+	})
+}
+
+func TestExtractMajor(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should extract major from major-only ref", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, 4, pipeline.ExtractMajor("v4"))
+	})
+
+	t.Run("should extract major from full semver ref", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, 5, pipeline.ExtractMajor("v5.1.2"))
+	})
+
+	t.Run("should return -1 for invalid ref", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, -1, pipeline.ExtractMajor("main"))
+	})
+}
+
+func TestDetermineActionUpgrade(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should upgrade major version when newer major exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ref := pipeline.ActionRef{
+			Owner: "actions", Repo: "checkout", CurrentRef: "v4",
+			RefStyle: pipeline.RefStyleMajor,
+		}
+		tags := []string{"v5.0.0", "v4.2.0", "v4.1.0", "v3.0.0"}
+
+		// when
+		up := pipeline.DetermineActionUpgrade(ref, tags)
+
+		// then
+		require.NotNil(t, up)
+		assert.Equal(t, "v5", pipeline.ActionUpgradeNewRef(up))
+	})
+
+	t.Run("should return nil when already on latest major", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ref := pipeline.ActionRef{
+			Owner: "actions", Repo: "checkout", CurrentRef: "v5",
+			RefStyle: pipeline.RefStyleMajor,
+		}
+		tags := []string{"v5.0.0", "v4.2.0"}
+
+		// when
+		up := pipeline.DetermineActionUpgrade(ref, tags)
+
+		// then
+		assert.Nil(t, up)
+	})
+
+	t.Run("should upgrade semver within same major", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ref := pipeline.ActionRef{
+			Owner: "actions", Repo: "setup-go", CurrentRef: "v5.1.0",
+			RefStyle: pipeline.RefStyleSemver,
+		}
+		tags := []string{"v6.0.0", "v5.3.0", "v5.2.0", "v5.1.0"}
+
+		// when
+		up := pipeline.DetermineActionUpgrade(ref, tags)
+
+		// then
+		require.NotNil(t, up)
+		assert.Equal(t, "v5.3.0", pipeline.ActionUpgradeNewRef(up))
+	})
+
+	t.Run("should not cross major for semver pins", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ref := pipeline.ActionRef{
+			Owner: "actions", Repo: "setup-go", CurrentRef: "v5.3.0",
+			RefStyle: pipeline.RefStyleSemver,
+		}
+		tags := []string{"v6.0.0", "v5.3.0"}
+
+		// when
+		up := pipeline.DetermineActionUpgrade(ref, tags)
+
+		// then
+		assert.Nil(t, up)
+	})
+
+	t.Run("should return nil when no tags available", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		ref := pipeline.ActionRef{
+			Owner: "actions", Repo: "checkout", CurrentRef: "v4",
+			RefStyle: pipeline.RefStyleMajor,
+		}
+
+		// when
+		up := pipeline.DetermineActionUpgrade(ref, nil)
+
+		// then
+		assert.Nil(t, up)
+	})
+}
+
+func TestFindActionUpgradesInFile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return upgrade tasks for outdated actions", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `steps:
+  - uses: actions/checkout@v3
+  - uses: actions/setup-go@v4
+`
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithTags([]string{"v5.0.0", "v4.0.0", "v3.0.0"}).
+			BuildSpy()
+		cache := make(pipeline.ActionTagCache)
+
+		// when
+		tasks := pipeline.FindActionUpgradesInFile(
+			t.Context(), provider, content, ".github/workflows/ci.yml", cache,
+		)
+
+		// then
+		require.Len(t, tasks, 2)
+		assert.Equal(t, "action:actions/checkout", pipeline.UpgradeTaskLanguage(tasks[0]))
+		assert.Equal(t, "v3", pipeline.UpgradeTaskCurrentVer(tasks[0]))
+		assert.Equal(t, "v5", pipeline.UpgradeTaskNewVersion(tasks[0]))
+		assert.Equal(t, "action:actions/setup-go", pipeline.UpgradeTaskLanguage(tasks[1]))
+		assert.Equal(t, "v5", pipeline.UpgradeTaskNewVersion(tasks[1]))
+	})
+
+	t.Run("should cache tags between calls for same owner/repo", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `steps:
+  - uses: actions/checkout@v3
+`
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithTags([]string{"v5.0.0", "v4.0.0"}).
+			BuildSpy()
+		cache := make(pipeline.ActionTagCache)
+
+		// when
+		_ = pipeline.FindActionUpgradesInFile(
+			t.Context(), provider, content, ".github/workflows/ci.yml", cache,
+		)
+		_ = pipeline.FindActionUpgradesInFile(
+			t.Context(), provider, content, ".github/workflows/other.yml", cache,
+		)
+
+		// then
+		assert.Len(t, cache, 1)
+		assert.Contains(t, cache, "actions/checkout")
+	})
+
+	t.Run("should deduplicate same action reference in one file", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `jobs:
+  job1:
+    steps:
+      - uses: actions/checkout@v3
+  job2:
+    steps:
+      - uses: actions/checkout@v3
+`
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithTags([]string{"v5.0.0", "v4.0.0"}).
+			BuildSpy()
+		cache := make(pipeline.ActionTagCache)
+
+		// when
+		tasks := pipeline.FindActionUpgradesInFile(
+			t.Context(), provider, content, ".github/workflows/ci.yml", cache,
+		)
+
+		// then
+		assert.Len(t, tasks, 1)
+	})
+}
+
+func TestSanitizeBranchSegment(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should replace colon and slash with dash", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.SanitizeBranchSegment("action:actions/checkout")
+
+		// then
+		assert.Equal(t, "action-actions-checkout", result)
+	})
+
+	t.Run("should not modify simple strings", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.SanitizeBranchSegment("golang")
+
+		// then
+		assert.Equal(t, "golang", result)
+	})
+}
+
 func TestIsExactVersion(t *testing.T) {
 	t.Parallel()
 
