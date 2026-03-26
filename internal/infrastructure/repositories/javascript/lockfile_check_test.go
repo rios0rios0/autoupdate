@@ -123,6 +123,35 @@ func TestHasOnlyLockfileVersionChanges(t *testing.T) {
 		assert.False(t, result)
 	})
 
+	t.Run("should return true when only package-lock.json version fields and CHANGELOG.md changed", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		dir := t.TempDir()
+		initGitRepo(t, dir, map[string]string{
+			"package.json":      `{"name":"test-project","version":"1.0.3"}`,
+			"package-lock.json": packageLockWithVersion("1.0.3", "4.17.21"),
+			"CHANGELOG.md":      "# Changelog\n",
+		})
+		// Simulate: cosmetic lockfile version sync + auto-generated changelog update.
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "package-lock.json"),
+			[]byte(packageLockWithVersion("1.0.4", "4.17.21")),
+			0o600,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "CHANGELOG.md"),
+			[]byte("# Changelog\n\n## [Unreleased]\n"),
+			0o600,
+		))
+
+		// when
+		result := javascript.HasOnlyLockfileVersionChanges(t.Context(), dir)
+
+		// then
+		assert.True(t, result)
+	})
+
 	t.Run("should return false when non-lockfile files also changed", func(t *testing.T) {
 		t.Parallel()
 
