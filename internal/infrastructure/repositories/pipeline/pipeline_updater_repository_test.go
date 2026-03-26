@@ -547,6 +547,22 @@ func TestDetect(t *testing.T) {
 		// then
 		assert.False(t, detected)
 	})
+
+	t.Run("should return false when provider returns error from ListFiles", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithListFileErr(fmt.Errorf("API rate limit exceeded")).
+			BuildSpy()
+		repo := entities.Repository{Organization: "org", Name: "repo"}
+
+		// when
+		detected := pipeline.NewUpdaterRepository().Detect(t.Context(), provider, repo)
+
+		// then
+		assert.False(t, detected)
+	})
 }
 
 func TestCreateUpdatePRs(t *testing.T) {

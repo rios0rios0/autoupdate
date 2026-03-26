@@ -14,20 +14,29 @@ type VersionFetcher interface {
 	FetchLatestVersion(ctx context.Context) (string, error)
 }
 
+// defaultNodeVersionURL is the default URL for fetching Node.js release metadata.
+const defaultNodeVersionURL = "https://nodejs.org/dist/index.json"
+
 // HTTPNodeVersionFetcher fetches the latest LTS Node.js version from the official API.
 type HTTPNodeVersionFetcher struct {
-	client *http.Client
+	client  *http.Client
+	baseURL string
 }
 
 // NewHTTPNodeVersionFetcher creates a version fetcher with the given HTTP client.
 func NewHTTPNodeVersionFetcher(client *http.Client) VersionFetcher {
-	return &HTTPNodeVersionFetcher{client: client}
+	return &HTTPNodeVersionFetcher{client: client, baseURL: defaultNodeVersionURL}
+}
+
+// NewHTTPNodeVersionFetcherWithURL creates a version fetcher with a custom base URL (for testing).
+func NewHTTPNodeVersionFetcherWithURL(client *http.Client, baseURL string) VersionFetcher {
+	return &HTTPNodeVersionFetcher{client: client, baseURL: baseURL}
 }
 
 // FetchLatestVersion returns the latest LTS Node.js version string (e.g. "20.18.0").
 func (f *HTTPNodeVersionFetcher) FetchLatestVersion(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "https://nodejs.org/dist/index.json", nil,
+		ctx, http.MethodGet, f.baseURL, nil,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)

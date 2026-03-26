@@ -21,20 +21,29 @@ type pythonRelease struct {
 	EOL    any    `json:"eol"` // bool (false) or string date
 }
 
+// defaultPythonVersionURL is the default URL for fetching Python release metadata.
+const defaultPythonVersionURL = "https://endoflife.date/api/python.json"
+
 // HTTPPythonVersionFetcher fetches the latest stable Python version from the endoflife.date API.
 type HTTPPythonVersionFetcher struct {
-	client *http.Client
+	client  *http.Client
+	baseURL string
 }
 
 // NewHTTPPythonVersionFetcher creates a version fetcher with the given HTTP client.
 func NewHTTPPythonVersionFetcher(client *http.Client) VersionFetcher {
-	return &HTTPPythonVersionFetcher{client: client}
+	return &HTTPPythonVersionFetcher{client: client, baseURL: defaultPythonVersionURL}
+}
+
+// NewHTTPPythonVersionFetcherWithURL creates a version fetcher with a custom base URL (for testing).
+func NewHTTPPythonVersionFetcherWithURL(client *http.Client, baseURL string) VersionFetcher {
+	return &HTTPPythonVersionFetcher{client: client, baseURL: baseURL}
 }
 
 // FetchLatestVersion returns the latest stable Python version string (e.g. "3.13.1").
 func (f *HTTPPythonVersionFetcher) FetchLatestVersion(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "https://endoflife.date/api/python.json", nil,
+		ctx, http.MethodGet, f.baseURL, nil,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)

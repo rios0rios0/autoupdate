@@ -186,3 +186,21 @@ func HandleDryRunLocal(vCtx *versionContext, repoDir, pkgMgr string) *LocalResul
 func PrepareLocalChangelog(repoDir string, vCtx *versionContext) string {
 	return prepareLocalChangelog(repoDir, vCtx)
 }
+
+// SetLocalCmdRunner overrides the package-level local command runner for testing.
+func SetLocalCmdRunner(r cmdrunner.Runner) func() {
+	old := localCmdRunner
+	localCmdRunner = r
+	return func() { localCmdRunner = old }
+}
+
+// RunLanguageUpgradeScript is exported for testing the local upgrade script execution.
+func RunLanguageUpgradeScript(
+	ctx context.Context,
+	repoDir string,
+	vCtx *versionContext,
+	pkgMgr string,
+	opts LocalUpgradeOptions,
+) (string, error) {
+	return runLanguageUpgradeScript(ctx, repoDir, vCtx, pkgMgr, opts)
+}

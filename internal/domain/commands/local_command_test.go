@@ -3,12 +3,17 @@
 package commands_test
 
 import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/commands"
+	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
 	langEntities "github.com/rios0rios0/langforge/pkg/domain/entities"
 )
 
@@ -239,4 +244,276 @@ func TestGeneratePRContent(t *testing.T) {
 		assert.Equal(t, "chore(deps): updated dependencies", title)
 		assert.Equal(t, "Automated dependency update.", desc)
 	})
+}
+
+func TestLocalUpgradeHandlers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return a map containing Go, Node, and Python handlers", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		handlers := commands.LocalUpgradeHandlers()
+
+		// then
+		assert.NotNil(t, handlers[langEntities.LanguageGo], "Go handler should be registered")
+		assert.NotNil(t, handlers[langEntities.LanguageNode], "Node handler should be registered")
+		assert.NotNil(t, handlers[langEntities.LanguagePython], "Python handler should be registered")
+	})
+
+	t.Run("should return nil handlers for unsupported languages", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		handlers := commands.LocalUpgradeHandlers()
+
+		// then
+		assert.Nil(t, handlers[langEntities.LanguageJava], "Java handler should be nil")
+		assert.Nil(t, handlers[langEntities.LanguageTerraform], "Terraform handler should be nil")
+		assert.Nil(t, handlers[langEntities.LanguageCSharp], "CSharp handler should be nil")
+		assert.Nil(t, handlers[langEntities.LanguageDockerfile], "Dockerfile handler should be nil")
+		assert.Nil(t, handlers[langEntities.LanguageUnknown], "Unknown handler should be nil")
+	})
+
+	t.Run("should contain all langforge Language keys", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		expectedLanguages := []langEntities.Language{
+			langEntities.LanguageGo,
+			langEntities.LanguageNode,
+			langEntities.LanguagePython,
+			langEntities.LanguageJava,
+			langEntities.LanguageJavaGradle,
+			langEntities.LanguageJavaMaven,
+			langEntities.LanguageCSharp,
+			langEntities.LanguageTerraform,
+			langEntities.LanguageYAML,
+			langEntities.LanguagePipeline,
+			langEntities.LanguageDockerfile,
+			langEntities.LanguageUnknown,
+		}
+
+		// when
+		handlers := commands.LocalUpgradeHandlers()
+
+		// then
+		for _, lang := range expectedLanguages {
+			_, exists := handlers[lang]
+			assert.True(t, exists, "handler map should contain key for %s", lang)
+		}
+	})
+}
+
+func TestServiceTypeToProvider(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should map GITHUB to github provider", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		mapping := commands.ServiceTypeToProvider()
+
+		// then
+		assert.Equal(t, "github", mapping[globalEntities.GITHUB])
+	})
+
+	t.Run("should map GITLAB to gitlab provider", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		mapping := commands.ServiceTypeToProvider()
+
+		// then
+		assert.Equal(t, "gitlab", mapping[globalEntities.GITLAB])
+	})
+
+	t.Run("should map AZUREDEVOPS to azuredevops provider", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		mapping := commands.ServiceTypeToProvider()
+
+		// then
+		assert.Equal(t, "azuredevops", mapping[globalEntities.AZUREDEVOPS])
+	})
+
+	t.Run("should map UNKNOWN to empty string", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		mapping := commands.ServiceTypeToProvider()
+
+		// then
+		assert.Equal(t, "", mapping[globalEntities.UNKNOWN])
+	})
+
+	t.Run("should map BITBUCKET to empty string", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		mapping := commands.ServiceTypeToProvider()
+
+		// then
+		assert.Equal(t, "", mapping[globalEntities.BITBUCKET])
+	})
+
+	t.Run("should map CODECOMMIT to empty string", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		mapping := commands.ServiceTypeToProvider()
+
+		// then
+		assert.Equal(t, "", mapping[globalEntities.CODECOMMIT])
+	})
+}
+
+func TestDetectDefaultBranch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return main for a freshly initialized repository", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := initTestGitRepo(t, "main")
+
+		// when
+		branch, err := commands.DetectDefaultBranch(context.Background(), repoDir)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, "main", branch)
+	})
+
+	t.Run("should return the current branch name when on a feature branch", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := initTestGitRepo(t, "main")
+		runGit(t, repoDir, "checkout", "-b", "feat/test-branch")
+
+		// when
+		branch, err := commands.DetectDefaultBranch(context.Background(), repoDir)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, "feat/test-branch", branch)
+	})
+
+	t.Run("should return error for non-git directory", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tmpDir := t.TempDir()
+
+		// when
+		_, err := commands.DetectDefaultBranch(context.Background(), tmpDir)
+
+		// then
+		require.Error(t, err)
+	})
+}
+
+func TestParseGitRemote(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should parse origin remote URL from a real git repository", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := initTestGitRepo(t, "main")
+		runGit(t, repoDir, "remote", "add", "origin", "git@github.com:testorg/testrepo.git")
+
+		// when
+		info, err := commands.ParseGitRemote(context.Background(), repoDir)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, "github", info.ProviderType)
+		assert.Equal(t, "testorg", info.Org)
+		assert.Equal(t, "testrepo", info.RepoName)
+	})
+
+	t.Run("should return error when no origin remote exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := initTestGitRepo(t, "main")
+
+		// when
+		_, err := commands.ParseGitRemote(context.Background(), repoDir)
+
+		// then
+		require.Error(t, err)
+	})
+
+	t.Run("should parse HTTPS origin remote", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := initTestGitRepo(t, "main")
+		runGit(t, repoDir, "remote", "add", "origin", "https://github.com/anotherorg/anotherrepo.git")
+
+		// when
+		info, err := commands.ParseGitRemote(context.Background(), repoDir)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, "github", info.ProviderType)
+		assert.Equal(t, "anotherorg", info.Org)
+		assert.Equal(t, "anotherrepo", info.RepoName)
+	})
+
+	t.Run("should parse Azure DevOps SSH origin remote", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := initTestGitRepo(t, "main")
+		runGit(t, repoDir, "remote", "add", "origin", "git@ssh.dev.azure.com:v3/myorg/myproject/myrepo")
+
+		// when
+		info, err := commands.ParseGitRemote(context.Background(), repoDir)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, "azuredevops", info.ProviderType)
+		assert.Equal(t, "myorg", info.Org)
+		assert.Equal(t, "myproject", info.Project)
+		assert.Equal(t, "myrepo", info.RepoName)
+	})
+}
+
+// --- test helpers ---
+
+// initTestGitRepo creates a temporary git repo with an initial commit using exec.Command.
+func initTestGitRepo(t *testing.T, branchName string) string {
+	t.Helper()
+
+	repoDir := t.TempDir()
+
+	// git init with specified branch
+	runGit(t, repoDir, "init", "-b", branchName)
+
+	// configure user identity
+	runGit(t, repoDir, "config", "user.name", "test")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "commit.gpgsign", "false")
+
+	// create a file and commit
+	readmePath := filepath.Join(repoDir, "README.md")
+	require.NoError(t, os.WriteFile(readmePath, []byte("# Test"), 0o600))
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "initial commit")
+
+	return repoDir
+}
+
+// runGit executes a git command in the given directory and fails the test on error.
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git %v failed: %s", args, string(output))
 }

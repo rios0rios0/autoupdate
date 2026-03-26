@@ -151,3 +151,20 @@ func PrepareLocalChangelog(repoDir string, vCtx *VersionContext) string {
 func FindPythonBinary() (string, error) {
 	return findPythonBinary()
 }
+
+// SetLocalCmdRunner overrides the package-level local command runner for testing.
+func SetLocalCmdRunner(r cmdrunner.Runner) func() {
+	old := localCmdRunner
+	localCmdRunner = r
+	return func() { localCmdRunner = old }
+}
+
+// RunLanguageUpgradeScript is exported for testing the local upgrade script execution.
+func RunLanguageUpgradeScript(
+	ctx context.Context,
+	repoDir string,
+	vCtx *versionContext,
+	opts LocalUpgradeOptions,
+) (string, error) {
+	return runLanguageUpgradeScript(ctx, repoDir, vCtx, opts)
+}

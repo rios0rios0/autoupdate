@@ -5,6 +5,7 @@ package python_test
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	pyUpdater "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
 	"github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
 )
@@ -194,6 +196,40 @@ func TestIsActiveRelease(t *testing.T) {
 
 		// then
 		assert.True(t, result)
+	})
+
+	t.Run("should return false when EOL is an invalid date string", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		release := pyUpdater.PythonRelease{
+			Cycle:  "3.7",
+			Latest: "3.7.17",
+			EOL:    "not-a-date",
+		}
+
+		// when
+		result := pyUpdater.IsActiveRelease(release)
+
+		// then
+		assert.False(t, result)
+	})
+
+	t.Run("should return false when EOL is an unexpected type", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		release := pyUpdater.PythonRelease{
+			Cycle:  "3.7",
+			Latest: "3.7.17",
+			EOL:    42,
+		}
+
+		// when
+		result := pyUpdater.IsActiveRelease(release)
+
+		// then
+		assert.False(t, result)
 	})
 }
 
@@ -1330,4 +1366,89 @@ func envToMap(env []string) map[string]string {
 		}
 	}
 	return m
+}
+
+func TestRunLanguageUpgradeScript(t *testing.T) { //nolint:paralleltest // mutates package-level localCmdRunner
+	t.Run("should return script output when runner succeeds", func(t *testing.T) {
+		// given
+		stub := repositorydoubles.NewStubCommandRunner(cmdrunner.RunResult{
+			Output:   "PYTHON_VERSION_UPDATED=true\nDone.\n",
+			ExitCode: 0,
+		})
+		restore := pyUpdater.SetLocalCmdRunner(stub)
+		defer restore()
+
+		repoDir := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(repoDir, "requirements.txt"),
+			[]byte("flask==2.0.0\n"),
+			0o600,
+		))
+
+		vCtx := &pyUpdater.VersionContext{
+			LatestVersion:       "3.13.0",
+			NeedsVersionUpgrade: true,
+			BranchName:          "chore/upgrade-python-3.13.0",
+		}
+		opts := pyUpdater.LocalUpgradeOptions{ProviderName: "github"}
+
+		// when
+		output, err := pyUpdater.RunLanguageUpgradeScript(t.Context(), repoDir, vCtx, opts)
+
+		// then
+		require.NoError(t, err)
+		assert.Contains(t, output, "PYTHON_VERSION_UPDATED=true")
+		require.Len(t, stub.Calls, 1)
+		assert.Equal(t, "bash", stub.Calls[0].Name)
+		assert.Equal(t, repoDir, stub.Calls[0].Opts.Dir)
+	})
+
+	t.Run("should return error when runner fails", func(t *testing.T) {
+		// given
+		stub := repositorydoubles.NewStubCommandRunnerWithError(errors.New("script crashed"))
+		restore := pyUpdater.SetLocalCmdRunner(stub)
+		defer restore()
+
+		repoDir := t.TempDir()
+
+		vCtx := &pyUpdater.VersionContext{
+			LatestVersion:       "3.13.0",
+			NeedsVersionUpgrade: true,
+			BranchName:          "chore/upgrade-python-3.13.0",
+		}
+		opts := pyUpdater.LocalUpgradeOptions{ProviderName: "github"}
+
+		// when
+		_, err := pyUpdater.RunLanguageUpgradeScript(t.Context(), repoDir, vCtx, opts)
+
+		// then
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "upgrade script failed")
+	})
+
+	t.Run("should pass verbose output through logger without error", func(t *testing.T) {
+		// given
+		stub := repositorydoubles.NewStubCommandRunner(cmdrunner.RunResult{
+			Output:   "verbose output\n",
+			ExitCode: 0,
+		})
+		restore := pyUpdater.SetLocalCmdRunner(stub)
+		defer restore()
+
+		repoDir := t.TempDir()
+
+		vCtx := &pyUpdater.VersionContext{
+			LatestVersion:       "3.13.0",
+			NeedsVersionUpgrade: false,
+			BranchName:          "chore/upgrade-python-deps",
+		}
+		opts := pyUpdater.LocalUpgradeOptions{ProviderName: "github", Verbose: true}
+
+		// when
+		output, err := pyUpdater.RunLanguageUpgradeScript(t.Context(), repoDir, vCtx, opts)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, "verbose output\n", output)
+	})
 }

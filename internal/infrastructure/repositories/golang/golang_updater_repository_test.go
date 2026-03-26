@@ -798,3 +798,4 @@ func TestPrepareLocalChangelogGo(t *testing.T) {
 		assert.Empty(t, result)
 	})
 }
+
