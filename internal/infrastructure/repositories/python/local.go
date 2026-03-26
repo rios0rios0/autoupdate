@@ -3,6 +3,7 @@ package python
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,7 +58,8 @@ func RunLocalUpgrade(
 // resolveLocalVersionContext fetches the latest Python version and compares
 // it against the local .python-version to build a versionContext.
 func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionContext {
-	latestPyVersion, err := fetchLatestPythonVersion(ctx)
+	fetcher := NewHTTPPythonVersionFetcher(&http.Client{Timeout: pyVersionTimeout})
+	latestPyVersion, err := fetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		logger.Warnf("[python] Failed to fetch latest Python version: %v (continuing without version upgrade)", err)
 		latestPyVersion = ""

@@ -3,6 +3,7 @@ package golang
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,7 +61,8 @@ func RunLocalUpgrade(
 // resolveLocalVersionContext fetches the latest Go version and compares
 // it against the local go.mod to build a versionContext.
 func resolveLocalVersionContext(ctx context.Context, repoDir string) (*versionContext, error) {
-	latestGoVersion, err := fetchLatestGoVersion(ctx)
+	fetcher := NewHTTPGoVersionFetcher(&http.Client{Timeout: goVersionTimeout})
+	latestGoVersion, err := fetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch latest Go version: %w", err)
 	}
