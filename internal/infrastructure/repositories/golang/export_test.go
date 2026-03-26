@@ -109,3 +109,31 @@ func OpenPullRequest(
 func FileExistsLocally(path string) bool {
 	return fileExistsLocally(path)
 }
+
+// LocalUpgradeParamsType is exported for testing.
+type LocalUpgradeParamsType = localUpgradeParams
+
+// HandleDryRun is exported for testing.
+func HandleDryRun(vCtx *versionContext, repoDir string) *LocalResult {
+	return handleDryRun(vCtx, repoDir)
+}
+
+// BuildLocalUpgradeScriptFull is exported for testing.
+func BuildLocalUpgradeScriptFull(params localUpgradeParams) string {
+	return buildLocalUpgradeScript(params)
+}
+
+// WriteLocalAuth is exported for testing.
+func WriteLocalAuth(sb *strings.Builder, params localUpgradeParams) {
+	writeLocalAuth(sb, params)
+}
+
+// BuildLocalEnvFull is exported for testing.
+func BuildLocalEnvFull(params localUpgradeParams, goBinary string) []string {
+	return buildLocalEnv(params, goBinary)
+}
+
+// PrepareLocalChangelog is exported for testing.
+func PrepareLocalChangelog(repoDir string, vCtx *versionContext) string {
+	return prepareLocalChangelog(repoDir, vCtx)
+}

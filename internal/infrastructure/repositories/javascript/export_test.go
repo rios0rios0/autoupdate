@@ -176,3 +176,13 @@ func NewUpdaterRepositoryWithDepsExported(vf VersionFetcher, runner ...cmdrunner
 	}
 	return u
 }
+
+// HandleDryRunLocal is exported for testing.
+func HandleDryRunLocal(vCtx *versionContext, repoDir, pkgMgr string) *LocalResult {
+	return handleDryRunLocal(vCtx, repoDir, pkgMgr)
+}
+
+// PrepareLocalChangelog is exported for testing.
+func PrepareLocalChangelog(repoDir string, vCtx *versionContext) string {
+	return prepareLocalChangelog(repoDir, vCtx)
+}

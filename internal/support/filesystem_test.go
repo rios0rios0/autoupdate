@@ -4,6 +4,7 @@ package support_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -278,5 +279,74 @@ func TestLocalChangelogUpdate(t *testing.T) {
 		// InsertChangelogEntry won't modify content without [Unreleased] heading
 		// The exact behavior depends on gitforge's implementation
 		_ = updated
+	})
+}
+
+// initGitRepo initializes a git repo in the given directory with an initial commit.
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	cmds := [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...) //nolint:gosec // test helper
+		cmd.Dir = dir
+		require.NoError(t, cmd.Run(), "failed to run: %v", args)
+	}
+	// Create and commit a file
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("init"), 0o600))
+	add := exec.Command("git", "add", ".")
+	add.Dir = dir
+	require.NoError(t, add.Run())
+	commit := exec.Command("git", "commit", "-m", "initial") //nolint:gosec // test
+	commit.Dir = dir
+	require.NoError(t, commit.Run())
+}
+
+func TestHasUncommittedChanges(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return false for clean git repo", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		initGitRepo(t, root)
+
+		// when
+		result := support.HasUncommittedChanges(t.Context(), root)
+
+		// then
+		assert.False(t, result)
+	})
+
+	t.Run("should return true for dirty git repo", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		initGitRepo(t, root)
+		require.NoError(t, os.WriteFile(filepath.Join(root, "new_file.txt"), []byte("dirty"), 0o600))
+
+		// when
+		result := support.HasUncommittedChanges(t.Context(), root)
+
+		// then
+		assert.True(t, result)
+	})
+
+	t.Run("should return true for non-git directory", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+
+		// when
+		result := support.HasUncommittedChanges(t.Context(), root)
+
+		// then
+		assert.True(t, result)
 	})
 }
