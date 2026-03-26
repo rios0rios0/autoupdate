@@ -10,8 +10,10 @@ import (
 // SettingsBuilder helps create test settings with a fluent interface.
 type SettingsBuilder struct {
 	*testkit.BaseBuilder
-	providers []entities.ProviderConfig
-	updaters  map[string]entities.UpdaterConfig
+	providers       []entities.ProviderConfig
+	updaters        map[string]entities.UpdaterConfig
+	excludeForks    bool
+	excludeArchived bool
 }
 
 // NewSettingsBuilder creates a new settings builder with sensible defaults.
@@ -35,6 +37,18 @@ func (b *SettingsBuilder) WithUpdaters(u map[string]entities.UpdaterConfig) *Set
 	return b
 }
 
+// WithExcludeForks sets the exclude forks flag.
+func (b *SettingsBuilder) WithExcludeForks(exclude bool) *SettingsBuilder {
+	b.excludeForks = exclude
+	return b
+}
+
+// WithExcludeArchived sets the exclude archived flag.
+func (b *SettingsBuilder) WithExcludeArchived(exclude bool) *SettingsBuilder {
+	b.excludeArchived = exclude
+	return b
+}
+
 // Build creates the settings (satisfies testkit.Builder interface).
 func (b *SettingsBuilder) Build() interface{} {
 	return b.BuildSettings()
@@ -43,8 +57,10 @@ func (b *SettingsBuilder) Build() interface{} {
 // BuildSettings creates the settings with a concrete return type.
 func (b *SettingsBuilder) BuildSettings() *entities.Settings {
 	return &entities.Settings{
-		Providers: b.providers,
-		Updaters:  b.updaters,
+		Providers:       b.providers,
+		Updaters:        b.updaters,
+		ExcludeForks:    b.excludeForks,
+		ExcludeArchived: b.excludeArchived,
 	}
 }
 
@@ -53,6 +69,8 @@ func (b *SettingsBuilder) Reset() testkit.Builder {
 	b.BaseBuilder.Reset()
 	b.providers = []entities.ProviderConfig{}
 	b.updaters = map[string]entities.UpdaterConfig{}
+	b.excludeForks = false
+	b.excludeArchived = false
 	return b
 }
 
@@ -67,8 +85,10 @@ func (b *SettingsBuilder) Clone() testkit.Builder {
 	}
 
 	return &SettingsBuilder{
-		BaseBuilder: b.BaseBuilder.Clone().(*testkit.BaseBuilder),
-		providers:   providers,
-		updaters:    updaters,
+		BaseBuilder:     b.BaseBuilder.Clone().(*testkit.BaseBuilder),
+		providers:       providers,
+		updaters:        updaters,
+		excludeForks:    b.excludeForks,
+		excludeArchived: b.excludeArchived,
 	}
 }

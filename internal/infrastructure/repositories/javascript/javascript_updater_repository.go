@@ -2,8 +2,6 @@ package javascript
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -43,11 +41,20 @@ const (
 // It clones the repository locally, runs the appropriate package manager
 // to update dependencies, pushes the changes, and creates a PR via the
 // provider API.
-type UpdaterRepository struct{}
+type UpdaterRepository struct {
+	versionFetcher VersionFetcher
+}
 
-// NewUpdaterRepository creates a new JavaScript updater.
+// NewUpdaterRepository creates a new JavaScript updater with default dependencies.
 func NewUpdaterRepository() repositories.UpdaterRepository {
-	return &UpdaterRepository{}
+	return &UpdaterRepository{
+		versionFetcher: NewHTTPNodeVersionFetcher(&http.Client{Timeout: nodeVersionTimeout}),
+	}
+}
+
+// NewUpdaterRepositoryWithDeps creates a JavaScript updater with injected dependencies (for testing).
+func NewUpdaterRepositoryWithDeps(vf VersionFetcher) repositories.UpdaterRepository {
+	return &UpdaterRepository{versionFetcher: vf}
 }
 
 func (u *UpdaterRepository) Name() string { return updaterName }
@@ -76,7 +83,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 ) ([]entities.PullRequest, error) {
 	logger.Infof("[javascript] Processing %s/%s", repo.Organization, repo.Name)
 
-	latestNodeVersion, err := fetchLatestNodeVersion(ctx)
+	latestNodeVersion, err := u.versionFetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		logger.Warnf(
 			"[javascript] Failed to fetch latest Node.js version: %v (continuing without version upgrade)",
@@ -343,45 +350,11 @@ type upgradeResult struct {
 	Output             string
 }
 
-// --- Node.js version fetching ---
+// --- Node.js version types and helpers ---
 
 type nodeRelease struct {
 	Version string `json:"version"`
 	LTS     any    `json:"lts"` // false or string like "Jod"
-}
-
-func fetchLatestNodeVersion(ctx context.Context) (string, error) {
-	client := &http.Client{Timeout: nodeVersionTimeout}
-
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "https://nodejs.org/dist/index.json", nil,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch Node.js versions: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	var releases []nodeRelease
-	if decodeErr := json.NewDecoder(resp.Body).Decode(&releases); decodeErr != nil {
-		return "", fmt.Errorf("failed to parse Node.js versions: %w", decodeErr)
-	}
-
-	for _, release := range releases {
-		if isLTSRelease(release) {
-			return strings.TrimPrefix(release.Version, "v"), nil
-		}
-	}
-
-	return "", errors.New("no LTS Node.js version found")
 }
 
 // isLTSRelease returns true if the Node.js release is an LTS version.

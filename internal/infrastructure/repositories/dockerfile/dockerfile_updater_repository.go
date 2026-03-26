@@ -308,6 +308,10 @@ func scanDockerfile(content, filePath string) []imageRef {
 
 // --- upgrade determination ---
 
+// fetchTagsFunc is the function used to fetch tags from the registry.
+// It defaults to fetchTags and can be overridden in tests.
+var fetchTagsFunc = fetchTags
+
 func determineUpgrades(ctx context.Context, allRefs []imageRef) []upgradeTask {
 	// Cache tags per image to avoid redundant API calls
 	tagCache := make(map[string][]string)
@@ -318,7 +322,7 @@ func determineUpgrades(ctx context.Context, allRefs []imageRef) []upgradeTask {
 		tags, ok := tagCache[cacheKey]
 		if !ok {
 			var err error
-			tags, err = fetchTags(ctx, ref.parsed)
+			tags, err = fetchTagsFunc(ctx, ref.parsed)
 			if err != nil {
 				logger.Warnf("[dockerfile] Failed to fetch tags for %s: %v", cacheKey, err)
 				tagCache[cacheKey] = nil

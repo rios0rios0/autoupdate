@@ -2,7 +2,6 @@ package golang
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -46,11 +45,20 @@ const (
 // UpdaterRepository implements repositories.UpdaterRepository for Go module dependencies.
 // It clones the repository locally, runs go commands to update
 // dependencies, pushes the changes, and creates a PR via the provider API.
-type UpdaterRepository struct{}
+type UpdaterRepository struct {
+	versionFetcher VersionFetcher
+}
 
-// NewUpdaterRepository creates a new Go updater.
+// NewUpdaterRepository creates a new Go updater with default dependencies.
 func NewUpdaterRepository() repositories.UpdaterRepository {
-	return &UpdaterRepository{}
+	return &UpdaterRepository{
+		versionFetcher: NewHTTPGoVersionFetcher(&http.Client{Timeout: goVersionTimeout}),
+	}
+}
+
+// NewUpdaterRepositoryWithDeps creates a Go updater with injected dependencies (for testing).
+func NewUpdaterRepositoryWithDeps(vf VersionFetcher) repositories.UpdaterRepository {
+	return &UpdaterRepository{versionFetcher: vf}
 }
 
 func (u *UpdaterRepository) Name() string { return updaterName }
@@ -79,7 +87,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 ) ([]entities.PullRequest, error) {
 	logger.Infof("[golang] Processing %s/%s", repo.Organization, repo.Name)
 
-	latestGoVersion, err := fetchLatestGoVersion(ctx)
+	latestGoVersion, err := u.versionFetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch latest Go version: %w", err)
 	}
@@ -140,7 +148,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[golang] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
-	latestGoVersion, err := fetchLatestGoVersion(ctx)
+	latestGoVersion, err := u.versionFetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch latest Go version: %w", err)
 	}
@@ -490,40 +498,6 @@ type upgradeResult struct {
 type goRelease struct {
 	Version string `json:"version"`
 	Stable  bool   `json:"stable"`
-}
-
-func fetchLatestGoVersion(ctx context.Context) (string, error) {
-	client := &http.Client{Timeout: goVersionTimeout}
-
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "https://go.dev/dl/?mode=json", nil,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch Go versions: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	var releases []goRelease
-	if decodeErr := json.NewDecoder(resp.Body).Decode(&releases); decodeErr != nil {
-		return "", fmt.Errorf("failed to parse Go versions: %w", decodeErr)
-	}
-
-	for _, release := range releases {
-		if release.Stable {
-			return strings.TrimPrefix(release.Version, "go"), nil
-		}
-	}
-
-	return "", errors.New("no stable Go version found")
 }
 
 // parseGoDirective extracts the version from a go.mod's "go" directive.

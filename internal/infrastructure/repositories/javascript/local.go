@@ -3,6 +3,7 @@ package javascript
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,7 +61,8 @@ func RunLocalUpgrade(
 // resolveLocalVersionContext fetches the latest Node.js version and compares
 // it against the local .nvmrc or .node-version to build a versionContext.
 func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionContext {
-	latestNodeVersion, err := fetchLatestNodeVersion(ctx)
+	fetcher := NewHTTPNodeVersionFetcher(&http.Client{Timeout: nodeVersionTimeout})
+	latestNodeVersion, err := fetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		logger.Warnf(
 			"[javascript] Failed to fetch latest Node.js version: %v (continuing without version upgrade)",
