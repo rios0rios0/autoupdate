@@ -3,15 +3,478 @@
 package pipeline_test
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/pipeline"
 	"github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
 )
+
+func TestLocalScanAndDetermineUpgrades(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should find version references in Azure DevOps pipeline files", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		adoDir := root + "/azure-devops"
+		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+
+		content := `steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.12'
+    displayName: 'Use Python 3.12'
+`
+		require.NoError(t, os.WriteFile(adoDir+"/build.yaml", []byte(content), 0o644))
+
+		latestVersions := map[string]string{
+			"python": "3.13.1",
+		}
+
+		// when
+		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then
+		require.Len(t, upgrades, 1)
+		assert.Equal(t, "python", pipeline.UpgradeTaskLanguage(upgrades[0]))
+		assert.Equal(t, "3.12", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
+		assert.Equal(t, "3.13", pipeline.UpgradeTaskNewVersion(upgrades[0]))
+		assert.Contains(t, fileContents, "azure-devops/build.yaml")
+	})
+
+	t.Run("should skip hidden directories like .github in local filesystem walk", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		ghDir := root + "/.github/workflows"
+		require.NoError(t, os.MkdirAll(ghDir, 0o755))
+
+		content := `name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.0'
+`
+		require.NoError(t, os.WriteFile(ghDir+"/ci.yaml", []byte(content), 0o644))
+
+		latestVersions := map[string]string{
+			"golang": "1.24.1",
+		}
+
+		// when
+		upgrades, _ := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then
+		// WalkFilesByExtension skips hidden directories (.github),
+		// so no upgrades are found for GitHub Actions in local mode
+		assert.Empty(t, upgrades)
+	})
+
+	t.Run("should return empty for files with no version refs", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		adoDir := root + "/azure-devops"
+		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+
+		content := `steps:
+  - script: echo "Hello World"
+    displayName: 'Run a script'
+`
+		require.NoError(t, os.WriteFile(adoDir+"/build.yaml", []byte(content), 0o644))
+
+		latestVersions := map[string]string{
+			"python": "3.13.1",
+			"golang": "1.24.1",
+		}
+
+		// when
+		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then
+		assert.Empty(t, upgrades)
+		assert.Empty(t, fileContents)
+	})
+
+	t.Run("should return empty when all versions are up to date", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		adoDir := root + "/azure-devops"
+		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+
+		content := `steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.13'
+    displayName: 'Use Python 3.13'
+`
+		require.NoError(t, os.WriteFile(adoDir+"/build.yaml", []byte(content), 0o644))
+
+		latestVersions := map[string]string{
+			"python": "3.13.1",
+		}
+
+		// when
+		upgrades, _ := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then
+		assert.Empty(t, upgrades)
+	})
+
+	t.Run("should find multiple version references across files", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		adoDir := root + "/azure-devops"
+		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+
+		pythonContent := `steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.11'
+`
+		goContent := `steps:
+  - task: GoTool@0
+    inputs:
+      version: '1.21'
+`
+		require.NoError(t, os.WriteFile(adoDir+"/python.yaml", []byte(pythonContent), 0o644))
+		require.NoError(t, os.WriteFile(adoDir+"/go.yml", []byte(goContent), 0o644))
+
+		latestVersions := map[string]string{
+			"python": "3.13.1",
+			"golang": "1.24.1",
+		}
+
+		// when
+		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then
+		assert.Len(t, upgrades, 2)
+		assert.Len(t, fileContents, 2)
+	})
+
+	t.Run("should find version references in .yml files", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		adoDir := root + "/azure-devops"
+		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+
+		content := `steps:
+  - task: NodeTool@0
+    inputs:
+      version: '18.0.0'
+`
+		require.NoError(t, os.WriteFile(adoDir+"/build.yml", []byte(content), 0o644))
+
+		latestVersions := map[string]string{
+			"nodejs": "22.0.0",
+		}
+
+		// when
+		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then
+		require.Len(t, upgrades, 1)
+		assert.Equal(t, "nodejs", pipeline.UpgradeTaskLanguage(upgrades[0]))
+		assert.Equal(t, "18.0.0", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
+		assert.Equal(t, "22.0.0", pipeline.UpgradeTaskNewVersion(upgrades[0]))
+		assert.Contains(t, fileContents, "azure-devops/build.yml")
+	})
+
+	t.Run("should skip non-pipeline YAML files", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(root+"/config.yaml", []byte("python-version: '3.10'"), 0o644))
+
+		latestVersions := map[string]string{
+			"python": "3.13.1",
+		}
+
+		// when
+		upgrades, _ := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then
+		assert.Empty(t, upgrades)
+	})
+}
+
+func TestApplyUpdatesLocal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return ErrNoUpdatesNeeded when no versions need upgrading", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		adoDir := root + "/azure-devops"
+		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+
+		content := `steps:
+  - script: echo "Hello"
+`
+		require.NoError(t, os.WriteFile(adoDir+"/build.yaml", []byte(content), 0o644))
+
+		updater := pipeline.NewUpdaterRepository()
+		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
+		opts := entities.UpdateOptions{}
+
+		// when
+		result, err := updater.(*pipeline.UpdaterRepository).ApplyUpdates(
+			t.Context(), root, nil, repo, opts,
+		)
+
+		// then
+		assert.Nil(t, result)
+		assert.ErrorIs(t, err, repositories.ErrNoUpdatesNeeded)
+	})
+}
+
+func TestCreateUpgradePR(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should create branch and PR with correct parameters", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"CHANGELOG.md": false}).
+			BuildSpy()
+		repo := entities.Repository{
+			Organization:  "org",
+			Name:          "repo",
+			DefaultBranch: "refs/heads/main",
+		}
+		opts := entities.UpdateOptions{AutoComplete: true}
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-devops/build.yml", "versionSpec: '3.12'"),
+		}
+		fileContents := map[string]string{
+			"azure-devops/build.yml": "versionSpec: '3.12'",
+		}
+
+		// when
+		prs, err := pipeline.CreateUpgradePR(t.Context(), provider, repo, opts, upgrades, fileContents)
+
+		// then
+		require.NoError(t, err)
+		require.Len(t, prs, 1)
+		assert.Equal(t, 1, prs[0].ID)
+
+		require.Len(t, provider.BranchInputs, 1)
+		assert.Equal(t, "chore/upgrade-pipeline-python-3.13", provider.BranchInputs[0].BranchName)
+		assert.Equal(t, "refs/heads/main", provider.BranchInputs[0].BaseBranch)
+		assert.Contains(t, provider.BranchInputs[0].CommitMessage, "python")
+
+		require.Len(t, provider.PRInputs, 1)
+		assert.Equal(t, "refs/heads/chore/upgrade-pipeline-python-3.13", provider.PRInputs[0].SourceBranch)
+		assert.Equal(t, "refs/heads/main", provider.PRInputs[0].TargetBranch)
+		assert.True(t, provider.PRInputs[0].AutoComplete)
+		assert.Contains(t, provider.PRInputs[0].Title, "python")
+	})
+
+	t.Run("should skip when PR already exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithPRExistsResult(true).
+			BuildSpy()
+		repo := entities.Repository{
+			Organization:  "org",
+			Name:          "repo",
+			DefaultBranch: "refs/heads/main",
+		}
+		opts := entities.UpdateOptions{}
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("golang", "1.21", "1.22", ".github/workflows/ci.yml", "go-version: '1.21'"),
+		}
+		fileContents := map[string]string{
+			".github/workflows/ci.yml": "go-version: '1.21'",
+		}
+
+		// when
+		prs, err := pipeline.CreateUpgradePR(t.Context(), provider, repo, opts, upgrades, fileContents)
+
+		// then
+		require.NoError(t, err)
+		assert.Empty(t, prs)
+		assert.Empty(t, provider.BranchInputs)
+		assert.Empty(t, provider.PRInputs)
+	})
+
+	t.Run("should use target branch from options when specified", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"CHANGELOG.md": false}).
+			BuildSpy()
+		repo := entities.Repository{
+			Organization:  "org",
+			Name:          "repo",
+			DefaultBranch: "refs/heads/main",
+		}
+		opts := entities.UpdateOptions{TargetBranch: "develop"}
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-devops/build.yml", "versionSpec: '3.12'"),
+		}
+		fileContents := map[string]string{
+			"azure-devops/build.yml": "versionSpec: '3.12'",
+		}
+
+		// when
+		prs, err := pipeline.CreateUpgradePR(t.Context(), provider, repo, opts, upgrades, fileContents)
+
+		// then
+		require.NoError(t, err)
+		require.Len(t, prs, 1)
+
+		assert.Equal(t, "refs/heads/develop", provider.BranchInputs[0].BaseBranch)
+		assert.Equal(t, "refs/heads/develop", provider.PRInputs[0].TargetBranch)
+	})
+
+	t.Run("should return error when branch creation fails", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithCreateBranchErr(fmt.Errorf("branch creation failed")).
+			BuildSpy()
+		repo := entities.Repository{
+			Organization:  "org",
+			Name:          "repo",
+			DefaultBranch: "refs/heads/main",
+		}
+		opts := entities.UpdateOptions{}
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-devops/build.yml", "versionSpec: '3.12'"),
+		}
+		fileContents := map[string]string{
+			"azure-devops/build.yml": "versionSpec: '3.12'",
+		}
+
+		// when
+		prs, err := pipeline.CreateUpgradePR(t.Context(), provider, repo, opts, upgrades, fileContents)
+
+		// then
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create branch")
+		assert.Nil(t, prs)
+	})
+
+	t.Run("should return error when PR creation fails", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithCreatePRErr(fmt.Errorf("PR creation failed")).
+			WithExistingFiles(map[string]bool{"CHANGELOG.md": false}).
+			BuildSpy()
+		repo := entities.Repository{
+			Organization:  "org",
+			Name:          "repo",
+			DefaultBranch: "refs/heads/main",
+		}
+		opts := entities.UpdateOptions{}
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-devops/build.yml", "versionSpec: '3.12'"),
+		}
+		fileContents := map[string]string{
+			"azure-devops/build.yml": "versionSpec: '3.12'",
+		}
+
+		// when
+		prs, err := pipeline.CreateUpgradePR(t.Context(), provider, repo, opts, upgrades, fileContents)
+
+		// then
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create PR")
+		assert.Nil(t, prs)
+	})
+
+	t.Run("should append CHANGELOG entry when CHANGELOG.md exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		changelog := `# Changelog
+
+## [Unreleased]
+
+## [1.0.0] - 2026-01-01
+`
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
+			WithFileContents(map[string]string{"CHANGELOG.md": changelog}).
+			BuildSpy()
+		repo := entities.Repository{
+			Organization:  "org",
+			Name:          "repo",
+			DefaultBranch: "refs/heads/main",
+		}
+		opts := entities.UpdateOptions{}
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-devops/build.yml", "versionSpec: '3.12'"),
+		}
+		fileContents := map[string]string{
+			"azure-devops/build.yml": "versionSpec: '3.12'",
+		}
+
+		// when
+		prs, err := pipeline.CreateUpgradePR(t.Context(), provider, repo, opts, upgrades, fileContents)
+
+		// then
+		require.NoError(t, err)
+		require.Len(t, prs, 1)
+
+		// Verify changelog was included in the branch changes
+		require.Len(t, provider.BranchInputs, 1)
+		changes := provider.BranchInputs[0].Changes
+		hasChangelog := false
+		for _, change := range changes {
+			if change.Path == "CHANGELOG.md" {
+				hasChangelog = true
+				assert.Contains(t, change.Content, "changed the python pipeline version")
+			}
+		}
+		assert.True(t, hasChangelog)
+	})
+}
 
 func TestName(t *testing.T) {
 	t.Parallel()
@@ -75,6 +538,22 @@ func TestDetect(t *testing.T) {
 		// given
 		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
 			WithFiles([]entities.File{}).
+			BuildSpy()
+		repo := entities.Repository{Organization: "org", Name: "repo"}
+
+		// when
+		detected := pipeline.NewUpdaterRepository().Detect(t.Context(), provider, repo)
+
+		// then
+		assert.False(t, detected)
+	})
+
+	t.Run("should return false when provider returns error from ListFiles", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithListFileErr(fmt.Errorf("API rate limit exceeded")).
 			BuildSpy()
 		repo := entities.Repository{Organization: "org", Name: "repo"}
 
@@ -795,5 +1274,202 @@ func TestIsExactVersion(t *testing.T) {
 		t.Parallel()
 
 		assert.False(t, pipeline.IsExactVersion(""))
+	})
+}
+
+func TestClassifyFile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should classify GitHub Actions workflow files", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.ClassifyFile(".github/workflows/ci.yml")
+
+		// then
+		assert.Equal(t, pipeline.CIGitHubActions, result)
+	})
+
+	t.Run("should classify azure-devops directory files", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.ClassifyFile("azure-devops/build.yml")
+
+		// then
+		assert.Equal(t, pipeline.CIAzureDevOps, result)
+	})
+
+	t.Run("should classify azure-pipelines.yml", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.ClassifyFile("azure-pipelines.yml")
+
+		// then
+		assert.Equal(t, pipeline.CIAzureDevOps, result)
+	})
+
+	t.Run("should return empty for unknown paths", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.ClassifyFile("src/main.go")
+
+		// then
+		assert.Equal(t, pipeline.CISystem(""), result)
+	})
+}
+
+func TestGenerateBranchName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should format single upgrade branch name", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTask("python", "3.12", "3.13"),
+		}
+
+		// when
+		result := pipeline.GenerateBranchName(tasks)
+
+		// then
+		assert.Contains(t, result, "python")
+		assert.Contains(t, result, "3.13")
+	})
+
+	t.Run("should format batch upgrade branch name", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTask("python", "3.12", "3.13"),
+			pipeline.NewUpgradeTask("go", "1.24", "1.25"),
+			pipeline.NewUpgradeTask("java", "21", "22"),
+		}
+
+		// when
+		result := pipeline.GenerateBranchName(tasks)
+
+		// then
+		assert.Contains(t, result, "3")
+	})
+}
+
+func TestGenerateCommitMessage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should format single upgrade commit message", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTask("python", "3.12", "3.13"),
+		}
+
+		// when
+		result := pipeline.GenerateCommitMessage(tasks)
+
+		// then
+		assert.Contains(t, result, "python")
+		assert.Contains(t, result, "3.12")
+		assert.Contains(t, result, "3.13")
+	})
+
+	t.Run("should format batch upgrade commit message", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTask("python", "3.12", "3.13"),
+			pipeline.NewUpgradeTask("go", "1.24", "1.25"),
+		}
+
+		// when
+		result := pipeline.GenerateCommitMessage(tasks)
+
+		// then
+		assert.Contains(t, result, "2")
+	})
+}
+
+func TestGeneratePRTitle(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should format single upgrade PR title", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTask("python", "3.12", "3.13"),
+		}
+
+		// when
+		result := pipeline.GeneratePRTitle(tasks)
+
+		// then
+		assert.Contains(t, result, "python")
+		assert.Contains(t, result, "3.13")
+	})
+
+	t.Run("should format batch upgrade PR title", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTask("python", "3.12", "3.13"),
+			pipeline.NewUpgradeTask("go", "1.24", "1.25"),
+		}
+
+		// when
+		result := pipeline.GeneratePRTitle(tasks)
+
+		// then
+		assert.Contains(t, result, "2")
+	})
+}
+
+func TestGeneratePRDescription(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should generate table for few upgrades", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tasks := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-pipelines.yml", "versionSpec: '3.12'"),
+			pipeline.NewUpgradeTaskWithFullMatch("go", "1.24", "1.25", ".github/workflows/ci.yml", "go-version: '1.24'"),
+		}
+
+		// when
+		result := pipeline.GeneratePRDescription(tasks)
+
+		// then
+		assert.Contains(t, result, "| Language |")
+		assert.Contains(t, result, "python")
+		assert.Contains(t, result, "go")
+		assert.Contains(t, result, "3.12")
+		assert.Contains(t, result, "1.25")
+	})
+
+	t.Run("should generate summary for many upgrades", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var tasks []pipeline.UpgradeTask
+		for i := range 6 {
+			tasks = append(tasks, pipeline.NewUpgradeTask(
+				fmt.Sprintf("lang-%d", i), "1.0", "2.0",
+			))
+		}
+
+		// when
+		result := pipeline.GeneratePRDescription(tasks)
+
+		// then
+		assert.Contains(t, result, "**6**")
+		assert.NotContains(t, result, "| Language |")
 	})
 }

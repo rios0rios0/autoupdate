@@ -135,3 +135,59 @@ func UpgradeTaskNewVersion(t UpgradeTask) string { return t.newVersion }
 
 // ActionUpgradeNewRef returns the new ref of an action upgrade.
 func ActionUpgradeNewRef(u *ActionUpgrade) string { return u.newRef }
+
+// ClassifyFile is exported for testing.
+func ClassifyFile(path string) CISystem {
+	return classifyFile(path)
+}
+
+// CISystem is exported for testing.
+type CISystem = ciSystem
+
+// Exported ciSystem constants for testing.
+const (
+	CIGitHubActions = ciGitHubActions
+	CIAzureDevOps   = ciAzureDevOps
+)
+
+// GenerateBranchName is exported for testing.
+func GenerateBranchName(tasks []UpgradeTask) string {
+	return generateBranchName(tasks)
+}
+
+// GenerateCommitMessage is exported for testing.
+func GenerateCommitMessage(tasks []UpgradeTask) string {
+	return generateCommitMessage(tasks)
+}
+
+// GeneratePRTitle is exported for testing.
+func GeneratePRTitle(tasks []UpgradeTask) string {
+	return generatePRTitle(tasks)
+}
+
+// GeneratePRDescription is exported for testing.
+func GeneratePRDescription(tasks []UpgradeTask) string {
+	return generatePRDescription(tasks)
+}
+
+// LocalScanAndDetermineUpgrades is exported for testing.
+func LocalScanAndDetermineUpgrades(
+	ctx context.Context,
+	repoDir string,
+	provider repositories.ProviderRepository,
+	latestVersions map[string]string,
+) ([]UpgradeTask, map[string]string) {
+	return localScanAndDetermineUpgrades(ctx, repoDir, provider, latestVersions)
+}
+
+// CreateUpgradePR is exported for testing.
+func CreateUpgradePR(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+	opts entities.UpdateOptions,
+	upgrades []UpgradeTask,
+	fileContents map[string]string,
+) ([]entities.PullRequest, error) {
+	return createUpgradePR(ctx, provider, repo, opts, upgrades, fileContents)
+}

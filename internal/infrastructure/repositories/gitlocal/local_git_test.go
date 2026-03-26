@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	gitconfig "github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -211,6 +212,100 @@ func TestHasChanges(t *testing.T) {
 	})
 }
 
+func TestCurrentBranch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return the new branch name after creating a branch", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := createTestRepoWithCommit(t)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
+		require.NoError(t, err)
+		require.NoError(t, ctx.CreateBranch("feat/new-feature"))
+
+		// when
+		branch, err := ctx.CurrentBranch()
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, "feat/new-feature", branch)
+	})
+}
+
+func TestCheckoutBranch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return error when branch does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := createTestRepoWithCommit(t)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
+		require.NoError(t, err)
+
+		// when
+		err = ctx.CheckoutBranch("nonexistent-branch")
+
+		// then
+		require.Error(t, err)
+	})
+}
+
+func TestLocalHasChanges(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return false when worktree is clean", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := createTestRepoWithCommit(t)
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
+		require.NoError(t, err)
+
+		// when
+		hasChanges, err := ctx.HasChanges()
+
+		// then
+		require.NoError(t, err)
+		assert.False(t, hasChanges)
+	})
+
+	t.Run("should return true when tracked file is modified", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := createTestRepoWithCommit(t)
+		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("changed"), 0o600))
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
+		require.NoError(t, err)
+
+		// when
+		hasChanges, err := ctx.HasChanges()
+
+		// then
+		require.NoError(t, err)
+		assert.True(t, hasChanges)
+	})
+
+	t.Run("should return true when untracked file is added", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := createTestRepoWithCommit(t)
+		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "new.txt"), []byte("new"), 0o600))
+		ctx, err := gitlocal.NewLocalGitContext(repoDir, nil)
+		require.NoError(t, err)
+
+		// when
+		hasChanges, err := ctx.HasChanges()
+
+		// then
+		require.NoError(t, err)
+		assert.True(t, hasChanges)
+	})
+}
+
 func TestStageCommitAndPush(t *testing.T) {
 	t.Parallel()
 
@@ -325,7 +420,7 @@ func createTestRepoWithCommit(t *testing.T) string {
 	_, err = wt.Add("README.md")
 	require.NoError(t, err)
 
-	_, err = wt.Commit("initial commit", &git.CommitOptions{
+	commitHash, err := wt.Commit("initial commit", &git.CommitOptions{
 		Author: &object.Signature{
 			Name:  "test",
 			Email: "test@test.com",
@@ -333,6 +428,17 @@ func createTestRepoWithCommit(t *testing.T) string {
 		},
 	})
 	require.NoError(t, err)
+
+	// Rename the default branch from "master" to "main" so tests that
+	// reference "main" as the default branch work correctly.
+	mainRef := plumbing.NewHashReference(plumbing.NewBranchReferenceName("main"), commitHash)
+	require.NoError(t, repo.Storer.SetReference(mainRef))
+
+	headRef := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.NewBranchReferenceName("main"))
+	require.NoError(t, repo.Storer.SetReference(headRef))
+
+	// Remove the old master reference
+	_ = repo.Storer.RemoveReference(plumbing.NewBranchReferenceName("master"))
 
 	return repoDir
 }

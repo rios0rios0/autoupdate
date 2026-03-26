@@ -3,16 +3,20 @@ package python
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	logger "github.com/sirupsen/logrus"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
 )
+
+// localCmdRunner is the package-level command runner for local-mode upgrade scripts.
+var localCmdRunner cmdrunner.Runner = cmdrunner.NewDefaultRunner() //nolint:gochecknoglobals // test override
 
 // LocalUpgradeOptions holds options for the local (standalone) upgrade mode.
 type LocalUpgradeOptions struct {
@@ -57,7 +61,8 @@ func RunLocalUpgrade(
 // resolveLocalVersionContext fetches the latest Python version and compares
 // it against the local .python-version to build a versionContext.
 func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionContext {
-	latestPyVersion, err := fetchLatestPythonVersion(ctx)
+	fetcher := NewHTTPPythonVersionFetcher(&http.Client{Timeout: pyVersionTimeout})
+	latestPyVersion, err := fetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		logger.Warnf("[python] Failed to fetch latest Python version: %v (continuing without version upgrade)", err)
 		latestPyVersion = ""
@@ -233,12 +238,15 @@ func runLanguageUpgradeScript(
 		return "", fmt.Errorf("failed to write script: %w", writeErr)
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = repoDir
-	cmd.Env = buildLocalEnv(params)
+	runResult, runErr := localCmdRunner.Run(ctx, "bash", []string{scriptPath}, cmdrunner.RunOptions{
+		Dir: repoDir,
+		Env: buildLocalEnv(params),
+	})
 
-	output, runErr := cmd.CombinedOutput()
-	outputStr := string(output)
+	var outputStr string
+	if runResult != nil {
+		outputStr = runResult.Output
+	}
 
 	if opts.Verbose {
 		logger.Debugf("[python] Script output:\n%s", outputStr)

@@ -3,9 +3,11 @@
 package entities_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 )
@@ -83,6 +85,259 @@ func TestIsAutoComplete(t *testing.T) {
 
 		// then
 		assert.False(t, result)
+	})
+}
+
+func TestNewSettings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return error for non-existent file", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		path := "/tmp/non-existent-config-file.yaml"
+
+		// when
+		_, err := entities.NewSettings(path)
+
+		// then
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read config file")
+	})
+
+	t.Run("should return error for invalid YAML", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tmpFile := t.TempDir() + "/bad.yaml"
+		require.NoError(t, os.WriteFile(tmpFile, []byte("{invalid yaml: [}"), 0o600))
+
+		// when
+		_, err := entities.NewSettings(tmpFile)
+
+		// then
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse config file")
+	})
+
+	t.Run("should return error for invalid settings", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		tmpFile := t.TempDir() + "/empty.yaml"
+		require.NoError(t, os.WriteFile(tmpFile, []byte("exclude_forks: true\n"), 0o600))
+
+		// when
+		_, err := entities.NewSettings(tmpFile)
+
+		// then
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "at least one provider")
+	})
+}
+
+func TestDecodeSettings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should decode valid YAML in lenient mode", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		data := []byte(`
+providers:
+  - type: github
+    token: my-token
+    organizations:
+      - my-org
+updaters:
+  terraform:
+    enabled: true
+`)
+
+		// when
+		settings, err := entities.DecodeSettings(data, false)
+
+		// then
+		assert.NoError(t, err)
+		assert.Len(t, settings.Providers, 1)
+		assert.Equal(t, "github", settings.Providers[0].Type)
+		assert.True(t, settings.Updaters["terraform"].IsEnabled())
+	})
+
+	t.Run("should return error for unknown fields in strict mode", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		data := []byte(`
+providers:
+  - type: github
+    token: my-token
+    organizations:
+      - my-org
+unknown_field: value
+`)
+
+		// when
+		_, err := entities.DecodeSettings(data, true)
+
+		// then
+		assert.Error(t, err)
+	})
+
+	t.Run("should ignore unknown fields in lenient mode", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		data := []byte(`
+providers:
+  - type: github
+    token: my-token
+    organizations:
+      - my-org
+unknown_field: value
+`)
+
+		// when
+		settings, err := entities.DecodeSettings(data, false)
+
+		// then
+		assert.NoError(t, err)
+		assert.Len(t, settings.Providers, 1)
+	})
+
+	t.Run("should return error for invalid YAML", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		data := []byte(`{invalid yaml: [}`)
+
+		// when
+		_, err := entities.DecodeSettings(data, false)
+
+		// then
+		assert.Error(t, err)
+	})
+}
+
+func TestValidateSettings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return nil for valid settings", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{
+			Providers: []entities.ProviderConfig{
+				{Type: "github", Token: "tok", Organizations: []string{"org"}},
+			},
+		}
+
+		// when
+		err := entities.ValidateSettings(settings)
+
+		// then
+		assert.NoError(t, err)
+	})
+
+	t.Run("should return error when no providers configured", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{}
+
+		// when
+		err := entities.ValidateSettings(settings)
+
+		// then
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "at least one provider")
+	})
+
+	t.Run("should return error when provider type is missing", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{
+			Providers: []entities.ProviderConfig{
+				{Token: "tok", Organizations: []string{"org"}},
+			},
+		}
+
+		// when
+		err := entities.ValidateSettings(settings)
+
+		// then
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "type is required")
+	})
+
+	t.Run("should return error when provider token is missing", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{
+			Providers: []entities.ProviderConfig{
+				{Type: "github", Organizations: []string{"org"}},
+			},
+		}
+
+		// when
+		err := entities.ValidateSettings(settings)
+
+		// then
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "token is required")
+	})
+
+	t.Run("should return error when provider organizations are empty", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{
+			Providers: []entities.ProviderConfig{
+				{Type: "github", Token: "tok"},
+			},
+		}
+
+		// when
+		err := entities.ValidateSettings(settings)
+
+		// then
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "organizations must have at least one entry")
+	})
+}
+
+func TestInsertChangelogEntry(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should insert entries under Unreleased section", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n"
+		entries := []string{"- added new feature X"}
+
+		// when
+		result := entities.InsertChangelogEntry(content, entries)
+
+		// then
+		assert.Contains(t, result, "- added new feature X")
+		assert.Contains(t, result, "[Unreleased]")
+	})
+
+	t.Run("should return content unchanged when no Unreleased section exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "# Changelog\n\n## [1.0.0] - 2026-01-01\n"
+		entries := []string{"- added something"}
+
+		// when
+		result := entities.InsertChangelogEntry(content, entries)
+
+		// then
+		assert.Equal(t, content, result)
 	})
 }
 
