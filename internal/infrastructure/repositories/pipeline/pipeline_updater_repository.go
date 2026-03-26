@@ -84,11 +84,11 @@ type actionUpgrade struct {
 type actionTagCache map[string][]string
 
 // actionUsesPattern matches GitHub Action references in workflow files.
-// Captures: (1) owner, (2) repo, (3) ref.
+// Captures: (1) the core uses clause (without trailing comment), (2) owner, (3) repo, (4) ref.
 // Requires a v-prefix on the ref to skip SHA pins and branch refs.
 // Allows optional quotes around the action string and an optional trailing inline comment.
 var actionUsesPattern = regexp.MustCompile(
-	`(?m)uses:\s+['"]?([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)@(v\d+(?:\.\d+(?:\.\d+)?)?)['"]?(?:\s+#.*)?$`,
+	`(?m)(uses:\s+['"]?([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)@(v\d+(?:\.\d+(?:\.\d+)?)?)['"]?)(?:\s+#.*)?$`,
 )
 
 // UpdaterRepository implements repositories.UpdaterRepository for CI/CD pipeline files.
@@ -440,16 +440,16 @@ func scanFileForActions(content, filePath string) []actionRef {
 	matches := actionUsesPattern.FindAllStringSubmatch(content, -1)
 
 	for _, m := range matches {
-		if len(m) < 4 { //nolint:mnd // need full match + 3 capture groups
+		if len(m) < 5 { //nolint:mnd // need full match + 4 capture groups
 			continue
 		}
 		refs = append(refs, actionRef{
 			FilePath:   filePath,
-			Owner:      m[1],
-			Repo:       m[2],
-			CurrentRef: m[3],
-			FullMatch:  m[0],
-			RefStyle:   classifyRefStyle(m[3]),
+			Owner:      m[2],
+			Repo:       m[3],
+			CurrentRef: m[4],
+			FullMatch:  m[1],
+			RefStyle:   classifyRefStyle(m[4]),
 		})
 	}
 

@@ -430,7 +430,7 @@ func TestScanFileForActions(t *testing.T) {
 		assert.Equal(t, "v4", refs[0].CurrentRef)
 	})
 
-	t.Run("should detect action references with trailing inline comment", func(t *testing.T) {
+	t.Run("should detect action references with trailing inline comment excluding comment from FullMatch", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -442,6 +442,7 @@ func TestScanFileForActions(t *testing.T) {
 		// then
 		require.Len(t, refs, 1)
 		assert.Equal(t, "v4", refs[0].CurrentRef)
+		assert.Equal(t, "uses: actions/checkout@v4", refs[0].FullMatch)
 	})
 
 	t.Run("should detect multiple actions in one file", func(t *testing.T) {
