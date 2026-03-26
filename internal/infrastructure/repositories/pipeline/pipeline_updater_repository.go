@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	logger "github.com/sirupsen/logrus"
+	"golang.org/x/mod/semver"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
@@ -53,6 +55,41 @@ type upgradeTask struct {
 	match      versionMatch
 	newVersion string
 }
+
+// refStyle describes the granularity of a GitHub Action version pin.
+type refStyle int
+
+const (
+	refStyleMajor  refStyle = iota // @v4
+	refStyleSemver                 // @v4.1.2
+)
+
+// actionRef represents a GitHub Action reference found in a workflow file.
+type actionRef struct {
+	FilePath   string
+	Owner      string
+	Repo       string
+	CurrentRef string
+	FullMatch  string
+	RefStyle   refStyle
+}
+
+// actionUpgrade groups an action reference with its target version.
+type actionUpgrade struct {
+	ref    actionRef
+	newRef string
+}
+
+// actionTagCache caches resolved tags per "owner/repo" key to avoid redundant API calls.
+type actionTagCache map[string][]string
+
+// actionUsesPattern matches GitHub Action references in workflow files.
+// Captures: (1) the core uses clause (without trailing comment), (2) owner, (3) repo, (4) ref.
+// Requires a v-prefix on the ref to skip SHA pins and branch refs.
+// Allows optional quotes around the action string and an optional trailing inline comment.
+var actionUsesPattern = regexp.MustCompile(
+	`(?m)(uses:\s+['"]?([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)@(v\d+(?:\.\d+(?:\.\d+)?)?)['"]?)(?:\s+#.*)?$`,
+)
 
 // UpdaterRepository implements repositories.UpdaterRepository for CI/CD pipeline files.
 type UpdaterRepository struct{}
@@ -121,7 +158,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 func (u *UpdaterRepository) ApplyUpdates(
 	ctx context.Context,
 	repoDir string,
-	_ repositories.ProviderRepository,
+	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	_ entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
@@ -134,7 +171,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	upgrades, fileContents := localScanAndDetermineUpgrades(repoDir, latestVersions)
+	upgrades, fileContents := localScanAndDetermineUpgrades(ctx, repoDir, provider, latestVersions)
 	if len(upgrades) == 0 {
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
@@ -170,7 +207,9 @@ func (u *UpdaterRepository) ApplyUpdates(
 // localScanAndDetermineUpgrades walks the local filesystem for YAML files,
 // scans them for version references, and returns upgrade tasks plus file contents.
 func localScanAndDetermineUpgrades(
+	ctx context.Context,
 	repoDir string,
+	provider repositories.ProviderRepository,
 	latestVersions map[string]string,
 ) ([]upgradeTask, map[string]string) {
 	fileContents := make(map[string]string)
@@ -187,6 +226,8 @@ func localScanAndDetermineUpgrades(
 	allFiles := yamlFiles
 	allFiles = append(allFiles, ymlFiles...)
 
+	tagCache := make(actionTagCache)
+
 	for _, relPath := range allFiles {
 		ci := classifyFile(relPath)
 		if ci == "" {
@@ -201,6 +242,12 @@ func localScanAndDetermineUpgrades(
 		content := string(data)
 
 		fileUpgrades := findUpgradesInFile(content, relPath, ci, latestVersions)
+
+		if ci == ciGitHubActions && provider != nil {
+			actionUpgrades := findActionUpgradesInFile(ctx, provider, content, relPath, tagCache)
+			fileUpgrades = append(fileUpgrades, actionUpgrades...)
+		}
+
 		upgrades = append(upgrades, fileUpgrades...)
 
 		if len(fileUpgrades) > 0 {
@@ -256,6 +303,7 @@ func scanAndDetermineUpgrades(
 	var upgrades []upgradeTask
 
 	allFiles := listPipelineFiles(ctx, provider, repo)
+	tagCache := make(actionTagCache)
 
 	for _, f := range allFiles {
 		if f.IsDir {
@@ -274,6 +322,12 @@ func scanAndDetermineUpgrades(
 		}
 
 		fileUpgrades := findUpgradesInFile(content, f.Path, ci, latestVersions)
+
+		if ci == ciGitHubActions {
+			actionUpgrades := findActionUpgradesInFile(ctx, provider, content, f.Path, tagCache)
+			fileUpgrades = append(fileUpgrades, actionUpgrades...)
+		}
+
 		upgrades = append(upgrades, fileUpgrades...)
 
 		if len(fileUpgrades) > 0 {
@@ -378,6 +432,39 @@ func scanFileForVersions(content, filePath string, rules []languageRule) []versi
 	return matches
 }
 
+// --- GitHub Actions scanning ---
+
+// scanFileForActions extracts GitHub Action references from a workflow file.
+func scanFileForActions(content, filePath string) []actionRef {
+	var refs []actionRef
+	matches := actionUsesPattern.FindAllStringSubmatch(content, -1)
+
+	for _, m := range matches {
+		if len(m) < 5 { //nolint:mnd // need full match + 4 capture groups
+			continue
+		}
+		refs = append(refs, actionRef{
+			FilePath:   filePath,
+			Owner:      m[2],
+			Repo:       m[3],
+			CurrentRef: m[4],
+			FullMatch:  m[1],
+			RefStyle:   classifyRefStyle(m[4]),
+		})
+	}
+
+	return refs
+}
+
+// classifyRefStyle determines whether an action ref is major-only or full semver.
+func classifyRefStyle(ref string) refStyle {
+	parts := strings.Split(strings.TrimPrefix(ref, "v"), ".")
+	if len(parts) == 1 {
+		return refStyleMajor
+	}
+	return refStyleSemver
+}
+
 // --- CI system rules ---
 
 // rulesForCI returns the scanning rules for a given CI system.
@@ -461,6 +548,165 @@ func azureDevOpsRules() []languageRule {
 	}
 }
 
+// --- GitHub Actions tag resolution and version comparison ---
+
+// resolveActionTags fetches tags for a GitHub Action repo, using the cache.
+func resolveActionTags(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	owner, repo string,
+	cache actionTagCache,
+) []string {
+	key := owner + "/" + repo
+	if tags, ok := cache[key]; ok {
+		return tags
+	}
+
+	actionRepo := entities.Repository{
+		Organization: owner,
+		Name:         repo,
+	}
+	tags, err := provider.GetTags(ctx, actionRepo)
+	if err != nil {
+		logger.Warnf("[pipeline] Failed to fetch tags for %s/%s: %v", owner, repo, err)
+		cache[key] = nil
+		return nil
+	}
+
+	cache[key] = tags
+	return tags
+}
+
+// determineActionUpgrade compares the current action ref against available tags
+// and returns an upgrade if one is available.
+func determineActionUpgrade(ref actionRef, tags []string) *actionUpgrade {
+	if len(tags) == 0 {
+		return nil
+	}
+
+	switch ref.RefStyle {
+	case refStyleMajor:
+		return findMajorUpgrade(ref, tags)
+	case refStyleSemver:
+		return findSemverUpgrade(ref, tags)
+	default:
+		return nil
+	}
+}
+
+// findMajorUpgrade checks if a higher major version exists.
+func findMajorUpgrade(ref actionRef, tags []string) *actionUpgrade {
+	currentMajor := extractMajor(ref.CurrentRef)
+	if currentMajor < 0 {
+		return nil
+	}
+
+	latestMajor := -1
+	for _, tag := range tags {
+		m := extractMajor(tag)
+		if m > latestMajor {
+			latestMajor = m
+		}
+	}
+
+	if latestMajor > currentMajor {
+		return &actionUpgrade{
+			ref:    ref,
+			newRef: fmt.Sprintf("v%d", latestMajor),
+		}
+	}
+	return nil
+}
+
+// findSemverUpgrade finds the latest tag within the same major version.
+func findSemverUpgrade(ref actionRef, tags []string) *actionUpgrade {
+	currentMajor := extractMajor(ref.CurrentRef)
+	if currentMajor < 0 {
+		return nil
+	}
+
+	currentNorm := normalizeActionVersion(ref.CurrentRef)
+	var bestTag string
+
+	for _, tag := range tags {
+		norm := normalizeActionVersion(tag)
+		if !semver.IsValid(norm) {
+			continue
+		}
+		if extractMajor(tag) != currentMajor {
+			continue
+		}
+		if semver.Compare(norm, currentNorm) > 0 {
+			if bestTag == "" || semver.Compare(norm, normalizeActionVersion(bestTag)) > 0 {
+				bestTag = tag
+			}
+		}
+	}
+
+	if bestTag != "" {
+		return &actionUpgrade{
+			ref:    ref,
+			newRef: bestTag,
+		}
+	}
+	return nil
+}
+
+// extractMajor parses the major version number from a ref like "v4" or "v4.1.2".
+func extractMajor(ref string) int {
+	s := strings.TrimPrefix(ref, "v")
+	parts := strings.SplitN(s, ".", 2) //nolint:mnd // split into major + rest
+	n, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
+// normalizeActionVersion ensures the version has a "v" prefix and expands to 3-part for semver.
+func normalizeActionVersion(ref string) string {
+	if !strings.HasPrefix(ref, "v") {
+		ref = "v" + ref
+	}
+	parts := strings.Split(strings.TrimPrefix(ref, "v"), ".")
+	for len(parts) < 3 {
+		parts = append(parts, "0")
+	}
+	return "v" + strings.Join(parts, ".")
+}
+
+// findActionUpgradesInFile scans a workflow file for GitHub Action references
+// and returns upgrade tasks using the existing upgradeTask type.
+func findActionUpgradesInFile(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	content, filePath string,
+	cache actionTagCache,
+) []upgradeTask {
+	refs := scanFileForActions(content, filePath)
+	var tasks []upgradeTask
+
+	for _, ref := range refs {
+		tags := resolveActionTags(ctx, provider, ref.Owner, ref.Repo, cache)
+		up := determineActionUpgrade(ref, tags)
+		if up == nil {
+			continue
+		}
+
+		tasks = append(tasks, upgradeTask{
+			match: versionMatch{
+				FilePath:   filePath,
+				Language:   fmt.Sprintf("action:%s/%s", ref.Owner, ref.Repo),
+				CurrentVer: ref.CurrentRef,
+				FullMatch:  ref.FullMatch,
+			},
+			newVersion: up.newRef,
+		})
+	}
+
+	return tasks
+}
+
 // --- version validation ---
 
 // versionPattern matches simple dotted numeric versions like "1.25", "1.25.7", "21".
@@ -490,6 +736,12 @@ func truncateToGranularity(latest, reference string) string {
 }
 
 // --- string helpers ---
+
+// sanitizeBranchSegment replaces characters illegal in Git branch names.
+func sanitizeBranchSegment(s string) string {
+	r := strings.NewReplacer(":", "-", "/", "-")
+	return r.Replace(s)
+}
 
 // replaceLastOccurrence replaces only the last occurrence of old in s with replacement.
 // This is used instead of [strings.Replace] to ensure multi-line regex matches
@@ -604,7 +856,11 @@ func createUpgradePR(
 
 func generateBranchName(tasks []upgradeTask) string {
 	if len(tasks) == 1 {
-		return fmt.Sprintf(branchSingleFmt, tasks[0].match.Language, tasks[0].newVersion)
+		return fmt.Sprintf(
+			branchSingleFmt,
+			sanitizeBranchSegment(tasks[0].match.Language),
+			tasks[0].newVersion,
+		)
 	}
 	return fmt.Sprintf(branchBatchFmt, len(tasks))
 }

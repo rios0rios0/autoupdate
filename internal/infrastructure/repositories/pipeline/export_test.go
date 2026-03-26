@@ -63,3 +63,75 @@ func AppendChangelogEntry(
 ) []entities.FileChange {
 	return appendChangelogEntry(ctx, provider, repo, upgrades, fileChanges)
 }
+
+// --- GitHub Actions exports ---
+
+// ActionRef is exported for testing.
+type ActionRef = actionRef
+
+// ActionUpgrade is exported for testing.
+type ActionUpgrade = actionUpgrade
+
+// RefStyle is exported for testing.
+type RefStyle = refStyle
+
+// ActionTagCache is exported for testing.
+type ActionTagCache = actionTagCache
+
+// Exported refStyle constants for testing.
+const (
+	RefStyleMajor  = refStyleMajor
+	RefStyleSemver = refStyleSemver
+)
+
+// ScanFileForActions is exported for testing.
+func ScanFileForActions(content, filePath string) []ActionRef {
+	return scanFileForActions(content, filePath)
+}
+
+// ClassifyRefStyle is exported for testing.
+func ClassifyRefStyle(ref string) RefStyle {
+	return classifyRefStyle(ref)
+}
+
+// DetermineActionUpgrade is exported for testing.
+func DetermineActionUpgrade(ref ActionRef, tags []string) *ActionUpgrade {
+	return determineActionUpgrade(ref, tags)
+}
+
+// NormalizeActionVersion is exported for testing.
+func NormalizeActionVersion(ref string) string {
+	return normalizeActionVersion(ref)
+}
+
+// ExtractMajor is exported for testing.
+func ExtractMajor(ref string) int {
+	return extractMajor(ref)
+}
+
+// FindActionUpgradesInFile is exported for testing.
+func FindActionUpgradesInFile(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	content, filePath string,
+	cache ActionTagCache,
+) []UpgradeTask {
+	return findActionUpgradesInFile(ctx, provider, content, filePath, cache)
+}
+
+// SanitizeBranchSegment is exported for testing.
+func SanitizeBranchSegment(s string) string {
+	return sanitizeBranchSegment(s)
+}
+
+// UpgradeTaskLanguage returns the language of an upgrade task.
+func UpgradeTaskLanguage(t UpgradeTask) string { return t.match.Language }
+
+// UpgradeTaskCurrentVer returns the current version of an upgrade task.
+func UpgradeTaskCurrentVer(t UpgradeTask) string { return t.match.CurrentVer }
+
+// UpgradeTaskNewVersion returns the new version of an upgrade task.
+func UpgradeTaskNewVersion(t UpgradeTask) string { return t.newVersion }
+
+// ActionUpgradeNewRef returns the new ref of an action upgrade.
+func ActionUpgradeNewRef(u *ActionUpgrade) string { return u.newRef }
