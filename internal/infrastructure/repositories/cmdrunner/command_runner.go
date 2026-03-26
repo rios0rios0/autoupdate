@@ -23,7 +23,7 @@ type RunResult struct {
 	ExitCode int
 }
 
-// DefaultRunner executes subprocesses via exec.CommandContext.
+// DefaultRunner executes subprocesses via [exec.CommandContext].
 type DefaultRunner struct{}
 
 // NewDefaultRunner creates a DefaultRunner.
