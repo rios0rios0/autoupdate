@@ -599,3 +599,202 @@ func TestPrepareChangelog(t *testing.T) {
 		assert.Empty(t, result)
 	})
 }
+
+func TestHandleDryRun(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return result with version upgrade info", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		vCtx := &goUpdater.VersionContext{
+			LatestVersion:       "1.25.7",
+			NeedsVersionUpgrade: true,
+			BranchName:          "chore/upgrade-go-1.25.7",
+		}
+
+		// when
+		result := goUpdater.HandleDryRun(vCtx, "/tmp/repo")
+
+		// then
+		require.NotNil(t, result)
+		assert.Equal(t, "1.25.7", result.LatestVersion)
+		assert.True(t, result.GoVersionUpdated)
+		assert.Equal(t, "chore/upgrade-go-1.25.7", result.BranchName)
+	})
+
+	t.Run("should return result with deps-only info", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		vCtx := &goUpdater.VersionContext{
+			LatestVersion:       "1.25.7",
+			NeedsVersionUpgrade: false,
+			BranchName:          "chore/upgrade-go-deps",
+		}
+
+		// when
+		result := goUpdater.HandleDryRun(vCtx, "/tmp/repo")
+
+		// then
+		require.NotNil(t, result)
+		assert.False(t, result.GoVersionUpdated)
+	})
+}
+
+func TestBuildLocalUpgradeScriptFull(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should contain bash shebang and go commands", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := goUpdater.LocalUpgradeParamsType{
+			BranchName:   "chore/upgrade-go-1.25.7",
+			GoVersion:    "1.25.7",
+			AuthToken:    "token",
+			ProviderName: "github",
+		}
+
+		// when
+		script := goUpdater.BuildLocalUpgradeScriptFull(params)
+
+		// then
+		assert.Contains(t, script, "#!/bin/bash")
+		assert.Contains(t, script, "go mod tidy")
+	})
+
+	t.Run("should include config.sh sourcing when set", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := goUpdater.LocalUpgradeParamsType{
+			ProviderName: "github",
+			HasConfigSH:  true,
+		}
+
+		// when
+		script := goUpdater.BuildLocalUpgradeScriptFull(params)
+
+		// then
+		assert.Contains(t, script, "config.sh")
+	})
+}
+
+func TestWriteLocalAuth(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should write GitHub auth when token provided", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+		params := goUpdater.LocalUpgradeParamsType{
+			AuthToken:    "ghp_token",
+			ProviderName: "github",
+		}
+
+		// when
+		goUpdater.WriteLocalAuth(&sb, params)
+
+		// then
+		assert.Contains(t, sb.String(), "github.com")
+	})
+
+	t.Run("should write Azure DevOps auth when token provided", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+		params := goUpdater.LocalUpgradeParamsType{
+			AuthToken:    "token",
+			ProviderName: "azuredevops",
+		}
+
+		// when
+		goUpdater.WriteLocalAuth(&sb, params)
+
+		// then
+		assert.Contains(t, sb.String(), "dev.azure.com")
+	})
+
+	t.Run("should skip auth when no token", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+		params := goUpdater.LocalUpgradeParamsType{
+			ProviderName: "github",
+		}
+
+		// when
+		goUpdater.WriteLocalAuth(&sb, params)
+
+		// then
+		assert.Empty(t, sb.String())
+	})
+}
+
+func TestBuildLocalEnvFull(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should include required environment variables", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		params := goUpdater.LocalUpgradeParamsType{
+			GoVersion: "1.25.7",
+			AuthToken: "token",
+		}
+
+		// when
+		env := goUpdater.BuildLocalEnvFull(params, "/usr/local/go/bin/go")
+
+		// then
+		assert.NotEmpty(t, env)
+		found := false
+		for _, e := range env {
+			if strings.HasPrefix(e, "GO_VERSION=") {
+				found = true
+			}
+		}
+		assert.True(t, found)
+	})
+}
+
+func TestPrepareLocalChangelogGo(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return temp file when CHANGELOG.md exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		changelog := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n"
+		require.NoError(t, os.WriteFile(filepath.Join(root, "CHANGELOG.md"), []byte(changelog), 0o600))
+		vCtx := &goUpdater.VersionContext{LatestVersion: "1.25.7", NeedsVersionUpgrade: true}
+
+		// when
+		result := goUpdater.PrepareLocalChangelog(root, vCtx)
+
+		// then
+		assert.NotEmpty(t, result)
+		if result != "" {
+			defer os.Remove(result)
+		}
+	})
+
+	t.Run("should return empty when no CHANGELOG.md", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		vCtx := &goUpdater.VersionContext{LatestVersion: "1.25.7", NeedsVersionUpgrade: true}
+
+		// when
+		result := goUpdater.PrepareLocalChangelog(root, vCtx)
+
+		// then
+		assert.Empty(t, result)
+	})
+}

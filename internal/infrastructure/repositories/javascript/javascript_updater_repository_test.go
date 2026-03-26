@@ -4,6 +4,7 @@ package javascript_test
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -1580,4 +1581,81 @@ func envToMap(env []string) map[string]string {
 		}
 	}
 	return result
+}
+
+func TestHandleDryRunLocal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return result with version upgrade info", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		vCtx := &jsUpdater.VersionContext{
+			LatestVersion:       "20.18.0",
+			NeedsVersionUpgrade: true,
+			BranchName:          "chore/upgrade-node-20.18.0",
+		}
+
+		// when
+		result := jsUpdater.HandleDryRunLocal(vCtx, "/tmp/repo", "npm")
+
+		// then
+		require.NotNil(t, result)
+		assert.True(t, result.NodeVersionUpdated)
+	})
+
+	t.Run("should return result with deps-only info", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		vCtx := &jsUpdater.VersionContext{
+			LatestVersion:       "20.18.0",
+			NeedsVersionUpgrade: false,
+			BranchName:          "chore/upgrade-js-deps",
+		}
+
+		// when
+		result := jsUpdater.HandleDryRunLocal(vCtx, "/tmp/repo", "npm")
+
+		// then
+		require.NotNil(t, result)
+		assert.False(t, result.NodeVersionUpdated)
+	})
+}
+
+func TestPrepareLocalChangelogJS(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return temp file when CHANGELOG.md exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		changelog := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n"
+		require.NoError(t, os.WriteFile(filepath.Join(root, "CHANGELOG.md"), []byte(changelog), 0o600))
+		vCtx := &jsUpdater.VersionContext{LatestVersion: "20.18.0", NeedsVersionUpgrade: true}
+
+		// when
+		result := jsUpdater.PrepareLocalChangelog(root, vCtx)
+
+		// then
+		assert.NotEmpty(t, result)
+		if result != "" {
+			defer os.Remove(result)
+		}
+	})
+
+	t.Run("should return empty when no CHANGELOG.md", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		vCtx := &jsUpdater.VersionContext{LatestVersion: "20.18.0", NeedsVersionUpgrade: true}
+
+		// when
+		result := jsUpdater.PrepareLocalChangelog(root, vCtx)
+
+		// then
+		assert.Empty(t, result)
+	})
 }
