@@ -23,6 +23,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Fixed
 
 - fixed `replaceLastOccurrence` replacing version in trailing inline comments instead of the action reference when GitHub Actions lines contain comments repeating the version (e.g., `# pinned to v4`)
+- fixed JavaScript updater creating misleading PRs when `npm update` only synced the project version in `package-lock.json` with zero actual dependency changes
 
 ## [0.11.1] - 2026-03-24
 

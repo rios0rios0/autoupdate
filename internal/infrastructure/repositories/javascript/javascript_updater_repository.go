@@ -262,6 +262,16 @@ func (u *UpdaterRepository) ApplyUpdates(
 		logger.Infof("[javascript] No filesystem changes detected after upgrade script")
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
+
+	// Skip when the only lockfile change is a cosmetic project-version sync
+	// (e.g., npm update syncing package-lock.json "version" to match package.json).
+	if hasOnlyLockfileVersionChanges(ctx, repoDir) {
+		logger.Infof(
+			"[javascript] Only cosmetic lockfile version changes detected (project version sync), skipping",
+		)
+		revertWorkingTreeChanges(ctx, repoDir)
+		return nil, repositories.ErrNoUpdatesNeeded
+	}
 	logger.Infof("[javascript] Filesystem changes detected, proceeding with commit")
 
 	// Update CHANGELOG locally
@@ -713,6 +723,14 @@ func writeChangelogUpdate(sb *strings.Builder) {
 
 func writeCommitAndPush(sb *strings.Builder) {
 	sb.WriteString("if [ -n \"$(git status --porcelain)\" ]; then\n")
+
+	// Detect cosmetic-only lockfile changes (project version sync with zero
+	// actual dependency updates). When `npm update` runs, it may sync the
+	// root "version" field in package-lock.json to match package.json even
+	// when no dependency versions changed. We compare the diff lines that
+	// are NOT "version" fields; if none remain, skip the commit.
+	writeLockfileOnlyCheck(sb)
+
 	sb.WriteString("    echo \"Changes detected, committing and pushing...\"\n")
 	sb.WriteString("    git add -A\n")
 	sb.WriteString("    if [ \"$NODE_VERSION_CHANGED\" = \"true\" ]; then\n")
@@ -728,6 +746,24 @@ func writeCommitAndPush(sb *strings.Builder) {
 	sb.WriteString("    echo \"No changes detected.\"\n")
 	sb.WriteString("    echo \"CHANGES_PUSHED=false\"\n")
 	sb.WriteString("fi\n")
+}
+
+// writeLockfileOnlyCheck emits a bash guard that reverts and exits early
+// when the only change is a package-lock.json project-version sync.
+func writeLockfileOnlyCheck(sb *strings.Builder) {
+	sb.WriteString("    # Skip cosmetic lockfile-only version sync\n")
+	sb.WriteString("    CHANGED_FILES=$(git diff --name-only)\n")
+	sb.WriteString("    if [ \"$CHANGED_FILES\" = \"package-lock.json\" ]; then\n")
+	// Extract added/removed content lines, excluding diff headers and "version" fields.
+	sb.WriteString("        NON_VERSION_LINES=$(git diff --unified=0 -- package-lock.json")
+	sb.WriteString(" | grep -E '^[+-]' | grep -v -E '^(\\+\\+\\+|---)' | grep -v '\"version\"' | wc -l)\n")
+	sb.WriteString("        if [ \"$NON_VERSION_LINES\" -eq 0 ]; then\n")
+	sb.WriteString("            echo \"Only cosmetic lockfile version changes detected, skipping.\"\n")
+	sb.WriteString("            git checkout -- .\n")
+	sb.WriteString("            echo \"CHANGES_PUSHED=false\"\n")
+	sb.WriteString("            exit 0\n")
+	sb.WriteString("        fi\n")
+	sb.WriteString("    fi\n\n")
 }
 
 func buildEnv(params upgradeParams, repoDir string) []string {

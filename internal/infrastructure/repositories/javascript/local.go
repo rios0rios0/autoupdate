@@ -189,6 +189,20 @@ func executeLocalUpgrade(
 
 	nodeVersionUpdated := strings.Contains(outputStr, "NODE_VERSION_UPDATED=true")
 
+	// Skip when the only change is a cosmetic lockfile version sync.
+	if hasOnlyLockfileVersionChanges(ctx, repoDir) {
+		logger.Infof(
+			"[javascript] Only cosmetic lockfile version changes detected (project version sync), skipping",
+		)
+		revertWorkingTreeChanges(ctx, repoDir)
+		return &LocalResult{
+			HasChanges:     false,
+			LatestVersion:  vCtx.LatestVersion,
+			BranchName:     vCtx.BranchName,
+			PackageManager: pkgMgr,
+		}, nil
+	}
+
 	// --- Git Finalize (go-git) ---
 	commitMsg := jsCommitMsgDeps
 	if nodeVersionUpdated {
