@@ -2,7 +2,6 @@ package python
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	"github.com/rios0rios0/autoupdate/internal/support"
 	langPython "github.com/rios0rios0/langforge/pkg/infrastructure/languages/python"
 )
@@ -39,11 +39,22 @@ const (
 // UpdaterRepository implements repositories.UpdaterRepository for Python dependencies.
 // It clones the repository locally, runs pip commands to update
 // dependencies, pushes the changes, and creates a PR via the provider API.
-type UpdaterRepository struct{}
+type UpdaterRepository struct {
+	versionFetcher VersionFetcher
+	cmdRunner      cmdrunner.Runner
+}
 
-// NewUpdaterRepository creates a new Python updater.
+// NewUpdaterRepository creates a new Python updater with default dependencies.
 func NewUpdaterRepository() repositories.UpdaterRepository {
-	return &UpdaterRepository{}
+	return &UpdaterRepository{
+		versionFetcher: NewHTTPPythonVersionFetcher(&http.Client{Timeout: pyVersionTimeout}),
+		cmdRunner:      cmdrunner.NewDefaultRunner(),
+	}
+}
+
+// NewUpdaterRepositoryWithDeps creates a Python updater with injected dependencies (for testing).
+func NewUpdaterRepositoryWithDeps(vf VersionFetcher) repositories.UpdaterRepository {
+	return &UpdaterRepository{versionFetcher: vf, cmdRunner: cmdrunner.NewDefaultRunner()}
 }
 
 func (u *UpdaterRepository) Name() string { return updaterName }
@@ -72,7 +83,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 ) ([]entities.PullRequest, error) {
 	logger.Infof("[python] Processing %s/%s", repo.Organization, repo.Name)
 
-	latestPyVersion, err := fetchLatestPythonVersion(ctx)
+	latestPyVersion, err := u.versionFetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		logger.Warnf("[python] Failed to fetch latest Python version: %v (continuing without version upgrade)", err)
 		latestPyVersion = ""
@@ -348,66 +359,6 @@ type upgradeResult struct {
 	HasChanges           bool
 	PythonVersionUpdated bool
 	Output               string
-}
-
-// --- Python version fetching ---
-
-type pythonRelease struct {
-	Cycle  string `json:"cycle"`
-	Latest string `json:"latest"`
-	EOL    any    `json:"eol"` // bool (false) or string date
-}
-
-func fetchLatestPythonVersion(ctx context.Context) (string, error) {
-	client := &http.Client{Timeout: pyVersionTimeout}
-
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "https://endoflife.date/api/python.json", nil,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch Python versions: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	var releases []pythonRelease
-	if decodeErr := json.NewDecoder(resp.Body).Decode(&releases); decodeErr != nil {
-		return "", fmt.Errorf("failed to parse Python versions: %w", decodeErr)
-	}
-
-	for _, release := range releases {
-		if isActiveRelease(release) {
-			return release.Latest, nil
-		}
-	}
-
-	return "", errors.New("no active Python release found")
-}
-
-// isActiveRelease returns true if the Python release cycle has not reached
-// end-of-life. The EOL field is false when still active, or a date string
-// when it has an EOL date — we check if that date is in the future.
-func isActiveRelease(release pythonRelease) bool {
-	switch v := release.EOL.(type) {
-	case bool:
-		return !v
-	case string:
-		eolDate, err := time.Parse("2006-01-02", v)
-		if err != nil {
-			return false
-		}
-		return eolDate.After(time.Now())
-	default:
-		return false
-	}
 }
 
 // parsePythonVersionFile extracts the Python version from a .python-version

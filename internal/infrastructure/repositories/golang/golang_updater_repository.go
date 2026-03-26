@@ -2,7 +2,6 @@ package golang
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	"github.com/rios0rios0/autoupdate/internal/support"
 	langGolang "github.com/rios0rios0/langforge/pkg/infrastructure/languages/golang"
 )
@@ -43,14 +43,28 @@ const (
 	providerGitLab      = "gitlab"
 )
 
+// defaultRunner is the package-level command runner for remote-mode functions.
+var defaultRunner cmdrunner.Runner = cmdrunner.NewDefaultRunner() //nolint:gochecknoglobals // test override
+
 // UpdaterRepository implements repositories.UpdaterRepository for Go module dependencies.
 // It clones the repository locally, runs go commands to update
 // dependencies, pushes the changes, and creates a PR via the provider API.
-type UpdaterRepository struct{}
+type UpdaterRepository struct {
+	versionFetcher VersionFetcher
+	cmdRunner      cmdrunner.Runner
+}
 
-// NewUpdaterRepository creates a new Go updater.
+// NewUpdaterRepository creates a new Go updater with default dependencies.
 func NewUpdaterRepository() repositories.UpdaterRepository {
-	return &UpdaterRepository{}
+	return &UpdaterRepository{
+		versionFetcher: NewHTTPGoVersionFetcher(&http.Client{Timeout: goVersionTimeout}),
+		cmdRunner:      cmdrunner.NewDefaultRunner(),
+	}
+}
+
+// NewUpdaterRepositoryWithDeps creates a Go updater with injected dependencies (for testing).
+func NewUpdaterRepositoryWithDeps(vf VersionFetcher) repositories.UpdaterRepository {
+	return &UpdaterRepository{versionFetcher: vf, cmdRunner: cmdrunner.NewDefaultRunner()}
 }
 
 func (u *UpdaterRepository) Name() string { return updaterName }
@@ -79,7 +93,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 ) ([]entities.PullRequest, error) {
 	logger.Infof("[golang] Processing %s/%s", repo.Organization, repo.Name)
 
-	latestGoVersion, err := fetchLatestGoVersion(ctx)
+	latestGoVersion, err := u.versionFetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch latest Go version: %w", err)
 	}
@@ -140,7 +154,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[golang] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
-	latestGoVersion, err := fetchLatestGoVersion(ctx)
+	latestGoVersion, err := u.versionFetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch latest Go version: %w", err)
 	}
@@ -162,17 +176,19 @@ func (u *UpdaterRepository) ApplyUpdates(
 	}
 	defer func() { _ = os.Remove(scriptPath) }()
 
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = repoDir
-	cmd.Env = append(os.Environ(),
-		"AUTH_TOKEN="+provider.AuthToken(),
-		"GIT_HTTPS_TOKEN="+provider.AuthToken(),
-		"GO_VERSION="+vCtx.LatestVersion,
-		"GO_BINARY="+goBinary,
-	)
-
-	output, cmdErr := cmd.CombinedOutput()
-	outputStr := support.RedactTokens(string(output), provider.AuthToken())
+	runResult, cmdErr := u.cmdRunner.Run(ctx, "bash", []string{scriptPath}, cmdrunner.RunOptions{
+		Dir: repoDir,
+		Env: append(os.Environ(),
+			"AUTH_TOKEN="+provider.AuthToken(),
+			"GIT_HTTPS_TOKEN="+provider.AuthToken(),
+			"GO_VERSION="+vCtx.LatestVersion,
+			"GO_BINARY="+goBinary,
+		),
+	})
+	outputStr := ""
+	if runResult != nil {
+		outputStr = support.RedactTokens(runResult.Output, provider.AuthToken())
+	}
 	logger.Debugf("[golang] Upgrade script output:\n%s", outputStr)
 
 	// Remove the script before checking worktree state so it does not
@@ -492,40 +508,6 @@ type goRelease struct {
 	Stable  bool   `json:"stable"`
 }
 
-func fetchLatestGoVersion(ctx context.Context) (string, error) {
-	client := &http.Client{Timeout: goVersionTimeout}
-
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "https://go.dev/dl/?mode=json", nil,
-	)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch Go versions: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	var releases []goRelease
-	if decodeErr := json.NewDecoder(resp.Body).Decode(&releases); decodeErr != nil {
-		return "", fmt.Errorf("failed to parse Go versions: %w", decodeErr)
-	}
-
-	for _, release := range releases {
-		if release.Stable {
-			return strings.TrimPrefix(release.Version, "go"), nil
-		}
-	}
-
-	return "", errors.New("no stable Go version found")
-}
-
 // parseGoDirective extracts the version from a go.mod's "go" directive.
 // For example, given content containing "go 1.25.7", it returns "1.25.7".
 func parseGoDirective(goModContent string) string {
@@ -572,16 +554,17 @@ func upgradeGoRepo(
 		return nil, fmt.Errorf("failed to write script: %w", writeErr)
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = tmpDir
-	cmd.Env = buildEnv(params, repoDir, goBinary)
+	runResult, runErr := defaultRunner.Run(ctx, "bash", []string{scriptPath}, cmdrunner.RunOptions{
+		Dir: tmpDir,
+		Env: buildEnv(params, repoDir, goBinary),
+	})
+	if runResult != nil {
+		result.Output = runResult.Output
+	}
 
-	output, err := cmd.CombinedOutput()
-	result.Output = string(output)
-
-	if err != nil {
+	if runErr != nil {
 		return result, fmt.Errorf(
-			"upgrade script failed: %w\nOutput:\n%s", err, result.Output,
+			"upgrade script failed: %w\nOutput:\n%s", runErr, result.Output,
 		)
 	}
 

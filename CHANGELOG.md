@@ -19,6 +19,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Added
 
 - added GitHub Actions version detection and upgrading to the pipeline updater, supporting major version pins (`@v4` -> `@v5`) and full semver pins (`@v4.1.2` -> `@v4.2.0`)
+- added unit test coverage from 17% to 55% across updater repositories, command runner, and support packages
 
 ### Fixed
 

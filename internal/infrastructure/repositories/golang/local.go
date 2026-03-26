@@ -3,16 +3,20 @@ package golang
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	logger "github.com/sirupsen/logrus"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
 )
+
+// localCmdRunner is the package-level command runner for local-mode upgrade scripts.
+var localCmdRunner cmdrunner.Runner = cmdrunner.NewDefaultRunner() //nolint:gochecknoglobals // test override
 
 // LocalUpgradeOptions holds options for the local (standalone) upgrade mode.
 type LocalUpgradeOptions struct {
@@ -60,7 +64,8 @@ func RunLocalUpgrade(
 // resolveLocalVersionContext fetches the latest Go version and compares
 // it against the local go.mod to build a versionContext.
 func resolveLocalVersionContext(ctx context.Context, repoDir string) (*versionContext, error) {
-	latestGoVersion, err := fetchLatestGoVersion(ctx)
+	fetcher := NewHTTPGoVersionFetcher(&http.Client{Timeout: goVersionTimeout})
+	latestGoVersion, err := fetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch latest Go version: %w", err)
 	}
@@ -226,12 +231,15 @@ func runLanguageUpgradeScript(
 		return "", fmt.Errorf("failed to write script: %w", writeErr)
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = repoDir
-	cmd.Env = buildLocalEnv(params, goBinary)
+	runResult, runErr := localCmdRunner.Run(ctx, "bash", []string{scriptPath}, cmdrunner.RunOptions{
+		Dir: repoDir,
+		Env: buildLocalEnv(params, goBinary),
+	})
 
-	output, runErr := cmd.CombinedOutput()
-	outputStr := string(output)
+	var outputStr string
+	if runResult != nil {
+		outputStr = runResult.Output
+	}
 
 	if opts.Verbose {
 		logger.Debugf("[golang] Script output:\n%s", outputStr)
