@@ -62,7 +62,8 @@ func TestRun_FailingCommand(t *testing.T) {
 		result, err := runner.Run(ctx, "false", nil, cmdrunner.RunOptions{})
 
 		// then
-		require.NoError(t, err)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exited with code")
 		assert.NotEqual(t, 0, result.ExitCode)
 	})
 }

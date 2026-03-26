@@ -4,6 +4,7 @@ package dockerfile
 
 import (
 	"context"
+	"strings"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
@@ -173,8 +174,7 @@ func NewUpgradeTaskFull(imageName, source, currentVer, newTag, filePath string) 
 func NewImageRefFromContent(content, filePath, imageName, source, currentVer string) ImageRef {
 	namespace := ""
 	image := imageName
-	if idx := len(imageName) - len(image); idx > 0 {
-		// Check for namespace
+	if strings.Contains(imageName, "/") {
 		parts := splitNamespace(imageName)
 		namespace = parts[0]
 		image = parts[1]

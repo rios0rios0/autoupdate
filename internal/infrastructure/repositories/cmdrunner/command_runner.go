@@ -49,10 +49,11 @@ func (r *DefaultRunner) Run(
 		var exitErr *exec.ExitError
 		if ok := isExitError(err, &exitErr); ok {
 			exitCode = exitErr.ExitCode()
-		} else {
-			return &RunResult{Output: string(output), ExitCode: -1},
-				fmt.Errorf("failed to execute %s: %w", name, err)
+			return &RunResult{Output: string(output), ExitCode: exitCode},
+				fmt.Errorf("command %s exited with code %d", name, exitCode)
 		}
+		return &RunResult{Output: string(output), ExitCode: -1},
+			fmt.Errorf("failed to execute %s: %w", name, err)
 	}
 
 	return &RunResult{Output: string(output), ExitCode: exitCode}, nil
