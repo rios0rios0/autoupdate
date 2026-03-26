@@ -22,6 +22,8 @@ func TestRunCommandExecute(t *testing.T) {
 	t.Parallel()
 
 	t.Run("should skip provider when ProviderName filter does not match", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		spy := doubles.NewSpyProviderRepositoryBuilder().
 			WithProviderName("github").
@@ -57,6 +59,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should call DiscoverRepositories for matching provider", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		spy := doubles.NewSpyProviderRepositoryBuilder().
 			WithProviderName("github").
@@ -93,6 +97,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should continue when DiscoverRepositories returns error", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		spy := doubles.NewSpyProviderRepositoryBuilder().
 			WithProviderName("github").
@@ -129,6 +135,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should call updater Detect and CreateUpdatePRs for discovered repos", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -182,6 +190,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should skip disabled updaters", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -236,6 +246,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should not skip updater when enabled is omitted from config", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -292,6 +304,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should respect UpdaterName filter", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -347,6 +361,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should skip updater when Detect returns false", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -397,6 +413,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should propagate AutoComplete from updater config", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -453,6 +471,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should use target_branch from updater config", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -509,6 +529,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should continue processing when CreateUpdatePRs returns error", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -559,6 +581,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should propagate DryRun and Verbose from RunOptions", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -611,6 +635,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should skip organization when OrgOverride does not match", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		spy := doubles.NewSpyProviderRepositoryBuilder().
 			WithProviderName("github").
@@ -647,6 +673,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should process multiple updaters for same repository", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -705,6 +733,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should handle provider creation error gracefully", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		providerRegistry := infraRepos.NewProviderRegistry()
 		// Do NOT register any factory for "github", so Get() will fail
@@ -732,6 +762,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should process multiple providers independently", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		githubSpy := doubles.NewSpyProviderRepositoryBuilder().
 			WithProviderName("github").
@@ -783,6 +815,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should filter out forks when ExcludeForks is enabled", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		forkRepo := entitybuilders.NewRepositoryBuilder().
 			WithID("fork-1").
@@ -843,6 +877,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should filter out archived repos when ExcludeArchived is enabled", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		archivedRepo := entitybuilders.NewRepositoryBuilder().
 			WithID("archived-1").
@@ -903,6 +939,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should continue processing remaining providers when one fails", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		gitlabSpy := doubles.NewSpyProviderRepositoryBuilder().
 			WithProviderName("gitlab").
@@ -945,6 +983,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should process multiple orgs in single provider", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		spy := doubles.NewSpyProviderRepositoryBuilder().
 			WithProviderName("github").
@@ -981,6 +1021,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should handle updater that returns error alongside a successful updater", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -1039,6 +1081,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should process multiple repos each with detected updaters", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo1 := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -1098,6 +1142,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should skip repos with no detected updaters", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -1148,6 +1194,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should handle empty repositories list from provider", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		spy := doubles.NewSpyProviderRepositoryBuilder().
 			WithProviderName("github").
@@ -1192,6 +1240,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should filter both forks and archived repos together", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		forkRepo := entitybuilders.NewRepositoryBuilder().
 			WithID("fork-1").
@@ -1261,6 +1311,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should handle updater that returns empty PR list", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -1311,6 +1363,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should combine ProviderName and OrgOverride filters", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		githubSpy := doubles.NewSpyProviderRepositoryBuilder().
 			WithProviderName("github").
@@ -1365,6 +1419,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should combine UpdaterName filter with multiple updaters", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("repo-1").
@@ -1432,6 +1488,8 @@ func TestRunCommandExecute(t *testing.T) {
 	})
 
 	t.Run("should process empty settings with no providers", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		providerRegistry := infraRepos.NewProviderRegistry()
 		updaterRegistry := infraRepos.NewUpdaterRegistry()
