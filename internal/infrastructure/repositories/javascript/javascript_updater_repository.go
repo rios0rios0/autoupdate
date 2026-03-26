@@ -14,6 +14,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	"github.com/rios0rios0/autoupdate/internal/support"
 	langNode "github.com/rios0rios0/langforge/pkg/infrastructure/languages/node"
 )
@@ -43,18 +44,20 @@ const (
 // provider API.
 type UpdaterRepository struct {
 	versionFetcher VersionFetcher
+	cmdRunner      cmdrunner.Runner
 }
 
 // NewUpdaterRepository creates a new JavaScript updater with default dependencies.
 func NewUpdaterRepository() repositories.UpdaterRepository {
 	return &UpdaterRepository{
 		versionFetcher: NewHTTPNodeVersionFetcher(&http.Client{Timeout: nodeVersionTimeout}),
+		cmdRunner:      cmdrunner.NewDefaultRunner(),
 	}
 }
 
 // NewUpdaterRepositoryWithDeps creates a JavaScript updater with injected dependencies (for testing).
 func NewUpdaterRepositoryWithDeps(vf VersionFetcher) repositories.UpdaterRepository {
-	return &UpdaterRepository{versionFetcher: vf}
+	return &UpdaterRepository{versionFetcher: vf, cmdRunner: cmdrunner.NewDefaultRunner()}
 }
 
 func (u *UpdaterRepository) Name() string { return updaterName }
