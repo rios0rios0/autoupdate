@@ -753,11 +753,26 @@ func writeCommitAndPush(sb *strings.Builder) {
 func writeLockfileOnlyCheck(sb *strings.Builder) {
 	sb.WriteString("    # Skip cosmetic lockfile-only version sync\n")
 	sb.WriteString("    CHANGED_FILES=$(git diff --name-only)\n")
-	sb.WriteString("    if [ \"$CHANGED_FILES\" = \"package-lock.json\" ]; then\n")
-	// Extract added/removed content lines, excluding diff headers and "version" fields.
-	sb.WriteString("        NON_VERSION_LINES=$(git diff --unified=0 -- package-lock.json")
-	sb.WriteString(" | grep -E '^[+-]' | grep -v -E '^(\\+\\+\\+|---)' | grep -v '\"version\"' | wc -l)\n")
-	sb.WriteString("        if [ \"$NON_VERSION_LINES\" -eq 0 ]; then\n")
+	// Filter out CHANGELOG.md because writeChangelogUpdate may have copied it
+	// even when the only real change is a cosmetic lockfile version sync.
+	sb.WriteString("    SIGNIFICANT_FILES=$(echo \"$CHANGED_FILES\" | grep -v '^CHANGELOG.md$')\n")
+	sb.WriteString("    if [ \"$SIGNIFICANT_FILES\" = \"package-lock.json\" ]; then\n")
+	// Use Node.js for a precise JSON comparison matching the Go-based
+	// isPackageLockOnlyVersionSync: strip only root "version" and
+	// packages[""]["version"], then compare the rest. This avoids the
+	// imprecision of grep-based filtering which would also exclude
+	// dependency "version" fields.
+	sb.WriteString("        if node -e '")
+	sb.WriteString("const fs=require(\"fs\"),{execSync:e}=require(\"child_process\");")
+	sb.WriteString("try{")
+	sb.WriteString("const h=JSON.parse(e(\"git show HEAD:package-lock.json\",{encoding:\"utf8\"})),")
+	sb.WriteString("c=JSON.parse(fs.readFileSync(\"package-lock.json\",\"utf8\"));")
+	sb.WriteString("delete h.version;delete c.version;")
+	sb.WriteString("if(h.packages&&h.packages[\"\"])delete h.packages[\"\"].version;")
+	sb.WriteString("if(c.packages&&c.packages[\"\"])delete c.packages[\"\"].version;")
+	sb.WriteString("process.exit(JSON.stringify(h)===JSON.stringify(c)?0:1)")
+	sb.WriteString("}catch(x){process.exit(1)}")
+	sb.WriteString("' 2>/dev/null; then\n")
 	sb.WriteString("            echo \"Only cosmetic lockfile version changes detected, skipping.\"\n")
 	sb.WriteString("            git checkout -- .\n")
 	sb.WriteString("            echo \"CHANGES_PUSHED=false\"\n")
