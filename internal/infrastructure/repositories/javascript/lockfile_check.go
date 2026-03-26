@@ -21,12 +21,18 @@ func hasOnlyLockfileVersionChanges(ctx context.Context, repoDir string) bool {
 		return false
 	}
 
+	hasLockfile := false
 	for _, f := range changedFiles {
 		switch f {
 		case "package-lock.json":
+			hasLockfile = true
 			if !isPackageLockOnlyVersionSync(ctx, repoDir) {
 				return false
 			}
+		case "CHANGELOG.md":
+			// Tolerate auto-generated changelog updates alongside cosmetic
+			// lockfile syncs — writeChangelogUpdate copies the changelog
+			// whenever git status is non-empty, even for cosmetic-only changes.
 		default:
 			// Any non-lockfile change (or yarn.lock / pnpm-lock.yaml which
 			// do not carry a project version field) is a real change.
@@ -34,7 +40,7 @@ func hasOnlyLockfileVersionChanges(ctx context.Context, repoDir string) bool {
 		}
 	}
 
-	return true
+	return hasLockfile
 }
 
 // gitChangedFiles returns the list of modified (unstaged) file paths

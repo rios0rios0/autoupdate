@@ -753,7 +753,10 @@ func writeCommitAndPush(sb *strings.Builder) {
 func writeLockfileOnlyCheck(sb *strings.Builder) {
 	sb.WriteString("    # Skip cosmetic lockfile-only version sync\n")
 	sb.WriteString("    CHANGED_FILES=$(git diff --name-only)\n")
-	sb.WriteString("    if [ \"$CHANGED_FILES\" = \"package-lock.json\" ]; then\n")
+	// Filter out CHANGELOG.md because writeChangelogUpdate may have copied it
+	// even when the only real change is a cosmetic lockfile version sync.
+	sb.WriteString("    SIGNIFICANT_FILES=$(echo \"$CHANGED_FILES\" | grep -v '^CHANGELOG.md$')\n")
+	sb.WriteString("    if [ \"$SIGNIFICANT_FILES\" = \"package-lock.json\" ]; then\n")
 	// Extract added/removed content lines, excluding diff headers and "version" fields.
 	sb.WriteString("        NON_VERSION_LINES=$(git diff --unified=0 -- package-lock.json")
 	sb.WriteString(" | grep -E '^[+-]' | grep -v -E '^(\\+\\+\\+|---)' | grep -v '\"version\"' | wc -l)\n")
