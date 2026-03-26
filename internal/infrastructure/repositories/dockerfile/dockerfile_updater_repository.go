@@ -310,7 +310,7 @@ func scanDockerfile(content, filePath string) []imageRef {
 
 // fetchTagsFunc is the function used to fetch tags from the registry.
 // It defaults to fetchTags and can be overridden in tests.
-var fetchTagsFunc = fetchTags
+var fetchTagsFunc = fetchTags //nolint:gochecknoglobals // test override for DI
 
 func determineUpgrades(ctx context.Context, allRefs []imageRef) []upgradeTask {
 	// Cache tags per image to avoid redundant API calls

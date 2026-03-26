@@ -312,9 +312,7 @@ func TestLocalChangelogUpdate(t *testing.T) {
 		updated := support.LocalChangelogUpdate(root, []string{"- added something"})
 
 		// then
-		// InsertChangelogEntry won't modify content without [Unreleased] heading
-		// The exact behavior depends on gitforge's implementation
-		_ = updated
+		assert.False(t, updated)
 	})
 }
 
