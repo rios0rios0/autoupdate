@@ -32,3 +32,9 @@ var LocalUpgradeHandlers = localUpgradeHandlers //nolint:gochecknoglobals // tes
 
 // ServiceTypeToProvider exports serviceTypeToProvider for testing.
 var ServiceTypeToProvider = serviceTypeToProvider //nolint:gochecknoglobals // test export
+
+// DetectDefaultBranch exports detectDefaultBranch for testing.
+var DetectDefaultBranch = detectDefaultBranch //nolint:gochecknoglobals // test export
+
+// ParseGitRemote exports parseGitRemote for testing.
+var ParseGitRemote = parseGitRemote //nolint:gochecknoglobals // test export

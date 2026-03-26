@@ -586,6 +586,34 @@ func TestIsNewerVersion(t *testing.T) {
 		// then
 		assert.True(t, result)
 	})
+
+	t.Run("should fall back to string comparison for non-semver versions", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		current := "abc-20240101"
+		newVersion := "abc-20250101"
+
+		// when
+		result := terraform.IsNewerVersion(current, newVersion)
+
+		// then
+		assert.True(t, result)
+	})
+
+	t.Run("should return false for equal non-semver strings", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		current := "main-snapshot"
+		newVersion := "main-snapshot"
+
+		// when
+		result := terraform.IsNewerVersion(current, newVersion)
+
+		// then
+		assert.False(t, result)
+	})
 }
 
 func TestNormalizeVersion(t *testing.T) {
@@ -677,6 +705,27 @@ func TestApplyVersionUpgrade(t *testing.T) {
 
 		// then
 		assert.Contains(t, result, "v2.0.0")
+		assert.NotContains(t, result, "?ref=v1.0.0")
+	})
+
+	t.Run("should use generic ref pattern fallback when source and module name do not match", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `source = "git::https://github.com/org/my-module.git?ref=v1.0.0"`
+		dep := entities.Dependency{
+			Name:       "unrelated_name",
+			Source:     "git::https://github.com/org/totally-different.git",
+			CurrentVer: "v1.0.0",
+			FilePath:   "modules/main.tf",
+			Line:       1,
+		}
+
+		// when
+		result := terraform.ApplyVersionUpgrade(content, dep, "v3.0.0")
+
+		// then
+		assert.Contains(t, result, "?ref=v3.0.0")
 		assert.NotContains(t, result, "?ref=v1.0.0")
 	})
 }

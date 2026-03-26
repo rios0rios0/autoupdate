@@ -166,6 +166,42 @@ func TestWalkFilesByPredicate(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, matches)
 	})
+
+	t.Run("should skip hidden directories when walking by predicate", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(root, ".hidden"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".hidden", "Dockerfile"), []byte(""), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "Dockerfile"), []byte(""), 0o600))
+
+		isDockerfile := func(name string) bool {
+			return name == "Dockerfile"
+		}
+
+		// when
+		matches, err := support.WalkFilesByPredicate(root, isDockerfile)
+
+		// then
+		require.NoError(t, err)
+		assert.Len(t, matches, 1)
+		assert.Contains(t, matches, "Dockerfile")
+	})
+
+	t.Run("should propagate walk error when root directory is invalid", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := "/nonexistent/path/that/does/not/exist"
+
+		// when
+		matches, err := support.WalkFilesByPredicate(root, func(string) bool { return true })
+
+		// then
+		assert.Error(t, err)
+		assert.Nil(t, matches)
+	})
 }
 
 func TestWriteFileChanges(t *testing.T) {

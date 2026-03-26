@@ -1659,3 +1659,4 @@ func TestPrepareLocalChangelogJS(t *testing.T) {
 		assert.Empty(t, result)
 	})
 }
+
