@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-03-26
+
 ### Added
 
 - added GitHub Actions version detection and upgrading to the pipeline updater, supporting major version pins (`@v4` -> `@v5`) and full semver pins (`@v4.1.2` -> `@v4.2.0`)
