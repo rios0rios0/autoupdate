@@ -8,6 +8,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 )
 
 // HasOnlyLockfileVersionChanges is exported for testing.
@@ -168,7 +169,10 @@ func ReadLocalNodeVersion(repoDir string) string {
 }
 
 // NewUpdaterRepositoryWithDepsExported creates a JavaScript updater with injected dependencies (for testing).
-func NewUpdaterRepositoryWithDepsExported(vf VersionFetcher) *UpdaterRepository {
-	r, _ := NewUpdaterRepositoryWithDeps(vf).(*UpdaterRepository)
-	return r
+func NewUpdaterRepositoryWithDepsExported(vf VersionFetcher, runner ...cmdrunner.Runner) *UpdaterRepository {
+	u := &UpdaterRepository{versionFetcher: vf, cmdRunner: cmdrunner.NewDefaultRunner()}
+	if len(runner) > 0 {
+		u.cmdRunner = runner[0]
+	}
+	return u
 }

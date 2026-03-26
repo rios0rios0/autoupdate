@@ -8,6 +8,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 )
 
 // ParsePythonVersionFile is exported for testing.
@@ -44,9 +45,13 @@ func BuildLocalEnv(params LocalUpgradeParamsExported) []string {
 // LocalUpgradeParamsExported is exported for testing.
 type LocalUpgradeParamsExported = localUpgradeParams
 
-// NewUpdaterRepositoryForTest creates an updater with an injected version fetcher.
-func NewUpdaterRepositoryForTest(vf VersionFetcher) *UpdaterRepository {
-	return &UpdaterRepository{versionFetcher: vf}
+// NewUpdaterRepositoryForTest creates an updater with injected dependencies.
+func NewUpdaterRepositoryForTest(vf VersionFetcher, runner ...cmdrunner.Runner) *UpdaterRepository {
+	r := cmdrunner.Runner(cmdrunner.NewDefaultRunner())
+	if len(runner) > 0 {
+		r = runner[0]
+	}
+	return &UpdaterRepository{versionFetcher: vf, cmdRunner: r}
 }
 
 // UpgradeParamsExported is exported for testing.
