@@ -138,7 +138,7 @@ func clearPackagesRootVersion(m map[string]json.RawMessage) {
 
 // gitShowHEAD returns the content of a file at HEAD.
 func gitShowHEAD(ctx context.Context, repoDir, filePath string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", "show", "HEAD:"+filePath)
+	cmd := exec.CommandContext(ctx, "git", "show", "HEAD:"+filePath) //nolint:gosec // filePath is always a hardcoded constant from internal callers
 	cmd.Dir = repoDir
 	return cmd.Output()
 }
