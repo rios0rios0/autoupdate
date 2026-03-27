@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-03-27
+
 ### Added
 
 - added GitHub Actions version detection and upgrading to the pipeline updater, supporting major version pins (`@v4` -> `@v5`) and full semver pins (`@v4.1.2` -> `@v4.2.0`)
@@ -34,30 +36,30 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Fixed
 
-- fixed the Python updater creating PRs without real dependency changes due to `pip freeze` capturing `file://` local path references from temp clone directories
 - fixed the pipeline updater leaving stale version numbers in `displayName` fields when updating `versionSpec` in CI/CD pipeline files
+- fixed the Python updater creating PRs without real dependency changes due to `pip freeze` capturing `file://` local path references from temp clone directories
 
 ## [0.11.0] - 2026-03-22
 
 ### Added
 
-- added default config download and merge for the `updaters` section, following the autobump pattern of fetching defaults from GitHub and merging user overrides on top
-- added `MergeUpdatersConfig()` function for field-level deep merge of updater configurations
 - added `DecodeSettings()` function for parsing YAML settings with optional strict mode
+- added `MergeUpdatersConfig()` function for field-level deep merge of updater configurations
+- added default config download and merge for the `updaters` section, following the autobump pattern of fetching defaults from GitHub and merging user overrides on top
 
 ### Changed
 
-- changed `UpdaterConfig.Enabled` field to default to `true` when omitted from config, preventing updaters from being silently disabled when only `target_branch` or `auto_complete` is set
 - changed `UpdaterConfig.AutoComplete` field from `bool` to `*bool` for proper field-level merge support
+- changed `UpdaterConfig.Enabled` field to default to `true` when omitted from config, preventing updaters from being silently disabled when only `target_branch` or `auto_complete` is set
 - changed the default `configs/autoupdate.yaml` to include all 6 registered updaters with sensible defaults
 - changed the Go module dependencies to their latest versions
 
 ### Fixed
 
-- fixed the Python updater creating empty PRs when the upgrade script did not modify any files
-- fixed the pipeline updater replacing `displayName` instead of `versionSpec` in Azure DevOps pipeline files when both contained the same version string
 - fixed stale temporary directories and changelog files not being cleaned up after process termination
 - fixed Terraform, Dockerfile, and Pipeline updaters generating changelog entries without backticks around code identifiers and version numbers, violating the CHANGELOG formatting standard
+- fixed the pipeline updater replacing `displayName` instead of `versionSpec` in Azure DevOps pipeline files when both contained the same version string
+- fixed the Python updater creating empty PRs when the upgrade script did not modify any files
 - fixed the Terraform updater using non-production tags by validating that upgrade targets appear in the dependency repo's CHANGELOG.md
 
 ## [0.10.2] - 2026-03-19
@@ -121,17 +123,17 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Added
 
-- added GPG/SSH commit signing support in batch mode (`run` command) via `BatchGitContext`
-- added `LocalUpdater` interface for updaters that work on locally cloned repositories
 - added `gpg_key_path`, `gpg_key_passphrase`, `github_access_token`, `gitlab_access_token`, and `azure_devops_access_token` configuration fields
+- added `LocalUpdater` interface for updaters that work on locally cloned repositories
+- added GPG/SSH commit signing support in batch mode (`run` command) via `BatchGitContext`
 - added multi-token authentication retry for batch mode git push operations
 - added transport auto-detection (SSH vs HTTPS) for batch mode push
 
 ### Changed
 
-- changed Go, Python, and JavaScript updater batch scripts to contain only language-specific operations (removed git clone, commit, and push from batch bash scripts)
 - changed all six updaters (Terraform, Pipeline, Dockerfile, Go, Python, JavaScript) to implement the `LocalUpdater` interface for local filesystem operations in the batch pipeline
 - changed batch mode (`run` command) to use a clone-based pipeline with centralized git operations (clone, branch, commit, push) instead of per-updater git management
+- changed Go, Python, and JavaScript updater batch scripts to contain only language-specific operations (removed git clone, commit, and push from batch bash scripts)
 - changed remote file checker to use `langforge`'s shared `fileutil.NewFileChecker()`, `IsGlobPattern()`, and `ExtractExtension()` utilities
 - changed the Go module dependencies to their latest versions
 - changed token resolution to use `gitforge`'s shared `ResolveTokenFromEnv()` and `TokenEnvHint()`, eliminating duplicated env var mapping logic
@@ -177,15 +179,15 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Added
 
+- added `github.com/rios0rios0/langforge` dependency for centralized language detection
 - added `LocalGitContext` wrapper in `internal/infrastructure/repositories/gitlocal/` using go-git for branch creation, clean check, staging, committing, and pushing (replacing bash-generated git commands in local mode)
 - added `RemoteFileChecker` and `DetectRemote` utilities in `internal/support/` bridging `langforge`'s `FileChecker` abstraction with `gitforge`'s's remote provider API
-- added `github.com/rios0rios0/langforge` dependency for centralized language detection
 - added unit tests for `LocalGitContext` covering all public methods with BDD pattern
 
 ### Changed
 
-- changed Go, Python, and JavaScript local-mode updaters to use `LocalGitContext` (go-git) for git operations instead of generating bash scripts for branch creation, clean check, commit, and push
 - changed all `gitforge`'s import paths to the new DDD `pkg/` structure (e.g. `domain/entities` → `pkg/global/domain/entities`, `infrastructure/providers/github` → `pkg/providers/infrastructure/github`)
+- changed Go, Python, and JavaScript local-mode updaters to use `LocalGitContext` (go-git) for git operations instead of generating bash scripts for branch creation, clean check, commit, and push
 - changed local-mode bash scripts to contain only language-specific operations (auth setup, dependency upgrades, Dockerfile updates, changelog updates)
 - changed the Go module dependencies to their latest versions
 - replaced `projectType` enum and `switch`/`case` dispatch in `runLocalUpgrade` and `generatePRContent` with mapper pattern using `langforge`'s `Language` constants
@@ -236,15 +238,15 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Added
 
+- added container image reference scanning in `.hcl` (Terragrunt) files, detecting patterns like `relayer_http_image = "relayer-http:0.7.0"` and upgrading them to the latest Git tag from the same organization
 - added JavaScript updater supporting npm, yarn, and pnpm projects (auto-detected via `lockfiles`), with automatic `.nvmrc`/`.node-version` and Dockerfile `node:` image tag updates
 - added Python and JavaScript support to the standalone local mode (`autoupdate .`), with automatic project type detection
 - added Python updater supporting `requirements.txt` and `pyproject.toml` projects, with automatic `.python-version` and Dockerfile `python:` image tag updates
-- added container image reference scanning in `.hcl` (Terragrunt) files, detecting patterns like `relayer_http_image = "relayer-http:0.7.0"` and upgrading them to the latest Git tag from the same organization
 
 ### Changed
 
-- changed the Terraform updater to scan both `.tf` and `.hcl` files, supporting mixed Terraform module and container image dependency upgrades in a single PR
 - changed the local mode to auto-detect Go, Python, and JavaScript projects instead of requiring `go.mod`
+- changed the Terraform updater to scan both `.tf` and `.hcl` files, supporting mixed Terraform module and container image dependency upgrades in a single PR
 
 ## [0.3.0] - 2026-02-12
 
@@ -304,11 +306,11 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Added
 
 - added Clean Architecture project structure (`domain/`, `application/`, `infrastructure/`, `cmd/`)
-- added YAML-based configuration with environment variable expansion for tokens
 - added comprehensive test suite with hand-crafted test doubles (spies, stubs, dummies)
 - added extensible updater plugin interface with Terraform and Go implementations
 - added multi-provider support (GitHub, GitLab, Azure DevOps) for repository discovery and PR creation
 - added project boilerplate (`CHANGELOG.md`, `Makefile`, `LICENSE`, `.editorconfig`, `.gitignore`, `.github/`)
+- added YAML-based configuration with environment variable expansion for tokens
 
 ### Changed
 
