@@ -58,6 +58,7 @@ func serviceTypeToProvider() map[globalEntities.ServiceType]string {
 		globalEntities.AZUREDEVOPS: providerAzureDevOps,
 		globalEntities.BITBUCKET:   "",
 		globalEntities.CODECOMMIT:  "",
+		globalEntities.CODEBERG:    "",
 	}
 }
 
