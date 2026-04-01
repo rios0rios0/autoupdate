@@ -1,14 +1,15 @@
 package commands
 
-import "github.com/rios0rios0/cliforge/selfupdate"
+import "github.com/rios0rios0/autoupdate/internal/domain/repositories"
 
-type SelfUpdateCommand struct{}
+type SelfUpdateCommand struct {
+	repository repositories.SelfUpdateRepository
+}
 
-func NewSelfUpdateCommand() *SelfUpdateCommand {
-	return &SelfUpdateCommand{}
+func NewSelfUpdateCommand(repository repositories.SelfUpdateRepository) *SelfUpdateCommand {
+	return &SelfUpdateCommand{repository: repository}
 }
 
 func (c *SelfUpdateCommand) Execute(dryRun, force bool) error {
-	cmd := selfupdate.NewSelfUpdateCommand("rios0rios0", "autoupdate", "autoupdate", AutoupdateVersion)
-	return cmd.Execute(dryRun, force)
+	return c.repository.Execute(AutoupdateVersion, dryRun, force)
 }
