@@ -7,8 +7,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rios0rios0/autoupdate/internal"
+	"github.com/rios0rios0/autoupdate/internal/domain/commands"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/controllers"
 )
+
+var version = "dev"
 
 func buildRootCommand(localController *controllers.LocalController) *cobra.Command {
 	bind := localController.GetBind()
@@ -68,6 +71,9 @@ func addSubcommands(rootCmd *cobra.Command, appContext *internal.AppInternal) {
 		if rc, ok := ctrl.(*controllers.RunController); ok {
 			rc.AddFlags(subCmd)
 		}
+		if sc, ok := ctrl.(*controllers.SelfUpdateController); ok {
+			sc.AddFlags(subCmd)
+		}
 
 		rootCmd.AddCommand(subCmd)
 	}
@@ -82,6 +88,9 @@ func main() {
 	if os.Getenv("DEBUG") == "true" {
 		logger.SetLevel(logger.DebugLevel)
 	}
+
+	// Bridge build-time version to domain package
+	commands.AutoupdateVersion = version //nolint:reassign // intentional cross-package assignment of build-time version
 
 	// Inject controllers via DIG
 	localController := injectLocalController()
