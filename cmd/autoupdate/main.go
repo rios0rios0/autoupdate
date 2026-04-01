@@ -11,7 +11,6 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/controllers"
 )
 
-//nolint:gochecknoglobals // Version set at build time via ldflags
 var version = "dev"
 
 func buildRootCommand(localController *controllers.LocalController) *cobra.Command {
@@ -72,9 +71,8 @@ func addSubcommands(rootCmd *cobra.Command, appContext *internal.AppInternal) {
 		if rc, ok := ctrl.(*controllers.RunController); ok {
 			rc.AddFlags(subCmd)
 		}
-		if bind.Use == "self-update" {
-			subCmd.Flags().Bool("dry-run", false, "Show what would be updated without performing it")
-			subCmd.Flags().Bool("force", false, "Skip confirmation prompts")
+		if sc, ok := ctrl.(*controllers.SelfUpdateController); ok {
+			sc.AddFlags(subCmd)
 		}
 
 		rootCmd.AddCommand(subCmd)
@@ -92,7 +90,7 @@ func main() {
 	}
 
 	// Bridge build-time version to domain package
-	commands.AutoupdateVersion = version
+	commands.AutoupdateVersion = version //nolint:reassign // intentional cross-package assignment of build-time version
 
 	// Inject controllers via DIG
 	localController := injectLocalController()

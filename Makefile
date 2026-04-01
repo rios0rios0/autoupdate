@@ -2,7 +2,7 @@ SCRIPTS_DIR ?= $(HOME)/Development/github.com/rios0rios0/pipelines
 -include $(SCRIPTS_DIR)/makefiles/common.mk
 -include $(SCRIPTS_DIR)/makefiles/golang.mk
 
-VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "dev")
+VERSION ?= $(shell sh -c 'git describe --tags --abbrev=0 2>/dev/null || echo "dev"' | sed 's/^v//')
 LDFLAGS := -X main.version=$(VERSION)
 
 .PHONY: build build-musl debug install run
@@ -17,7 +17,7 @@ debug:
 
 build-musl:
 	CGO_ENABLED=1 CC=musl-gcc go build \
-		-ldflags "$(LDFLAGS) -linkmode external -extldflags='-static' -s -w" -o bin/autoupdate ./cmd/autoupdate
+		-ldflags "$(LDFLAGS) -linkmode external -extldflags=-static -s -w" -o bin/autoupdate ./cmd/autoupdate
 
 run:
 	go run ./cmd/autoupdate
