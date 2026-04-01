@@ -23,12 +23,18 @@ func (it *SelfUpdateController) GetBind() entities.ControllerBind {
 	}
 }
 
+// AddFlags adds the self-update-specific flags to the given Cobra command.
+func (it *SelfUpdateController) AddFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("force", false, "Skip confirmation prompts")
+}
+
 func (it *SelfUpdateController) Execute(cmd *cobra.Command, _ []string) {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	force, _ := cmd.Flags().GetBool("force")
 
 	err := it.command.Execute(dryRun, force)
 	if err != nil {
-		logger.Fatalf("Self-update failed: %s", err)
+		logger.Errorf("Self-update failed: %s", err)
+		return
 	}
 }
