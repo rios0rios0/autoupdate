@@ -25,6 +25,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 - changed the Go module dependencies to their latest versions
 - changed the Go module dependencies to their latest versions
+- changed cliforge import paths to follow the new `pkg/` package restructuring
 
 ## [0.12.1] - 2026-03-31
 
