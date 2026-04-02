@@ -1,6 +1,6 @@
 package selfupdate
 
-import "github.com/rios0rios0/cliforge/selfupdate"
+import "github.com/rios0rios0/cliforge/pkg/selfupdate"
 
 type Repository struct{}
 
@@ -9,6 +9,6 @@ func NewRepository() *Repository {
 }
 
 func (r *Repository) Execute(version string, dryRun, force bool) error {
-	cmd := selfupdate.NewSelfUpdateCommand("rios0rios0", "autoupdate", "autoupdate", version)
+	cmd := selfupdate.NewCommand("rios0rios0", "autoupdate", "autoupdate", version)
 	return cmd.Execute(dryRun, force)
 }
