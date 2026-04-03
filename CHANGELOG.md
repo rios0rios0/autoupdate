@@ -19,6 +19,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Added
 
 - added Ruby, Java, and C# dependency updaters supporting version upgrades and dependency refresh
+- added unit tests for Ruby, Java, and C# updater version fetchers and repository logic
 
 ## [0.13.0] - 2026-04-03
 
