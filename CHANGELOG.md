@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added Ruby, Java, and C# dependency updaters supporting version upgrades and dependency refresh
+
 ## [0.13.0] - 2026-04-03
 
 ### Added
