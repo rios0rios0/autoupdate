@@ -179,9 +179,14 @@ func TestHTTPJavaVersionFetcher(t *testing.T) {
 		t.Parallel()
 
 		// given
-		fetcher := javaUpdater.NewHTTPJavaVersionFetcherWithURL(
-			http.DefaultClient, "http://127.0.0.1:1",
-		)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		client := server.Client()
+		url := server.URL
+		server.Close()
+
+		fetcher := javaUpdater.NewHTTPJavaVersionFetcherWithURL(client, url)
 
 		// when
 		_, err := fetcher.FetchLatestVersion(context.Background())
