@@ -2,11 +2,14 @@ package repositories
 
 import (
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	csRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/csharp"
 	dfRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dockerfile"
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
+	jvRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/java"
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
 	plRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/pipeline"
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
+	rbRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/ruby"
 	suRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/selfupdate"
 	tfRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/terraform"
 	"github.com/rios0rios0/gitforge/pkg/providers/infrastructure/azuredevops"
@@ -50,6 +53,9 @@ func RegisterProviders(container *dig.Container) error {
 		reg.Register(goRepo.NewUpdaterRepository())
 		reg.Register(pyRepo.NewUpdaterRepository())
 		reg.Register(jsRepo.NewUpdaterRepository())
+		reg.Register(rbRepo.NewUpdaterRepository())
+		reg.Register(jvRepo.NewUpdaterRepository())
+		reg.Register(csRepo.NewUpdaterRepository())
 		reg.Register(plRepo.NewUpdaterRepository())
 		reg.Register(dfRepo.NewUpdaterRepository())
 		return reg
