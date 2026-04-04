@@ -16,14 +16,16 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
-### Changed
-
-- changed the Go module dependencies to their latest versions
+## [0.14.0] - 2026-04-04
 
 ### Added
 
 - added Ruby, Java, and C# dependency updaters supporting version upgrades and dependency refresh
 - added unit tests for Ruby, Java, and C# updater version fetchers and repository logic
+
+### Changed
+
+- changed the Go module dependencies to their latest versions
 
 ## [0.13.0] - 2026-04-03
 
