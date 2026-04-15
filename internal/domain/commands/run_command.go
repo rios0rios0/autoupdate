@@ -3,7 +3,9 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
@@ -260,9 +262,18 @@ func (it *RunCommand) collectApplicableUpdaters(
 	return local, legacy
 }
 
-// processLocalUpdaters clones the repository once and runs all local updaters
-// against the clone, handling branch creation, signed commits, push, and PR
-// creation centrally.
+// appliedUpdaterResult pairs the updater name with the result it returned
+// from ApplyUpdates so the synthesis helpers can build a single aggregate
+// commit and PR.
+type appliedUpdaterResult struct {
+	name   string
+	result *repositories.LocalUpdateResult
+}
+
+// processLocalUpdaters clones the repository once and runs every applicable
+// local updater against a single aggregate branch, producing one signed
+// commit and one pull request that bundles all the changes. Per-updater
+// failure isolation is handled via snapshot commits on BatchGitContext.
 func (it *RunCommand) processLocalUpdaters(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
@@ -270,168 +281,335 @@ func (it *RunCommand) processLocalUpdaters(
 	settings *entities.Settings,
 	updaters []applicableUpdater,
 ) ([]entities.PullRequest, int) {
+	if allDryRun(updaters) {
+		logAggregateDryRun(updaters, repo)
+		return nil, 0
+	}
+
 	cloneURL := provider.CloneURL(repo)
 	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
 
-	// Resolve service type and collect auth methods for clone and push
 	serviceType := gitlocal.ResolveServiceTypeFromURL(it.providerRegistry, cloneURL)
 	authMethods := gitlocal.CollectBatchAuthMethods(
 		it.providerRegistry, serviceType, provider.AuthToken(), settings,
 	)
 
 	gitOps := gitops.NewGitOperations(it.providerRegistry)
-	batchCtx, err := gitlocal.CloneRepository(gitOps, cloneURL, defaultBranch, authMethods, it.providerRegistry)
+	batchCtx, err := gitlocal.CloneRepository(
+		gitOps, cloneURL, defaultBranch, authMethods, it.providerRegistry,
+	)
 	if err != nil {
-		logger.Errorf(
-			"Failed to clone %s/%s: %v", repo.Organization, repo.Name, err,
-		)
-		return nil, len(updaters)
+		logger.Errorf("Failed to clone %s/%s: %v", repo.Organization, repo.Name, err)
+		return nil, 1
 	}
 	defer batchCtx.Close()
 
-	var allPRs []entities.PullRequest
+	aggregateBranch := buildAggregateBranchName(time.Now())
+
+	exists, checkErr := provider.PullRequestExists(ctx, repo, aggregateBranch)
+	if checkErr != nil {
+		logger.Warnf("[autoupdate] Failed to check existing PRs for %s/%s: %v",
+			repo.Organization, repo.Name, checkErr)
+	} else if exists {
+		logger.Infof("[autoupdate] PR already exists for %s/%s on branch %q, skipping",
+			repo.Organization, repo.Name, aggregateBranch)
+		return nil, 0
+	}
+
+	if branchErr := batchCtx.CreateBranchFromDefault(aggregateBranch); branchErr != nil {
+		logger.Errorf("[autoupdate] Failed to create branch %s for %s/%s: %v",
+			aggregateBranch, repo.Organization, repo.Name, branchErr)
+		return nil, 1
+	}
+
+	applied, errorCount := it.runUpdatersOnBranch(ctx, batchCtx, updaters, provider, repo)
+	if len(applied) == 0 {
+		logger.Infof("[autoupdate] %s/%s: no updaters produced changes",
+			repo.Organization, repo.Name)
+		return nil, errorCount
+	}
+
+	pr, pushErrs := it.commitPushAndOpenPR(
+		ctx, batchCtx, provider, repo, settings, authMethods,
+		aggregateBranch, applied, updaters,
+	)
+	if pr == nil {
+		return nil, errorCount + pushErrs
+	}
+	return []entities.PullRequest{*pr}, errorCount + pushErrs
+}
+
+// runUpdatersOnBranch runs each applicable LocalUpdater against the shared
+// worktree on the aggregate branch with snapshot-based failure isolation.
+// On success with real changes, the snapshot advances so the next updater
+// builds on top of it. On failure, the worktree hard-resets to the last
+// known-good snapshot, discarding only the failing updater's partial writes.
+func (it *RunCommand) runUpdatersOnBranch(
+	ctx context.Context,
+	batchCtx *gitlocal.BatchGitContext,
+	updaters []applicableUpdater,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+) ([]appliedUpdaterResult, int) {
+	snapshot, err := batchCtx.HeadHash()
+	if err != nil {
+		logger.Errorf("[autoupdate] Failed to resolve HEAD for %s/%s: %v",
+			repo.Organization, repo.Name, err)
+		return nil, 1
+	}
+
+	var applied []appliedUpdaterResult
 	errorCount := 0
 
 	for _, au := range updaters {
+		name := au.updater.Name()
 		lu := au.updater.(repositories.LocalUpdater) //nolint:errcheck,forcetypeassert // checked at partition time
-		prs, errs := it.runLocalUpdater(ctx, batchCtx, lu, au, provider, repo, settings, authMethods)
-		allPRs = append(allPRs, prs...)
-		errorCount += errs
+
+		if au.opts.DryRun {
+			logger.Infof("[%s] [DRY RUN] Would apply updates to %s/%s via aggregate pipeline",
+				name, repo.Organization, repo.Name)
+			continue
+		}
+
+		result, applyErr := lu.ApplyUpdates(ctx, batchCtx.RepoDir(), provider, repo, au.opts)
+		if applyErr != nil {
+			if errors.Is(applyErr, repositories.ErrNoUpdatesNeeded) {
+				logger.Infof("[%s] %s/%s: already up to date",
+					name, repo.Organization, repo.Name)
+				continue
+			}
+			logger.Errorf("[%s] Failed to apply updates to %s/%s: %v",
+				name, repo.Organization, repo.Name, applyErr)
+			errorCount++
+			if rbErr := batchCtx.RestoreSnapshot(snapshot); rbErr != nil {
+				logger.Warnf("[%s] Failed to restore snapshot after failure: %v", name, rbErr)
+			}
+			continue
+		}
+
+		if result == nil {
+			continue
+		}
+
+		applied = append(applied, appliedUpdaterResult{name: name, result: result})
+		logger.Infof("[%s] %s/%s: staged changes for aggregate PR",
+			name, repo.Organization, repo.Name)
+
+		hasChanges, hcErr := batchCtx.HasChanges()
+		if hcErr != nil {
+			logger.Warnf("[%s] Failed to detect changes after apply: %v", name, hcErr)
+			continue
+		}
+		if !hasChanges {
+			continue
+		}
+
+		newSnap, snapErr := batchCtx.AdvanceSnapshot(snapshot)
+		if snapErr != nil {
+			logger.Warnf("[%s] Failed to advance snapshot: %v", name, snapErr)
+			continue
+		}
+		snapshot = newSnap
 	}
 
-	return allPRs, errorCount
+	return applied, errorCount
 }
 
-// resetWorktree resets the batch context to the default branch, logging any error.
-func resetWorktree(batchCtx *gitlocal.BatchGitContext, name string) {
-	if resetErr := batchCtx.ResetToDefault(); resetErr != nil {
-		logger.Warnf("[%s] Failed to reset worktree to default branch: %v", name, resetErr)
-	}
-}
-
-// runLocalUpdater executes a single local updater against the cloned repo.
-func (it *RunCommand) runLocalUpdater(
+// commitPushAndOpenPR flattens the snapshot chain back into the worktree,
+// builds the aggregate commit/PR text, signs and pushes the single commit,
+// and opens the consolidated pull request.
+func (it *RunCommand) commitPushAndOpenPR(
 	ctx context.Context,
 	batchCtx *gitlocal.BatchGitContext,
-	lu repositories.LocalUpdater,
-	au applicableUpdater,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	settings *entities.Settings,
 	authMethods []transport.AuthMethod,
-) ([]entities.PullRequest, int) {
-	name := au.updater.Name()
-
-	if au.opts.DryRun {
-		logger.Infof("[%s] [DRY RUN] Would apply updates to %s/%s via clone-based pipeline",
-			name, repo.Organization, repo.Name)
-		return nil, 0
-	}
-
-	result, err := lu.ApplyUpdates(ctx, batchCtx.RepoDir(), provider, repo, au.opts)
-	if err != nil {
-		if errors.Is(err, repositories.ErrNoUpdatesNeeded) {
-			logger.Infof("[%s] %s/%s: already up to date", name, repo.Organization, repo.Name)
-			return nil, 0
-		}
-		logger.Errorf("[%s] Failed to apply updates to %s/%s: %v",
-			name, repo.Organization, repo.Name, err)
-		resetWorktree(batchCtx, name)
+	branchName string,
+	applied []appliedUpdaterResult,
+	updaters []applicableUpdater,
+) (*entities.PullRequest, int) {
+	if flattenErr := batchCtx.FlattenToWorktree(); flattenErr != nil {
+		logger.Errorf("[autoupdate] Failed to flatten worktree for %s/%s: %v",
+			repo.Organization, repo.Name, flattenErr)
 		return nil, 1
 	}
 
-	exists, prCheckErr := provider.PullRequestExists(ctx, repo, result.BranchName)
-	if prCheckErr != nil {
-		logger.Warnf("[%s] Failed to check existing PRs: %v", name, prCheckErr)
-	}
-	if exists {
-		logger.Infof("[%s] PR already exists for branch %q, skipping", name, result.BranchName)
-		resetWorktree(batchCtx, name)
-		return nil, 0
-	}
+	commitMsg := buildAggregateCommitMessage(applied)
 
-	// CreateBranchFromDefault uses a force-checkout (go-git) which discards
-	// uncommitted working-tree changes.  The upgrade script already modified
-	// go.mod/go.sum on the default branch, so we must stash those changes
-	// before the branch switch and pop them on the new branch.
-	logger.Infof("[%s] Stashing upgrade changes before branch switch to %s", name, result.BranchName)
-	stashed, stashErr := batchCtx.StashChanges()
-	if stashErr != nil {
-		logger.Errorf("[%s] Failed to stash changes before branch switch: %v", name, stashErr)
-		resetWorktree(batchCtx, name)
-		return nil, 1
-	}
-
-	if branchErr := batchCtx.CreateBranchFromDefault(result.BranchName); branchErr != nil {
-		logger.Errorf("[%s] Failed to create branch %s: %v", name, result.BranchName, branchErr)
-		if stashed {
-			batchCtx.DropStash()
-		}
-		resetWorktree(batchCtx, name)
-		return nil, 1
-	}
-
-	if stashed {
-		logger.Infof("[%s] Restoring upgrade changes on branch %s", name, result.BranchName)
-		if popErr := batchCtx.PopStash(); popErr != nil {
-			logger.Errorf("[%s] Failed to pop stash after branch switch: %v", name, popErr)
-			resetWorktree(batchCtx, name)
-			return nil, 1
-		}
-	}
-
-	pushed, pushErr := batchCtx.CommitSignedAndPush(result.BranchName, result.CommitMessage, settings, authMethods)
+	pushed, pushErr := batchCtx.CommitSignedAndPush(branchName, commitMsg, settings, authMethods)
 	if pushErr != nil {
-		logger.Errorf("[%s] Failed to commit/push for %s/%s: %v",
-			name, repo.Organization, repo.Name, pushErr)
-		resetWorktree(batchCtx, name)
+		logger.Errorf("[autoupdate] Failed to commit/push for %s/%s: %v",
+			repo.Organization, repo.Name, pushErr)
 		return nil, 1
 	}
-
 	if !pushed {
-		logger.Infof("[%s] %s/%s: no changes after apply", name, repo.Organization, repo.Name)
-		resetWorktree(batchCtx, name)
+		logger.Infof("[autoupdate] %s/%s: no net changes after apply, skipping PR",
+			repo.Organization, repo.Name)
 		return nil, 0
-	}
-
-	return it.createLocalPR(ctx, batchCtx, au, provider, repo, result, name)
-}
-
-// createLocalPR creates a pull request for changes pushed by a local updater.
-func (it *RunCommand) createLocalPR(
-	ctx context.Context,
-	batchCtx *gitlocal.BatchGitContext,
-	au applicableUpdater,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	result *repositories.LocalUpdateResult,
-	name string,
-) ([]entities.PullRequest, int) {
-	targetBranch := repo.DefaultBranch
-	if au.opts.TargetBranch != "" {
-		targetBranch = "refs/heads/" + au.opts.TargetBranch
 	}
 
 	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
-		SourceBranch: "refs/heads/" + result.BranchName,
-		TargetBranch: targetBranch,
-		Title:        result.PRTitle,
-		Description:  result.PRDescription,
-		AutoComplete: au.opts.AutoComplete,
+		SourceBranch: "refs/heads/" + branchName,
+		TargetBranch: resolveAggregateTargetBranch(repo, updaters),
+		Title:        buildAggregatePRTitle(applied),
+		Description:  buildAggregatePRDescription(applied),
+		AutoComplete: anyAutoComplete(updaters),
 	})
 	if createErr != nil {
-		logger.Errorf("[%s] Failed to create PR for %s/%s: %v",
-			name, repo.Organization, repo.Name, createErr)
-		resetWorktree(batchCtx, name)
+		logger.Errorf("[autoupdate] Failed to create PR for %s/%s: %v",
+			repo.Organization, repo.Name, createErr)
 		return nil, 1
 	}
 
-	logger.Infof("[%s] Created PR #%d for %s/%s: %s",
-		name, pr.ID, repo.Organization, repo.Name, pr.URL)
+	logger.Infof("[autoupdate] Created PR #%d for %s/%s: %s",
+		pr.ID, repo.Organization, repo.Name, pr.URL)
 
 	if switchErr := batchCtx.SwitchToDefault(); switchErr != nil {
-		logger.Warnf("[%s] Failed to switch back to default branch: %v", name, switchErr)
+		logger.Warnf("[autoupdate] Failed to switch back to default branch: %v", switchErr)
 	}
 
-	return []entities.PullRequest{*pr}, 0
+	return pr, 0
+}
+
+// aggregateBranchPrefix is the prefix used for every consolidated branch
+// name produced by the aggregate pipeline. The full name is
+// `chore/autoupdate-YYYY-MM-DD` (UTC), making same-day re-runs idempotent
+// without force-pushing over an under-review pull request.
+const aggregateBranchPrefix = "chore/autoupdate-"
+
+// buildAggregateBranchName returns the deterministic consolidated branch
+// name for a given run timestamp. Two invocations on the same UTC day for
+// the same repo land on the same branch, which together with the
+// PullRequestExists pre-check makes same-day re-runs idempotent.
+func buildAggregateBranchName(now time.Time) string {
+	return aggregateBranchPrefix + now.UTC().Format("2006-01-02")
+}
+
+// buildAggregateCommitMessage synthesizes a single commit message that
+// covers every updater that produced changes. For a single contributor
+// the message passes through verbatim so the one-PR path is
+// indistinguishable from the pre-refactor single-updater output.
+func buildAggregateCommitMessage(applied []appliedUpdaterResult) string {
+	if len(applied) == 1 {
+		return applied[0].result.CommitMessage
+	}
+
+	var sb strings.Builder
+	sb.WriteString("chore(deps): bumped dependencies via autoupdate\n\n")
+	for _, a := range applied {
+		fmt.Fprintf(&sb, "- [%s] %s\n", a.name, firstLine(a.result.CommitMessage))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// buildAggregatePRTitle returns the PR title. For a single updater it is
+// that updater's original title; for multiple it lists the contributing
+// updater names so reviewers can see at a glance which ecosystems moved.
+func buildAggregatePRTitle(applied []appliedUpdaterResult) string {
+	if len(applied) == 1 {
+		return applied[0].result.PRTitle
+	}
+	names := make([]string, 0, len(applied))
+	for _, a := range applied {
+		names = append(names, a.name)
+	}
+	return fmt.Sprintf("chore(deps): bumped dependencies (%s)", strings.Join(names, ", "))
+}
+
+// buildAggregatePRDescription renders the PR body with one section per
+// contributing updater, preserving each updater's original PR description
+// so reviewers see the full context for every change.
+func buildAggregatePRDescription(applied []appliedUpdaterResult) string {
+	if len(applied) == 1 {
+		return applied[0].result.PRDescription
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Summary\n\n")
+	sb.WriteString(
+		"This pull request bundles updates from multiple autoupdate updaters into a single branch " +
+			"so reviewers see the full set of changes for this repository in one place.\n\n",
+	)
+	sb.WriteString("Contributing updaters:\n\n")
+	for _, a := range applied {
+		fmt.Fprintf(&sb, "- `%s` — %s\n", a.name, firstLine(a.result.PRTitle))
+	}
+	sb.WriteString("\n---\n\n")
+	for _, a := range applied {
+		fmt.Fprintf(&sb, "## %s\n\n", a.name)
+		if a.result.PRDescription != "" {
+			sb.WriteString(a.result.PRDescription)
+			sb.WriteString("\n\n")
+		} else {
+			sb.WriteString("_(no description provided by updater)_\n\n")
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// resolveAggregateTargetBranch picks the target branch for the aggregate
+// PR. All enabled updaters should agree (they read the same settings); if
+// any one overrides TargetBranch we honor the first non-empty override
+// for determinism.
+func resolveAggregateTargetBranch(
+	repo entities.Repository, updaters []applicableUpdater,
+) string {
+	for _, au := range updaters {
+		if au.opts.TargetBranch != "" {
+			return "refs/heads/" + au.opts.TargetBranch
+		}
+	}
+	return repo.DefaultBranch
+}
+
+// anyAutoComplete returns true if at least one applicable updater requested
+// auto-complete. The aggregate PR represents the same logical "bump
+// dependencies" change every contributor individually requested, so honoring
+// auto-complete when anyone asks for it preserves their intent.
+func anyAutoComplete(updaters []applicableUpdater) bool {
+	for _, au := range updaters {
+		if au.opts.AutoComplete {
+			return true
+		}
+	}
+	return false
+}
+
+// allDryRun reports whether every applicable updater is running in dry-run
+// mode, in which case the aggregate pipeline can short-circuit before
+// cloning anything.
+func allDryRun(updaters []applicableUpdater) bool {
+	if len(updaters) == 0 {
+		return false
+	}
+	for _, au := range updaters {
+		if !au.opts.DryRun {
+			return false
+		}
+	}
+	return true
+}
+
+// logAggregateDryRun emits the dry-run summary line for an aggregate run
+// where every applicable updater is dry-run.
+func logAggregateDryRun(updaters []applicableUpdater, repo entities.Repository) {
+	names := make([]string, 0, len(updaters))
+	for _, au := range updaters {
+		names = append(names, au.updater.Name())
+	}
+	logger.Infof(
+		"[autoupdate] [DRY RUN] Would apply %d updater(s) to %s/%s: %s",
+		len(updaters), repo.Organization, repo.Name, strings.Join(names, ", "),
+	)
+}
+
+// firstLine returns the first newline-delimited segment of s, or s itself
+// when there is no newline. Used to extract subject lines from multi-line
+// commit messages and PR titles.
+func firstLine(s string) string {
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before
+	}
+	return s
 }

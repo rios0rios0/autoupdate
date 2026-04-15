@@ -18,6 +18,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Changed
 
+- changed batch mode (`run` command) to produce one consolidated pull request per repository that bundles changes from every applicable updater into a single `chore/autoupdate-YYYY-MM-DD` branch, commit, and PR, instead of one PR per updater
+- changed `BatchGitContext` to expose `HeadHash`, `RestoreSnapshot`, `AdvanceSnapshot`, and `FlattenToWorktree` so the aggregate pipeline can roll back individual updater failures without discarding earlier successes
 - changed the Go version to `1.26.2` and updated all module dependencies
 
 ## [0.14.0] - 2026-04-14
