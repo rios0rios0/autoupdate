@@ -286,24 +286,8 @@ func (it *RunCommand) processLocalUpdaters(
 		return nil, 0
 	}
 
-	cloneURL := provider.CloneURL(repo)
-	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
-
-	serviceType := gitlocal.ResolveServiceTypeFromURL(it.providerRegistry, cloneURL)
-	authMethods := gitlocal.CollectBatchAuthMethods(
-		it.providerRegistry, serviceType, provider.AuthToken(), settings,
-	)
-
-	gitOps := gitops.NewGitOperations(it.providerRegistry)
-	batchCtx, err := gitlocal.CloneRepository(
-		gitOps, cloneURL, defaultBranch, authMethods, it.providerRegistry,
-	)
-	if err != nil {
-		logger.Errorf("Failed to clone %s/%s: %v", repo.Organization, repo.Name, err)
-		return nil, 1
-	}
-	defer batchCtx.Close()
-
+	// Same-day idempotency: short-circuit before touching git if the aggregate
+	// PR already exists for the target branch on this day.
 	aggregateBranch := buildAggregateBranchName(time.Now())
 
 	exists, checkErr := provider.PullRequestExists(ctx, repo, aggregateBranch)
@@ -315,6 +299,29 @@ func (it *RunCommand) processLocalUpdaters(
 			repo.Organization, repo.Name, aggregateBranch)
 		return nil, 0
 	}
+
+	// The clone base ref and the PR target ref must match so the aggregate
+	// branch is not based on a different ref than the PR targets (which would
+	// produce unexpected diffs and conflicts when TargetBranch is overridden).
+	targetBranch := strings.TrimPrefix(
+		resolveAggregateTargetBranch(repo, updaters), "refs/heads/",
+	)
+
+	cloneURL := provider.CloneURL(repo)
+	serviceType := gitlocal.ResolveServiceTypeFromURL(it.providerRegistry, cloneURL)
+	authMethods := gitlocal.CollectBatchAuthMethods(
+		it.providerRegistry, serviceType, provider.AuthToken(), settings,
+	)
+
+	gitOps := gitops.NewGitOperations(it.providerRegistry)
+	batchCtx, err := gitlocal.CloneRepository(
+		gitOps, cloneURL, targetBranch, authMethods, it.providerRegistry,
+	)
+	if err != nil {
+		logger.Errorf("Failed to clone %s/%s: %v", repo.Organization, repo.Name, err)
+		return nil, 1
+	}
+	defer batchCtx.Close()
 
 	if branchErr := batchCtx.CreateBranchFromDefault(aggregateBranch); branchErr != nil {
 		logger.Errorf("[autoupdate] Failed to create branch %s for %s/%s: %v",
@@ -382,7 +389,16 @@ func (it *RunCommand) runUpdatersOnBranch(
 				name, repo.Organization, repo.Name, applyErr)
 			errorCount++
 			if rbErr := batchCtx.RestoreSnapshot(snapshot); rbErr != nil {
-				logger.Warnf("[%s] Failed to restore snapshot after failure: %v", name, rbErr)
+				// A failed restore leaves the worktree in an unknown state,
+				// so any subsequent updater would be building on top of a
+				// potentially corrupted tree. Abort the repo entirely
+				// instead of silently producing a tainted aggregate PR.
+				logger.Errorf(
+					"[%s] failed to restore snapshot after updater failure for %s/%s: "+
+						"updater error: %v; restore error: %v",
+					name, repo.Organization, repo.Name, applyErr, rbErr,
+				)
+				return nil, errorCount
 			}
 			continue
 		}
@@ -406,8 +422,16 @@ func (it *RunCommand) runUpdatersOnBranch(
 
 		newSnap, snapErr := batchCtx.AdvanceSnapshot(snapshot)
 		if snapErr != nil {
-			logger.Warnf("[%s] Failed to advance snapshot: %v", name, snapErr)
-			continue
+			// If the snapshot fails to advance, a later updater failure
+			// would RestoreSnapshot back to the older hash and discard
+			// this updater's successful changes. Treat the advance
+			// failure as fatal for the repo to preserve correctness.
+			logger.Errorf(
+				"[%s] failed to advance snapshot for %s/%s: %v",
+				name, repo.Organization, repo.Name, snapErr,
+			)
+			errorCount++
+			return nil, errorCount
 		}
 		snapshot = newSnap
 	}

@@ -92,9 +92,9 @@ func TestAdvanceSnapshot(t *testing.T) {
 		require.NoError(t, headErr)
 		assert.Equal(t, newHash, head)
 
-		clean, hcErr := ctx.HasChanges()
+		hasChanges, hcErr := ctx.HasChanges()
 		require.NoError(t, hcErr)
-		assert.False(t, clean, "worktree should be clean after a snapshot commit")
+		assert.False(t, hasChanges, "worktree should be clean after a snapshot commit")
 	})
 }
 
