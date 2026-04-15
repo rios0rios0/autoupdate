@@ -5,7 +5,9 @@ package commands_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1600,5 +1602,381 @@ func TestFilterRepositories(t *testing.T) {
 
 		// then
 		assert.Empty(t, result)
+	})
+}
+
+func TestBuildAggregateBranchName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should produce a chore/autoupdate-YYYY-MM-DD branch in UTC", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		loc, err := time.LoadLocation("America/Toronto")
+		require.NoError(t, err)
+		// 23:30 in Toronto on Apr 15 (UTC-5 in this period before DST quirks
+		// — pick a date safely inside DST so the offset is deterministic).
+		ts := time.Date(2026, time.July, 15, 23, 30, 0, 0, loc)
+
+		// when
+		branch := commands.BuildAggregateBranchName(ts)
+
+		// then
+		// 23:30 EDT (UTC-4) on July 15 → 03:30 UTC on July 16
+		assert.Equal(t, "chore/autoupdate-2026-07-16", branch)
+	})
+
+	t.Run("should produce the same branch for two same-day calls", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		morning := time.Date(2026, time.April, 15, 8, 0, 0, 0, time.UTC)
+		evening := time.Date(2026, time.April, 15, 22, 0, 0, 0, time.UTC)
+
+		// when
+		branchA := commands.BuildAggregateBranchName(morning)
+		branchB := commands.BuildAggregateBranchName(evening)
+
+		// then
+		assert.Equal(t, branchA, branchB)
+		assert.Equal(t, "chore/autoupdate-2026-04-15", branchA)
+	})
+}
+
+func TestBuildAggregateCommitMessage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should pass the single updater message through verbatim", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		applied := []commands.AppliedUpdaterResult{
+			commands.NewAppliedUpdaterResult("golang", &repositories.LocalUpdateResult{
+				CommitMessage: "chore(deps): upgraded Go version to `1.26.2` and updated all dependencies",
+			}),
+		}
+
+		// when
+		msg := commands.BuildAggregateCommitMessage(applied)
+
+		// then
+		assert.Equal(t, "chore(deps): upgraded Go version to `1.26.2` and updated all dependencies", msg)
+	})
+
+	t.Run("should aggregate multi-updater messages with a bullet list of first lines", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		applied := []commands.AppliedUpdaterResult{
+			commands.NewAppliedUpdaterResult("golang", &repositories.LocalUpdateResult{
+				CommitMessage: "chore(deps): upgraded Go version to `1.26.2` and updated all dependencies\n\nbody",
+			}),
+			commands.NewAppliedUpdaterResult("dockerfile", &repositories.LocalUpdateResult{
+				CommitMessage: "chore(deps): upgraded `golang` from `1.26.1-alpine` to `1.26.2-alpine`",
+			}),
+		}
+
+		// when
+		msg := commands.BuildAggregateCommitMessage(applied)
+
+		// then
+		require.True(t, strings.HasPrefix(msg, "chore(deps): bumped dependencies via autoupdate\n\n"))
+		assert.Contains(t, msg, "- [golang] chore(deps): upgraded Go version to `1.26.2` and updated all dependencies")
+		assert.Contains(t, msg, "- [dockerfile] chore(deps): upgraded `golang` from `1.26.1-alpine` to `1.26.2-alpine`")
+		assert.NotContains(t, msg, "body", "only the first line of each source message should be included")
+	})
+}
+
+func TestBuildAggregatePRTitle(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should pass the single updater PR title through verbatim", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		applied := []commands.AppliedUpdaterResult{
+			commands.NewAppliedUpdaterResult("golang", &repositories.LocalUpdateResult{
+				PRTitle: "chore(deps): upgraded Go version to `1.26.2` and updated all dependencies",
+			}),
+		}
+
+		// when
+		title := commands.BuildAggregatePRTitle(applied)
+
+		// then
+		assert.Equal(t, "chore(deps): upgraded Go version to `1.26.2` and updated all dependencies", title)
+	})
+
+	t.Run("should list contributing updater names for multi-updater runs", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		applied := []commands.AppliedUpdaterResult{
+			commands.NewAppliedUpdaterResult("golang", &repositories.LocalUpdateResult{PRTitle: "Go bump"}),
+			commands.NewAppliedUpdaterResult("dockerfile", &repositories.LocalUpdateResult{PRTitle: "Dockerfile bump"}),
+		}
+
+		// when
+		title := commands.BuildAggregatePRTitle(applied)
+
+		// then
+		assert.Equal(t, "chore(deps): bumped dependencies (golang, dockerfile)", title)
+	})
+}
+
+func TestBuildAggregatePRDescription(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should pass the single updater PR description through verbatim", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		applied := []commands.AppliedUpdaterResult{
+			commands.NewAppliedUpdaterResult("golang", &repositories.LocalUpdateResult{
+				PRDescription: "## Summary\n\nGo upgrade.",
+			}),
+		}
+
+		// when
+		desc := commands.BuildAggregatePRDescription(applied)
+
+		// then
+		assert.Equal(t, "## Summary\n\nGo upgrade.", desc)
+	})
+
+	t.Run("should render Summary, contributing list, and per-updater sections", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		applied := []commands.AppliedUpdaterResult{
+			commands.NewAppliedUpdaterResult("golang", &repositories.LocalUpdateResult{
+				PRTitle:       "chore(deps): upgraded Go to `1.26.2`",
+				PRDescription: "go body",
+			}),
+			commands.NewAppliedUpdaterResult("dockerfile", &repositories.LocalUpdateResult{
+				PRTitle:       "chore(deps): upgraded `golang` to `1.26.2-alpine`",
+				PRDescription: "dockerfile body",
+			}),
+		}
+
+		// when
+		desc := commands.BuildAggregatePRDescription(applied)
+
+		// then
+		assert.Contains(t, desc, "## Summary")
+		assert.Contains(t, desc, "Contributing updaters:")
+		assert.Contains(t, desc, "- `golang` — chore(deps): upgraded Go to `1.26.2`")
+		assert.Contains(t, desc, "- `dockerfile` — chore(deps): upgraded `golang` to `1.26.2-alpine`")
+		assert.Contains(t, desc, "## golang")
+		assert.Contains(t, desc, "go body")
+		assert.Contains(t, desc, "## dockerfile")
+		assert.Contains(t, desc, "dockerfile body")
+	})
+
+	t.Run("should use a placeholder when an updater provides no description", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		applied := []commands.AppliedUpdaterResult{
+			commands.NewAppliedUpdaterResult("golang", &repositories.LocalUpdateResult{
+				PRTitle:       "Go bump",
+				PRDescription: "",
+			}),
+			commands.NewAppliedUpdaterResult("dockerfile", &repositories.LocalUpdateResult{
+				PRTitle:       "Dockerfile bump",
+				PRDescription: "real body",
+			}),
+		}
+
+		// when
+		desc := commands.BuildAggregatePRDescription(applied)
+
+		// then
+		assert.Contains(t, desc, "_(no description provided by updater)_")
+		assert.Contains(t, desc, "real body")
+	})
+}
+
+func TestAnyAutoComplete(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return false for an empty updater slice", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var updaters []commands.ApplicableUpdater
+
+		// when
+		result := commands.AnyAutoComplete(updaters)
+
+		// then
+		assert.False(t, result)
+	})
+
+	t.Run("should return false when no updater requested auto-complete", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		updaters := []commands.ApplicableUpdater{
+			commands.NewApplicableUpdaterForTest(
+				&doubles.DummyUpdaterRepository{},
+				entities.UpdateOptions{AutoComplete: false},
+			),
+			commands.NewApplicableUpdaterForTest(
+				&doubles.DummyUpdaterRepository{},
+				entities.UpdateOptions{AutoComplete: false},
+			),
+		}
+
+		// when
+		result := commands.AnyAutoComplete(updaters)
+
+		// then
+		assert.False(t, result)
+	})
+
+	t.Run("should return true when at least one updater requested auto-complete", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		updaters := []commands.ApplicableUpdater{
+			commands.NewApplicableUpdaterForTest(
+				&doubles.DummyUpdaterRepository{},
+				entities.UpdateOptions{AutoComplete: false},
+			),
+			commands.NewApplicableUpdaterForTest(
+				&doubles.DummyUpdaterRepository{},
+				entities.UpdateOptions{AutoComplete: true},
+			),
+		}
+
+		// when
+		result := commands.AnyAutoComplete(updaters)
+
+		// then
+		assert.True(t, result)
+	})
+}
+
+func TestAllDryRun(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return false for an empty updater slice", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var updaters []commands.ApplicableUpdater
+
+		// when
+		result := commands.AllDryRun(updaters)
+
+		// then
+		assert.False(t, result)
+	})
+
+	t.Run("should return true when every updater is dry-run", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		updaters := []commands.ApplicableUpdater{
+			commands.NewApplicableUpdaterForTest(
+				&doubles.DummyUpdaterRepository{}, entities.UpdateOptions{DryRun: true}),
+			commands.NewApplicableUpdaterForTest(
+				&doubles.DummyUpdaterRepository{}, entities.UpdateOptions{DryRun: true}),
+		}
+
+		// when
+		result := commands.AllDryRun(updaters)
+
+		// then
+		assert.True(t, result)
+	})
+
+	t.Run("should return false when at least one updater is not dry-run", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		updaters := []commands.ApplicableUpdater{
+			commands.NewApplicableUpdaterForTest(
+				&doubles.DummyUpdaterRepository{}, entities.UpdateOptions{DryRun: true}),
+			commands.NewApplicableUpdaterForTest(
+				&doubles.DummyUpdaterRepository{}, entities.UpdateOptions{DryRun: false}),
+		}
+
+		// when
+		result := commands.AllDryRun(updaters)
+
+		// then
+		assert.False(t, result)
+	})
+}
+
+func TestResolveAggregateTargetBranch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should fall back to the repo default branch when no override is set", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repo := entities.Repository{DefaultBranch: "refs/heads/main"}
+		updaters := []commands.ApplicableUpdater{
+			commands.NewApplicableUpdaterForTest(
+				&doubles.DummyUpdaterRepository{}, entities.UpdateOptions{}),
+		}
+
+		// when
+		target := commands.ResolveAggregateTargetBranch(repo, updaters)
+
+		// then
+		assert.Equal(t, "refs/heads/main", target)
+	})
+
+	t.Run("should honor the first non-empty TargetBranch override", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repo := entities.Repository{DefaultBranch: "refs/heads/main"}
+		updaters := []commands.ApplicableUpdater{
+			commands.NewApplicableUpdaterForTest(
+				&doubles.DummyUpdaterRepository{},
+				entities.UpdateOptions{TargetBranch: "develop"},
+			),
+		}
+
+		// when
+		target := commands.ResolveAggregateTargetBranch(repo, updaters)
+
+		// then
+		assert.Equal(t, "refs/heads/develop", target)
+	})
+}
+
+func TestFirstLine(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return the first newline-delimited segment", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		s := "subject line\nbody line 1\nbody line 2"
+
+		// when
+		result := commands.FirstLine(s)
+
+		// then
+		assert.Equal(t, "subject line", result)
+	})
+
+	t.Run("should return the whole string when there is no newline", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		s := "single line"
+
+		// when
+		result := commands.FirstLine(s)
+
+		// then
+		assert.Equal(t, "single line", result)
 	})
 }
