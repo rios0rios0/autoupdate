@@ -12,6 +12,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
 
@@ -297,6 +298,94 @@ func (c *BatchGitContext) DropStash() {
 	cmd.Dir = c.tmpDir
 	_ = cmd.Run()
 	c.stashRef = ""
+}
+
+// snapshotCommitSubject is the sentinel subject line used by AdvanceSnapshot
+// for the throw-away commits that materialize per-updater rollback points.
+// These commits never reach the remote: FlattenToWorktree collapses them
+// before CommitSignedAndPush builds the final aggregate commit.
+const snapshotCommitSubject = "__autoupdate_snapshot__"
+
+// HeadHash returns the current HEAD commit hash. The aggregate pipeline
+// uses this to capture a baseline before running each updater so it can
+// roll back only that updater's partial writes if it fails.
+func (c *BatchGitContext) HeadHash() (plumbing.Hash, error) {
+	head, err := c.repo.Head()
+	if err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("failed to resolve HEAD: %w", err)
+	}
+	return head.Hash(), nil
+}
+
+// RestoreSnapshot hard-resets the worktree to the given commit without
+// switching branches. This is the rollback primitive for per-updater
+// failure isolation in the aggregate pipeline: after a failing updater
+// leaves the worktree in a half-modified state, callers restore the last
+// known-good snapshot so the next updater starts from the accumulated
+// state of all prior successful updaters.
+func (c *BatchGitContext) RestoreSnapshot(hash plumbing.Hash) error {
+	if err := c.workTree.Reset(&git.ResetOptions{
+		Mode:   git.HardReset,
+		Commit: hash,
+	}); err != nil {
+		return fmt.Errorf("failed to restore snapshot %s: %w", hash.String()[:7], err)
+	}
+	return nil
+}
+
+// AdvanceSnapshot stages all current worktree changes and commits them as
+// a throw-away snapshot on the current branch, returning the new HEAD
+// hash. The commit is intentionally unsigned and carries
+// snapshotCommitSubject so reviewers can recognise it if it ever leaks.
+// FlattenToWorktree collapses these commits before the aggregate pipeline
+// produces the real signed commit, so they never reach the remote.
+//
+// The prev hash is passed in for traceability/logging only; the new
+// commit is created on top of whatever HEAD currently points at.
+func (c *BatchGitContext) AdvanceSnapshot(prev plumbing.Hash) (plumbing.Hash, error) {
+	if err := gitops.StageAll(c.workTree); err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("failed to stage snapshot: %w", err)
+	}
+	commit, err := c.workTree.Commit(snapshotCommitSubject, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "autoupdate[bot]",
+			Email: "autoupdate[bot]@users.noreply.github.com",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		return plumbing.ZeroHash, fmt.Errorf(
+			"failed to create snapshot commit (prev=%s): %w",
+			prev.String()[:7], err,
+		)
+	}
+	return commit, nil
+}
+
+// FlattenToWorktree collapses any snapshot commits made via AdvanceSnapshot
+// back into the worktree and index, so a subsequent CommitSignedAndPush
+// produces one signed commit representing the full aggregate diff. It
+// works by mixed-resetting the current branch back to the default branch
+// head; nothing has been pushed yet, so rewriting the branch here is safe.
+//
+// MixedReset (rather than SoftReset) is used so the change set lands in
+// both the index and the working tree — CommitSignedAndPush calls
+// HasChanges() / WorktreeIsClean() which inspect the working tree rather
+// than the index, so the diff must be visible there.
+func (c *BatchGitContext) FlattenToWorktree() error {
+	defaultRef, err := c.repo.Reference(
+		plumbing.NewBranchReferenceName(c.defaultBranch), true,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to resolve default branch ref: %w", err)
+	}
+	if resetErr := c.workTree.Reset(&git.ResetOptions{
+		Mode:   git.MixedReset,
+		Commit: defaultRef.Hash(),
+	}); resetErr != nil {
+		return fmt.Errorf("failed to flatten worktree: %w", resetErr)
+	}
+	return nil
 }
 
 // Close removes the temporary directory created during cloning.
