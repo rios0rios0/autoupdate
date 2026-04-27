@@ -1,6 +1,6 @@
 # AutoUpdate
 
-AutoUpdate is a Go CLI tool that automatically discovers repositories across multiple Git providers (GitHub, GitLab, Azure DevOps), scans them for outdated dependencies, and creates Pull Requests with version upgrades. It supports Terraform modules, Go, Python, and JavaScript projects, with an extensible updater plugin interface for future ecosystems.
+AutoUpdate is a Go CLI tool that automatically discovers repositories across multiple Git providers (GitHub, GitLab, Azure DevOps), scans them for outdated dependencies, and creates Pull Requests with version upgrades. It supports Terraform, Go, Python, JavaScript, Ruby, Java, C#, Dockerfile, and CI/CD Pipeline ecosystems, with an extensible updater plugin interface.
 
 Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.
 
@@ -48,6 +48,8 @@ Note: The CI/CD pipeline automatically uses these scripts via the reusable workf
 ### Usage Modes
 - **Standalone (local) mode**: `./bin/autoupdate [path]` — updates dependencies in a local repository, detects project type, and creates a PR
 - **Batch (run) mode**: `./bin/autoupdate run` — reads config file, discovers repositories from all configured providers and orgs, and creates update PRs
+- **Self-update**: `./bin/autoupdate self-update` — downloads and installs the latest release from GitHub
+- **Version**: `./bin/autoupdate version` — prints the current build version
 
 ### Installation
 - Build first: `make build`
@@ -80,72 +82,36 @@ After making changes, ALWAYS run through these validation steps:
 - **Tests**: <1 second (cached), ~7 seconds clean run. NEVER CANCEL. Set timeout to 30+ minutes.
 - **Go mod operations**: <1 second after first download. Set timeout to 15+ minutes.
 
-## Common Tasks
+## Architecture
 
-### Repository Structure (Clean Architecture)
+Clean Architecture with `domain`/`infrastructure` split, wired via `go.uber.org/dig` dependency injection.
+
+### Layer Flow
+
 ```
-autoupdate/
-├── cmd/
-│   └── autoupdate/
-│       ├── main.go                # Entry point; builds Cobra root command and subcommands
-│       └── dig.go                 # DI container wiring (go.uber.org/dig)
-├── configs/
-│   └── autoupdate.yaml            # Configuration template
-├── internal/
-│   ├── app.go                     # AppInternal: aggregates all controllers
-│   ├── container.go               # Top-level DIG provider registration (bottom-up)
-│   ├── domain/
-│   │   ├── commands/              # Domain use-case commands
-│   │   │   ├── local_command.go   # LocalCommand: standalone local-repo update
-│   │   │   └── run_command.go     # RunCommand: batch multi-provider update
-│   │   ├── entities/              # Domain entities and configuration
-│   │   │   ├── controller.go      # Controller interface and ControllerBind
-│   │   │   ├── dependency.go      # Dependency entity (re-exported from gitforge)
-│   │   │   ├── pull_request.go    # PullRequest entity (re-exported from gitforge)
-│   │   │   ├── repository.go      # Repository entity (re-exported from gitforge)
-│   │   │   ├── settings.go        # Settings: YAML config, env var expansion, auto-discovery
-│   │   │   └── update_options.go  # UpdateOptions for updater invocations
-│   │   └── repositories/          # Repository interfaces (ports)
-│   │       ├── provider_repository.go  # ProviderRepository interface
-│   │       └── updater_repository.go   # UpdaterRepository interface
-│   └── infrastructure/
-│       ├── controllers/           # Cobra CLI controllers (adapters)
-│       │   ├── local_controller.go  # LocalController: handles root path argument
-│       │   └── run_controller.go    # RunController: handles "run" subcommand
-│       └── repositories/          # Infrastructure implementations
-│           ├── provider_registry.go  # ProviderRegistry: maps provider type -> factory
-│           ├── updater_registry.go   # UpdaterRegistry: holds all updater implementations
-│           ├── container.go          # Registers providers/updaters with DIG
-│           ├── gitlocal/             # Local Git operations (go-git)
-│           ├── golang/               # Go dependency updater
-│           ├── javascript/           # JavaScript (npm) dependency updater
-│           ├── python/               # Python (pip/pyproject) dependency updater
-│           └── terraform/            # Terraform module updater
-├── test/
-│   └── domain/
-│       ├── commanddoubles/        # Stub commands for unit tests
-│       │   ├── stub_local_command.go
-│       │   └── stub_run_command.go
-│       └── entitybuilders/        # Test builders for domain entities
-│           ├── dependency_builder.go
-│           └── repository_builder.go
-├── Makefile                       # Build automation
-├── go.mod                         # Go module definition
-└── .github/workflows/             # CI/CD pipeline
+Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapters)
 ```
 
-### Key Files and Their Purpose
-- `cmd/autoupdate/main.go` - Entry point; builds Cobra root command with `--config`, `--dry-run`, `--verbose`, `--token` flags
-- `cmd/autoupdate/dig.go` - DI container wiring using `go.uber.org/dig`
-- `internal/app.go` - `AppInternal` aggregates all registered controllers
-- `internal/container.go` - Registers all layers bottom-up (repos -> entities -> commands -> controllers)
-- `internal/domain/commands/run_command.go` - Orchestrates: discover repos -> detect ecosystems -> create PRs
-- `internal/domain/commands/local_command.go` - Standalone mode: detect project type, upgrade deps, create PR
-- `internal/domain/entities/settings.go` - YAML config loading, env var expansion (`${VAR}`), token file resolution, auto-discovery
-- `internal/infrastructure/controllers/run_controller.go` - Handles `run` subcommand flags and delegates to `RunCommand`
-- `internal/infrastructure/controllers/local_controller.go` - Handles root path argument and delegates to `LocalCommand`
-- `internal/infrastructure/repositories/container.go` - Wires gitforge providers and all updater repositories
-- `configs/autoupdate.yaml` - Configuration template with provider/updater examples
+- **Entry point**: `cmd/autoupdate/main.go` builds Cobra commands, `cmd/autoupdate/dig.go` wires the DI container
+- **DI registration**: `internal/container.go` registers all layers bottom-up (repos -> entities -> commands -> controllers)
+- **Domain commands**: `internal/domain/commands/` — `LocalCommand`, `RunCommand`, `SelfUpdateCommand`, `VersionCommand`
+- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `ProviderRepository`, `SelfUpdateRepository`
+- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem (terraform, golang, python, javascript, ruby, java, csharp, dockerfile, pipeline), plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations), and `selfupdate`
+- **Support utilities**: `internal/support/` — filesystem helpers and remote file checker bridging `langforge` with `gitforge`
+- **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
+
+### Key External Libraries
+
+- **gitforge** (`rios0rios0/gitforge`): Abstraction over GitHub/GitLab/Azure DevOps APIs. Domain entities (`Repository`, `PullRequest`, `Dependency`) are re-exported as type aliases from gitforge.
+- **langforge** (`rios0rios0/langforge`): Language/ecosystem detection and shared version fetchers.
+- **cliforge** (`rios0rios0/cliforge`): Shared CLI utilities including the self-update mechanism.
+- **testkit** (`rios0rios0/testkit`): Base builder pattern for test data construction.
+
+### Adding a New Updater
+
+1. Create a new package under `internal/infrastructure/repositories/<ecosystem>/`
+2. Implement `UpdaterRepository` interface (`Name()`, `Detect()`, `CreateUpdatePRs()`)
+3. Register in `internal/infrastructure/repositories/container.go`
 
 ### Configuration System
 - Config auto-discovery searches: `.`, `.config`, `configs`, `$HOME`, `$HOME/.config` for `.autoupdate.{yml,yaml}` and `autoupdate.{yml,yaml}`
@@ -155,86 +121,18 @@ autoupdate/
 - Updaters can be enabled/disabled with per-updater `auto_complete` and `target_branch`
 
 ### Commit Signing
-When `commit.gpgsign=true` is set in git config (local or global), commits are automatically signed:
-- **SSH signing**: detected when `gpg.format=ssh`; reads the signing key path from `user.signingkey`
-- **GPG signing**: default when `gpg.format` is unset or `openpgp`; reads the GPG key ID from `user.signingkey` and passphrase from `GPG_PASSPHRASE` environment variable
-- Signing is transport-agnostic (embedded in the commit object) and works with both SSH and HTTPS push
+When `commit.gpgsign=true` is set in git config, commits are automatically signed using GPG or SSH (based on `gpg.format`). The signing key is read from `user.signingkey`. GPG passphrase is read from `GPG_PASSPHRASE` env var.
 
 ### Push Transport (Local Mode)
 Push transport is auto-detected from the origin remote URL:
 - **SSH** (`git@...`): Uses system SSH keys via gitforge's `PushChangesSSH`
 - **HTTPS** (`https://...`): Uses gitforge's adapter pattern with auth method retry
-- The `PushAuthResolver` interface in `gitlocal/` abstracts the `ProviderRegistry` to avoid import cycles between `gitlocal` and the parent `repositories` package
-
-### Provider Support
-All Git provider implementations come from the `github.com/rios0rios0/gitforge` library:
-- **GitHub**: via `gitforge/pkg/providers/infrastructure/github`
-- **GitLab**: via `gitforge/pkg/providers/infrastructure/gitlab`
-- **Azure DevOps**: via `gitforge/pkg/providers/infrastructure/azuredevops`
-
-### Updater Support
-- **Terraform**: Scans `.tf` files for Git module sources, checks tags for newer versions
-- **Go**: Detects `go.mod` files, runs `go get -u` and `go mod tidy`
-- **Python**: Detects `requirements.txt` or `pyproject.toml`, upgrades pip dependencies
-- **JavaScript**: Detects `package.json`, upgrades npm dependencies
-
-### CLI Flags
-**Root / global (persistent) flags:**
-- `--config`, `-c` — Path to config file (default: auto-detect)
-- `--token` — Auth token for the Git provider (overrides env var detection)
-- `--dry-run` — Show what would be done without making changes
-- `--verbose`, `-v` — Enable verbose output
-
-**`run` subcommand flags:**
-- `--provider` — Only process this provider (`github`, `gitlab`, `azuredevops`)
-- `--org` — Only process this organization/group
-- `--updater` — Only run this updater (`terraform`, `golang`, `python`, `javascript`)
-
-### Dependency Injection
-The project uses `go.uber.org/dig` for dependency injection. Registration happens bottom-up in `internal/container.go`: infrastructure repositories -> domain entities -> domain commands -> controllers -> `AppInternal`.
-
-### Entity Types
-Core entity types (`Repository`, `File`, `BranchInput`, `PullRequestInput`, `PullRequest`, `FileChange`) are re-exported as type aliases from the `gitforge` library in `internal/domain/entities/`.
+- The `PushAuthResolver` interface in `gitlocal/` abstracts the `ProviderRegistry` to avoid import cycles
 
 ### Testing Infrastructure
 - All unit tests are tagged with `//go:build unit` and must be run with `-tags unit`
-- Uses testify for assertions (`assert`/`require`) — no mock framework
-- Test stubs in `test/domain/commanddoubles/` (`StubLocalCommand`, `StubRunCommand`)
-- Test builders in `test/domain/entitybuilders/` (`DependencyBuilder`, `RepositoryBuilder`)
+- Uses testify for assertions (`assert`/`require`) — prefer stubs over mocks
+- Test doubles in `test/domain/commanddoubles/` (stubs), `test/domain/entitybuilders/` (builders), and `test/infrastructure/repositorydoubles/` (stubs, spies, builders)
 - Uses `github.com/rios0rios0/testkit` for additional test helpers
 - BDD-style tests with Given/When/Then comments
 - Parallel test execution via `t.Run` subtests
-
-### Development Workflow
-1. Make code changes
-2. Run `go fmt ./...` to format
-3. Run `go vet ./...` to check for issues
-4. Run `go test -tags unit ./...` to verify tests pass
-5. Run `make build` to ensure clean build
-6. Test binary with `./bin/autoupdate --help`
-7. Test functional operation with `./bin/autoupdate run --dry-run`
-8. (Optional) Run full linting with pipeline script for final validation
-
-### Common Development Commands
-```bash
-# Full development cycle
-go mod download && make build && go test -tags unit ./... && ./bin/autoupdate --help
-
-# Quick test cycle
-go test -tags unit ./... && make build
-
-# Format and lint (quick)
-go fmt ./... && go vet ./...
-
-# Full lint using pipeline scripts
-git clone https://github.com/rios0rios0/pipelines.git /tmp/pipelines 2>/dev/null || true
-/tmp/pipelines/global/scripts/GoLang/GoLangCI-Lint/run.sh
-
-# Clean rebuild
-rm -rf bin && make build
-
-# Run directly without building
-go run ./cmd/autoupdate --help
-```
-
-Always validate any changes by building and testing the actual binary functionality, not just unit tests.
