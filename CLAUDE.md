@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Does
 
-AutoUpdate is a self-hosted Dependabot alternative. It discovers repositories across Git providers (GitHub, GitLab, Azure DevOps), detects outdated dependencies, and creates Pull Requests with version upgrades. Supports Terraform, Go, Python, and JavaScript ecosystems.
+AutoUpdate is a self-hosted Dependabot alternative. It discovers repositories across Git providers (GitHub, GitLab, Azure DevOps), detects outdated dependencies, and creates Pull Requests with version upgrades. Supports Terraform, Go, Python, JavaScript, Ruby, Java, C#, Dockerfile, and CI/CD Pipeline ecosystems.
 
-Two modes: **local** (`autoupdate [path]`) updates a single repo, **batch** (`autoupdate run`) reads a config file and processes multiple repos/providers.
+Three modes: **local** (`autoupdate [path]`) updates a single repo, **batch** (`autoupdate run`) reads a config file and processes multiple repos/providers, **self-update** (`autoupdate self-update`) downloads the latest release. A `version` command prints the current build version.
 
 ## Build and Test Commands
 
@@ -40,15 +40,17 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 
 - **Entry point**: `cmd/autoupdate/main.go` builds Cobra commands, `cmd/autoupdate/dig.go` wires the DI container
 - **DI registration**: `internal/container.go` registers all layers bottom-up (repos -> entities -> commands -> controllers)
-- **Domain commands**: `internal/domain/commands/` — `LocalCommand` (single repo) and `RunCommand` (batch mode)
-- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository` and `ProviderRepository` interfaces
-- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem
+- **Domain commands**: `internal/domain/commands/` — `LocalCommand` (single repo), `RunCommand` (batch mode), `SelfUpdateCommand`, and `VersionCommand`
+- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `ProviderRepository`, and `SelfUpdateRepository` interfaces
+- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution) and `selfupdate`
+- **Support utilities**: `internal/support/` — filesystem helpers and remote file checker bridging `langforge` with `gitforge`
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
 
 ### Key External Libraries
 
 - **gitforge** (`rios0rios0/gitforge`): Abstraction over GitHub/GitLab/Azure DevOps APIs. Domain entities (`Repository`, `PullRequest`, `Dependency`) are re-exported as type aliases from gitforge.
-- **langforge** (`rios0rios0/langforge`): Language/ecosystem detection (detects Go, Python, JS, Terraform from file patterns).
+- **langforge** (`rios0rios0/langforge`): Language/ecosystem detection and shared version fetchers.
+- **cliforge** (`rios0rios0/cliforge`): Shared CLI utilities including the self-update mechanism.
 - **testkit** (`rios0rios0/testkit`): Base builder pattern for test data construction.
 
 ### Adding a New Updater
@@ -79,5 +81,5 @@ Auto-discovery searches `.`, `.config`, `configs`, `$HOME`, `$HOME/.config` for 
 - External test packages (e.g., `commands_test` for package `commands`)
 - BDD structure with `// given`, `// when`, `// then` comments
 - Parallel execution via `t.Parallel()` and `t.Run()` subtests
-- Test doubles in `test/domain/commanddoubles/` (stubs) and `test/domain/entitybuilders/` (builders)
+- Test doubles in `test/domain/commanddoubles/` (stubs), `test/domain/entitybuilders/` (builders), and `test/infrastructure/repositorydoubles/` (stubs, spies, builders)
 - Uses `stretchr/testify` for assertions — prefer stubs over mocks
