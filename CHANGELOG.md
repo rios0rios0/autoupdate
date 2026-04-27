@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.14.6] - 2026-04-27
+
 ### Changed
 
 - refreshed `CLAUDE.md` and `.github/copilot-instructions.md` to document new ecosystems (Ruby, Java, C#, Dockerfile, Pipeline), `self-update`/`version` commands, `cliforge` dependency, and additional domain ports
