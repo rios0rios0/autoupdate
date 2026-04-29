@@ -5,10 +5,10 @@ go 1.26.2
 require (
 	github.com/go-git/go-git/v5 v5.18.0
 	github.com/hashicorp/hcl/v2 v2.24.0
-	github.com/rios0rios0/cliforge v0.3.3
-	github.com/rios0rios0/gitforge v0.9.4
-	github.com/rios0rios0/langforge v0.6.2
-	github.com/rios0rios0/testkit v0.1.2
+	github.com/rios0rios0/cliforge v0.3.4
+	github.com/rios0rios0/gitforge v0.9.5
+	github.com/rios0rios0/langforge v0.6.3
+	github.com/rios0rios0/testkit v0.2.0
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
