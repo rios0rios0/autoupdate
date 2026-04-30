@@ -16,10 +16,12 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-04-30
+
 ### Added
 
-- added per-repository `.autoupdate.yaml` opt-out file (`skip: true` short-circuits both `autoupdate run` and `autoupdate .` before any updater work). The optional `reason` field is logged when the skip fires.
 - added `exclude_repos` to the global `autoupdate.yaml`: a right-anchored glob list (`path.Match` semantics) matched against `<org>/<repo>` for GitHub/GitLab and `<org>/<project>/<repo>` for Azure DevOps. Honored in batch mode and in `autoupdate .` when a config file is loadable.
+- added per-repository `.autoupdate.yaml` opt-out file (`skip: true` short-circuits both `autoupdate run` and `autoupdate .` before any updater work). The optional `reason` field is logged when the skip fires.
 
 ### Changed
 
