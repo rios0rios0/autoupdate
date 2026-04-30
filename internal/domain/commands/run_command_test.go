@@ -1603,6 +1603,225 @@ func TestFilterRepositories(t *testing.T) {
 		// then
 		assert.Empty(t, result)
 	})
+
+	t.Run("should drop repos matching the global exclude_repos list", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repos := []entities.Repository{
+			{Organization: "ZestSecurity", Project: "frontend", Name: "opensearch-dashboards"},
+			{Organization: "ZestSecurity", Project: "frontend", Name: "oui"},
+			{Organization: "ZestSecurity", Project: "frontend", Name: "regular"},
+		}
+		settings := &entities.Settings{ExcludeRepos: []string{
+			"ZestSecurity/frontend/opensearch-dashboards",
+			"*/oui",
+		}}
+
+		// when
+		result := commands.FilterRepositories(repos, settings)
+
+		// then
+		require.Len(t, result, 1)
+		assert.Equal(t, "regular", result[0].Name)
+	})
+}
+
+func TestRunCommandRunsExcludeRepos(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should not call Detect on repos excluded by exclude_repos", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		excluded := entitybuilders.NewRepositoryBuilder().
+			WithID("excl").
+			WithName("opensearch-dashboards").
+			WithOrganization("ZestSecurity").
+			WithDefaultBranch("refs/heads/main").
+			BuildRepository()
+		excluded.Project = "frontend"
+
+		kept := entitybuilders.NewRepositoryBuilder().
+			WithID("kept").
+			WithName("regular").
+			WithOrganization("ZestSecurity").
+			WithDefaultBranch("refs/heads/main").
+			BuildRepository()
+
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithProviderName("azuredevops").
+			WithToken("ado-token").
+			WithRepositories([]entities.Repository{excluded, kept}).
+			BuildSpy()
+
+		updaterSpy := doubles.NewSpyUpdaterRepositoryBuilder().
+			WithUpdaterName("terraform").
+			WithDetectResult(true).
+			WithPRs([]entities.PullRequest{{ID: 1, Title: "Update", URL: "https://example.com/pr/1"}}).
+			BuildSpy()
+
+		providerRegistry := infraRepos.NewProviderRegistry()
+		providerRegistry.Register("azuredevops", func(_ string) repositories.ProviderRepository {
+			return spy
+		})
+
+		updaterRegistry := infraRepos.NewUpdaterRegistry()
+		updaterRegistry.Register(updaterSpy)
+
+		cmd := commands.NewRunCommand(providerRegistry, updaterRegistry)
+
+		settings := entitybuilders.NewSettingsBuilder().
+			WithProviders([]entities.ProviderConfig{
+				entitybuilders.NewProviderConfigBuilder().
+					WithType("azuredevops").
+					WithToken("ado-token").
+					WithOrganizations([]string{"ZestSecurity"}).
+					BuildProviderConfig(),
+			}).
+			WithExcludeRepos([]string{"ZestSecurity/frontend/opensearch-dashboards"}).
+			BuildSettings()
+
+		// when
+		err := cmd.Execute(context.Background(), settings, commands.RunOptions{})
+
+		// then
+		require.NoError(t, err)
+		require.Len(t, updaterSpy.DetectedRepos, 1)
+		assert.Equal(t, "regular", updaterSpy.DetectedRepos[0].Name)
+	})
+}
+
+func TestRunCommandRunsRepoConfigSkip(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should not invoke updaters on a repo that requested skip via .autoupdate.yaml", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repo := entitybuilders.NewRepositoryBuilder().
+			WithID("opted-out").
+			WithName("opensearch-dashboards").
+			WithOrganization("ZestSecurity").
+			WithDefaultBranch("refs/heads/main").
+			BuildRepository()
+
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithProviderName("github").
+			WithToken("test-token").
+			WithRepositories([]entities.Repository{repo}).
+			WithExistingFiles(map[string]bool{entities.RepoConfigFile: true}).
+			WithFileContents(map[string]string{
+				entities.RepoConfigFile: "skip: true\nreason: \"fork\"\n",
+			}).
+			BuildSpy()
+
+		updaterSpy := doubles.NewSpyUpdaterRepositoryBuilder().
+			WithUpdaterName("terraform").
+			WithDetectResult(true).
+			BuildSpy()
+
+		providerRegistry := infraRepos.NewProviderRegistry()
+		providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
+			return spy
+		})
+
+		updaterRegistry := infraRepos.NewUpdaterRegistry()
+		updaterRegistry.Register(updaterSpy)
+
+		cmd := commands.NewRunCommand(providerRegistry, updaterRegistry)
+
+		settings := entitybuilders.NewSettingsBuilder().
+			WithProviders([]entities.ProviderConfig{
+				entitybuilders.NewProviderConfigBuilder().
+					WithType("github").
+					WithToken("test-token").
+					WithOrganizations([]string{"ZestSecurity"}).
+					BuildProviderConfig(),
+			}).
+			BuildSettings()
+
+		// when
+		err := cmd.Execute(context.Background(), settings, commands.RunOptions{})
+
+		// then
+		require.NoError(t, err)
+		assert.Empty(t, updaterSpy.DetectedRepos,
+			"Detect must not be called for a repo that opted out via .autoupdate.yaml")
+	})
+}
+
+func TestIsSkippedByRepoConfig(t *testing.T) {
+	t.Parallel()
+
+	repo := entities.Repository{Organization: "org", Name: "repo"}
+
+	t.Run("should return false when repo has no .autoupdate.yaml", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{}).
+			BuildSpy()
+
+		// when
+		skipped := commands.IsSkippedByRepoConfig(context.Background(), spy, repo)
+
+		// then
+		assert.False(t, skipped)
+	})
+
+	t.Run("should return true when remote .autoupdate.yaml requests skip", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{entities.RepoConfigFile: true}).
+			WithFileContents(map[string]string{
+				entities.RepoConfigFile: "skip: true\nreason: \"fork\"\n",
+			}).
+			BuildSpy()
+
+		// when
+		skipped := commands.IsSkippedByRepoConfig(context.Background(), spy, repo)
+
+		// then
+		assert.True(t, skipped)
+	})
+
+	t.Run("should return false when remote .autoupdate.yaml has skip: false", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{entities.RepoConfigFile: true}).
+			WithFileContents(map[string]string{
+				entities.RepoConfigFile: "skip: false\n",
+			}).
+			BuildSpy()
+
+		// when
+		skipped := commands.IsSkippedByRepoConfig(context.Background(), spy, repo)
+
+		// then
+		assert.False(t, skipped)
+	})
+
+	t.Run("should fail open and continue when GetFileContent errors", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{entities.RepoConfigFile: true}).
+			WithFileContentErr(errors.New("network down")).
+			BuildSpy()
+
+		// when
+		skipped := commands.IsSkippedByRepoConfig(context.Background(), spy, repo)
+
+		// then
+		assert.False(t, skipped)
+	})
 }
 
 func TestBuildAggregateBranchName(t *testing.T) {

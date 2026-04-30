@@ -18,6 +18,14 @@ providers:
   #   organizations:
   #     - "my-group"
 
+# Skip specific repositories globally. Patterns are right-anchored
+# against <org>/<repo> (or <org>/<project>/<repo> on Azure DevOps), and
+# support `path.Match`-style globs (`*`, `?`, `[...]`) that do not cross
+# "/". A bare name matches the trailing segment of the key.
+# exclude_repos:
+#   - 'ZestSecurity/frontend/opensearch-dashboards'
+#   - '*/oui'
+
 # All updaters are enabled by default with auto_complete disabled.
 # Users only need to override specific fields; omitted fields keep these defaults.
 # The entire updaters section can be omitted to use all defaults.

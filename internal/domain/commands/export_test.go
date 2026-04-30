@@ -27,6 +27,15 @@ func FilterRepositories(
 	return filterRepositories(repos, settings)
 }
 
+// CheckLocalRepoConfigSkip exports checkLocalRepoConfigSkip for testing.
+var CheckLocalRepoConfigSkip = checkLocalRepoConfigSkip //nolint:gochecknoglobals // test export
+
+// IsExcludedByGlobalList exports isExcludedByGlobalList for testing.
+var IsExcludedByGlobalList = isExcludedByGlobalList //nolint:gochecknoglobals // test export
+
+// IsSkippedByRepoConfig exports isSkippedByRepoConfig for testing.
+var IsSkippedByRepoConfig = isSkippedByRepoConfig //nolint:gochecknoglobals // test export
+
 // RunLocalUpgrade exports runLocalUpgrade for testing.
 var RunLocalUpgrade = runLocalUpgrade //nolint:gochecknoglobals // test export
 
