@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/commands"
+	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	infraRepos "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
 	langEntities "github.com/rios0rios0/langforge/pkg/domain/entities"
 )
@@ -481,6 +483,233 @@ func TestParseGitRemote(t *testing.T) {
 		assert.Equal(t, "myorg", info.Org)
 		assert.Equal(t, "myproject", info.Project)
 		assert.Equal(t, "myrepo", info.RepoName)
+	})
+}
+
+func TestCheckLocalRepoConfigSkip(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return false when .autoupdate.yaml does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		dir := t.TempDir()
+
+		// when
+		skipped, err := commands.CheckLocalRepoConfigSkip(dir)
+
+		// then
+		require.NoError(t, err)
+		assert.False(t, skipped)
+	})
+
+	t.Run("should return true when .autoupdate.yaml has skip: true", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, ".autoupdate.yaml"),
+			[]byte("skip: true\nreason: \"fork\"\n"),
+			0o600,
+		))
+
+		// when
+		skipped, err := commands.CheckLocalRepoConfigSkip(dir)
+
+		// then
+		require.NoError(t, err)
+		assert.True(t, skipped)
+	})
+
+	t.Run("should return false when .autoupdate.yaml has skip: false", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, ".autoupdate.yaml"),
+			[]byte("skip: false\n"),
+			0o600,
+		))
+
+		// when
+		skipped, err := commands.CheckLocalRepoConfigSkip(dir)
+
+		// then
+		require.NoError(t, err)
+		assert.False(t, skipped)
+	})
+
+	t.Run("should propagate parse errors from malformed YAML", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, ".autoupdate.yaml"),
+			[]byte("skip: : not-yaml"),
+			0o600,
+		))
+
+		// when
+		_, err := commands.CheckLocalRepoConfigSkip(dir)
+
+		// then
+		require.Error(t, err)
+	})
+}
+
+func TestIsExcludedByGlobalList(t *testing.T) {
+	t.Parallel()
+
+	github := &commands.RemoteInfo{Org: "rios0rios0", RepoName: "autoupdate"}
+	ado := &commands.RemoteInfo{Org: "ZestSecurity", Project: "frontend", RepoName: "opensearch-dashboards"}
+
+	t.Run("should return false when settings is nil", func(t *testing.T) {
+		t.Parallel()
+
+		// given/when
+		excluded := commands.IsExcludedByGlobalList(nil, github)
+
+		// then
+		assert.False(t, excluded)
+	})
+
+	t.Run("should return false when ExcludeRepos is empty", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{}
+
+		// when
+		excluded := commands.IsExcludedByGlobalList(settings, github)
+
+		// then
+		assert.False(t, excluded)
+	})
+
+	t.Run("should return true for matching org/repo pattern", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{ExcludeRepos: []string{"rios0rios0/autoupdate"}}
+
+		// when
+		excluded := commands.IsExcludedByGlobalList(settings, github)
+
+		// then
+		assert.True(t, excluded)
+	})
+
+	t.Run("should match Azure DevOps three-segment paths", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{ExcludeRepos: []string{
+			"ZestSecurity/frontend/opensearch-dashboards",
+		}}
+
+		// when
+		excluded := commands.IsExcludedByGlobalList(settings, ado)
+
+		// then
+		assert.True(t, excluded)
+	})
+
+	t.Run("should match plain repo names via substring fallback", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{ExcludeRepos: []string{"opensearch-dashboards"}}
+
+		// when
+		excluded := commands.IsExcludedByGlobalList(settings, ado)
+
+		// then
+		assert.True(t, excluded)
+	})
+}
+
+func TestLocalCommandExecute(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should short-circuit when .autoupdate.yaml requests skip", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := initTestGitRepo(t, "main")
+		runGit(t, repoDir, "remote", "add", "origin", "git@github.com:rios0rios0/autoupdate.git")
+		require.NoError(t, os.WriteFile(
+			filepath.Join(repoDir, ".autoupdate.yaml"),
+			[]byte("skip: true\nreason: \"manually maintained\"\n"),
+			0o600,
+		))
+
+		registry := infraRepos.NewProviderRegistry()
+		cmd := commands.NewLocalCommand(registry)
+
+		// when
+		err := cmd.Execute(context.Background(), commands.LocalOptions{
+			RepoDir: repoDir,
+			DryRun:  true,
+		})
+
+		// then
+		// No git provider was registered and no project files exist; the
+		// only way Execute returns nil here is by short-circuiting via
+		// the .autoupdate.yaml skip check before any of those steps run.
+		require.NoError(t, err)
+	})
+
+	t.Run("should short-circuit when global exclude_repos matches", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := initTestGitRepo(t, "main")
+		runGit(t, repoDir, "remote", "add", "origin", "git@github.com:rios0rios0/autoupdate.git")
+
+		registry := infraRepos.NewProviderRegistry()
+		cmd := commands.NewLocalCommand(registry)
+
+		settings := &entities.Settings{ExcludeRepos: []string{"rios0rios0/autoupdate"}}
+
+		// when
+		err := cmd.Execute(context.Background(), commands.LocalOptions{
+			RepoDir:  repoDir,
+			DryRun:   true,
+			Settings: settings,
+		})
+
+		// then
+		// langforge would otherwise fail to detect a project type here;
+		// returning nil proves the exclude_repos check fired before
+		// language detection.
+		require.NoError(t, err)
+	})
+
+	t.Run("should propagate parse errors from .autoupdate.yaml", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := initTestGitRepo(t, "main")
+		require.NoError(t, os.WriteFile(
+			filepath.Join(repoDir, ".autoupdate.yaml"),
+			[]byte("skip: : not-yaml"),
+			0o600,
+		))
+
+		registry := infraRepos.NewProviderRegistry()
+		cmd := commands.NewLocalCommand(registry)
+
+		// when
+		err := cmd.Execute(context.Background(), commands.LocalOptions{
+			RepoDir: repoDir,
+			DryRun:  true,
+		})
+
+		// then
+		require.Error(t, err)
 	})
 }
 

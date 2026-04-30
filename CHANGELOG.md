@@ -16,8 +16,14 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added per-repository `.autoupdate.yaml` opt-out file (`skip: true` short-circuits both `autoupdate run` and `autoupdate .` before any updater work). The optional `reason` field is logged when the skip fires.
+- added `exclude_repos` to the global `autoupdate.yaml`: a right-anchored glob list (`path.Match` semantics) matched against `<org>/<repo>` for GitHub/GitLab and `<org>/<project>/<repo>` for Azure DevOps. Honored in batch mode and in `autoupdate .` when a config file is loadable.
+
 ### Changed
 
+- changed `LocalCommand` to detect the Git remote before language detection so excluded repos no longer require a supported project layout.
 - changed the Go module dependencies to their latest versions
 
 ## [0.14.7] - 2026-04-29

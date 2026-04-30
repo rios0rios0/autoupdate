@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path"
 	"strings"
 
 	configEntities "github.com/rios0rios0/gitforge/pkg/config/domain/entities"
@@ -24,6 +25,7 @@ type Settings struct {
 	Updaters               map[string]UpdaterConfig `yaml:"updaters"`
 	ExcludeForks           bool                     `yaml:"exclude_forks"`
 	ExcludeArchived        bool                     `yaml:"exclude_archived"`
+	ExcludeRepos           []string                 `yaml:"exclude_repos"`
 	GpgKeyPath             string                   `yaml:"gpg_key_path"`
 	GpgKeyPassphrase       string                   `yaml:"gpg_key_passphrase"`
 	GitHubAccessToken      string                   `yaml:"github_access_token"`
@@ -123,6 +125,17 @@ func ValidateSettings(settings *Settings) error {
 				"providers[%d].organizations must have at least one entry",
 				i,
 			)
+		}
+	}
+
+	for i, pattern := range settings.ExcludeRepos {
+		trimmed := strings.TrimSpace(pattern)
+		if trimmed == "" {
+			continue
+		}
+		if _, err := path.Match(trimmed, "probe"); err != nil {
+			return fmt.Errorf("exclude_repos[%d] %q: invalid glob pattern: %w",
+				i, pattern, err)
 		}
 	}
 

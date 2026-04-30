@@ -306,6 +306,67 @@ func TestValidateSettings(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "organizations must have at least one entry")
 	})
+
+	t.Run("should accept valid exclude_repos patterns", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{
+			Providers: []entities.ProviderConfig{
+				{Type: "github", Token: "tok", Organizations: []string{"org"}},
+			},
+			ExcludeRepos: []string{
+				"rios0rios0/autoupdate",
+				"*/oui",
+				"zestsecurity/frontend/*",
+				"opensearch-dashboards",
+			},
+		}
+
+		// when
+		err := entities.ValidateSettings(settings)
+
+		// then
+		assert.NoError(t, err)
+	})
+
+	t.Run("should ignore blank exclude_repos entries", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{
+			Providers: []entities.ProviderConfig{
+				{Type: "github", Token: "tok", Organizations: []string{"org"}},
+			},
+			ExcludeRepos: []string{"", "   ", "rios0rios0/autoupdate"},
+		}
+
+		// when
+		err := entities.ValidateSettings(settings)
+
+		// then
+		assert.NoError(t, err)
+	})
+
+	t.Run("should return error for invalid glob patterns in exclude_repos", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{
+			Providers: []entities.ProviderConfig{
+				{Type: "github", Token: "tok", Organizations: []string{"org"}},
+			},
+			ExcludeRepos: []string{"valid/repo", "bad/[unclosed"},
+		}
+
+		// when
+		err := entities.ValidateSettings(settings)
+
+		// then
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exclude_repos[1]")
+		assert.Contains(t, err.Error(), "bad/[unclosed")
+	})
 }
 
 func TestInsertChangelogEntry(t *testing.T) {
