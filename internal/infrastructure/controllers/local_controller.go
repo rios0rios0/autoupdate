@@ -34,6 +34,7 @@ Detects the project type, upgrades dependencies, and creates a pull request.`,
 func (it *LocalController) Execute(cmd *cobra.Command, args []string) {
 	ctx := context.Background()
 
+	configPath, _ := cmd.Flags().GetString("config")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	verbose, _ := cmd.Flags().GetBool("verbose")
 	token, _ := cmd.Flags().GetString("token")
@@ -43,11 +44,18 @@ func (it *LocalController) Execute(cmd *cobra.Command, args []string) {
 		repoDir = args[0]
 	}
 
+	settings, configErr := findReadAndValidateConfig(configPath)
+	if configErr != nil {
+		logger.Debugf("No usable autoupdate config for local mode: %v", configErr)
+		settings = nil
+	}
+
 	if err := it.command.Execute(ctx, commands.LocalOptions{
-		RepoDir: repoDir,
-		DryRun:  dryRun,
-		Verbose: verbose,
-		Token:   token,
+		RepoDir:  repoDir,
+		DryRun:   dryRun,
+		Verbose:  verbose,
+		Token:    token,
+		Settings: settings,
 	}); err != nil {
 		logger.Errorf("Local update failed: %v", err)
 	}
