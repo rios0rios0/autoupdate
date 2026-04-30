@@ -465,8 +465,8 @@ func isExcludedByGlobalList(settings *entities.Settings, remote *remoteInfo) boo
 	if !excluded {
 		return false
 	}
-	logger.Infof("Skipping %s/%s: matched exclude_repos pattern %q",
-		remote.Org, remote.RepoName, pattern)
+	logger.Infof("Skipping %s: matched exclude_repos pattern %q",
+		entities.RepoKey(repo), pattern)
 	return true
 }
 

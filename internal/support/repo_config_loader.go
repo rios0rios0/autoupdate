@@ -43,8 +43,8 @@ func LoadRemoteRepoConfig(
 
 	content, err := provider.GetFileContent(ctx, repo, entities.RepoConfigFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch %s for %s/%s: %w",
-			entities.RepoConfigFile, repo.Organization, repo.Name, err)
+		return nil, fmt.Errorf("failed to fetch %s for %s: %w",
+			entities.RepoConfigFile, entities.RepoKey(repo), err)
 	}
 	return entities.ParseRepoConfig([]byte(content))
 }

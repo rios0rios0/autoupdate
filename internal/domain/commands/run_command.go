@@ -157,17 +157,18 @@ func filterRepositories(
 
 	filtered := make([]entities.Repository, 0, len(repos))
 	for _, repo := range repos {
+		key := entities.RepoKey(repo)
 		if settings.ExcludeForks && repo.IsFork {
-			logger.Debugf("Skipping fork: %s/%s", repo.Organization, repo.Name)
+			logger.Debugf("Skipping fork: %s", key)
 			continue
 		}
 		if settings.ExcludeArchived && repo.IsArchived {
-			logger.Debugf("Skipping archived repo: %s/%s", repo.Organization, repo.Name)
+			logger.Debugf("Skipping archived repo: %s", key)
 			continue
 		}
 		if excluded, pattern := settings.IsRepoExcluded(repo); excluded {
-			logger.Infof("Skipping %s/%s: matched exclude_repos pattern %q",
-				repo.Organization, repo.Name, pattern)
+			logger.Infof("Skipping %s: matched exclude_repos pattern %q",
+				key, pattern)
 			continue
 		}
 		filtered = append(filtered, repo)
@@ -185,10 +186,11 @@ func isSkippedByRepoConfig(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 ) bool {
+	key := entities.RepoKey(repo)
 	cfg, err := support.LoadRemoteRepoConfig(ctx, provider, repo)
 	if err != nil {
-		logger.Warnf("Could not read %s for %s/%s: %v (continuing without it)",
-			entities.RepoConfigFile, repo.Organization, repo.Name, err)
+		logger.Warnf("Could not read %s for %s: %v (continuing without it)",
+			entities.RepoConfigFile, key, err)
 		return false
 	}
 	if !cfg.IsSkipped() {
@@ -196,11 +198,11 @@ func isSkippedByRepoConfig(
 	}
 
 	if cfg.Reason != "" {
-		logger.Infof("Skipping %s/%s: %s requested skip (%s)",
-			repo.Organization, repo.Name, entities.RepoConfigFile, cfg.Reason)
+		logger.Infof("Skipping %s: %s requested skip (%s)",
+			key, entities.RepoConfigFile, cfg.Reason)
 	} else {
-		logger.Infof("Skipping %s/%s: %s requested skip",
-			repo.Organization, repo.Name, entities.RepoConfigFile)
+		logger.Infof("Skipping %s: %s requested skip",
+			key, entities.RepoConfigFile)
 	}
 	return true
 }
