@@ -91,6 +91,17 @@ providers:
     organizations:
       - "my-group"
 
+# Skip specific repos globally without touching each project. Patterns
+# are right-anchored against the canonical key:
+#   - GitHub/GitLab: <org>/<repo>
+#   - Azure DevOps:  <org>/<project>/<repo>
+# Glob wildcards (*, ?, [...]) follow path.Match semantics and do not
+# cross "/". A bare name matches the repo's trailing segment.
+exclude_repos:
+  - 'ZestSecurity/frontend/opensearch-dashboards'  # exact ADO path
+  - '*/oui'                                         # any org or org/project ending in /oui
+  - 'rios0rios0/private-fork'                       # exact GitHub path
+
 # The updaters section is optional. All 6 updaters (terraform, golang,
 # python, javascript, pipeline, dockerfile) are enabled by default.
 # Default config is fetched from GitHub and merged with your overrides.
@@ -101,6 +112,24 @@ updaters:
   python:
     enabled: false
 ```
+
+### Skipping a Single Repository (Per-Repo Opt-Out)
+
+Drop a `.autoupdate.yaml` in the **target repository's root** to opt that
+project out of automated updates without touching the global config:
+
+```yaml
+# .autoupdate.yaml in the target repo
+skip: true
+reason: 'fork of upstream; rebase manually before any update'
+```
+
+The `reason` is optional but is logged when the skip fires, so reviewers
+can tell at a glance why a repo is being passed over. The file is
+honored in both `autoupdate run` (read via the provider API on the
+default branch) and `autoupdate .` (read directly from disk). Use it for
+forks you maintain by hand, frozen branches, or any project where
+automated PRs would create more work than they save.
 
 ### Token Resolution
 

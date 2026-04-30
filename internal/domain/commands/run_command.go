@@ -14,6 +14,7 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	infraRepos "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
+	"github.com/rios0rios0/autoupdate/internal/support"
 	gitops "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
 )
 
@@ -144,12 +145,13 @@ func (it *RunCommand) processOrganization(
 }
 
 // filterRepositories removes repositories that match the exclusion criteria
-// defined in the settings (e.g. forks, archived repos).
+// defined in the settings (e.g. forks, archived repos, or anything in the
+// global exclude_repos list).
 func filterRepositories(
 	repos []entities.Repository,
 	settings *entities.Settings,
 ) []entities.Repository {
-	if !settings.ExcludeForks && !settings.ExcludeArchived {
+	if !settings.ExcludeForks && !settings.ExcludeArchived && len(settings.ExcludeRepos) == 0 {
 		return repos
 	}
 
@@ -163,9 +165,44 @@ func filterRepositories(
 			logger.Debugf("Skipping archived repo: %s/%s", repo.Organization, repo.Name)
 			continue
 		}
+		if excluded, pattern := settings.IsRepoExcluded(repo); excluded {
+			logger.Infof("Skipping %s/%s: matched exclude_repos pattern %q",
+				repo.Organization, repo.Name, pattern)
+			continue
+		}
 		filtered = append(filtered, repo)
 	}
 	return filtered
+}
+
+// isSkippedByRepoConfig reads the target repository's .autoupdate.yaml
+// via the provider API. It returns true only when the file exists and
+// requests an explicit skip; transient fetch or parse errors fail open
+// (proceed with the update) so a flaky API call cannot silently disable
+// every update.
+func isSkippedByRepoConfig(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+) bool {
+	cfg, err := support.LoadRemoteRepoConfig(ctx, provider, repo)
+	if err != nil {
+		logger.Warnf("Could not read %s for %s/%s: %v (continuing without it)",
+			entities.RepoConfigFile, repo.Organization, repo.Name, err)
+		return false
+	}
+	if !cfg.IsSkipped() {
+		return false
+	}
+
+	if cfg.Reason != "" {
+		logger.Infof("Skipping %s/%s: %s requested skip (%s)",
+			repo.Organization, repo.Name, entities.RepoConfigFile, cfg.Reason)
+	} else {
+		logger.Infof("Skipping %s/%s: %s requested skip",
+			repo.Organization, repo.Name, entities.RepoConfigFile)
+	}
+	return true
 }
 
 // applicableUpdater holds an updater and its resolved options.
@@ -185,6 +222,10 @@ func (it *RunCommand) processRepository(
 	settings *entities.Settings,
 	runOpts RunOptions,
 ) ([]entities.PullRequest, int) {
+	if isSkippedByRepoConfig(ctx, provider, repo) {
+		return nil, 0
+	}
+
 	localUpdaters, legacyUpdaters := it.collectApplicableUpdaters(ctx, provider, repo, settings, runOpts)
 
 	var allPRs []entities.PullRequest

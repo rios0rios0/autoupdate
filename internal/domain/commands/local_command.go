@@ -14,6 +14,7 @@ import (
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
+	"github.com/rios0rios0/autoupdate/internal/support"
 	configHelpers "github.com/rios0rios0/gitforge/pkg/config/domain/helpers"
 	gitInfra "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
 	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
@@ -38,6 +39,10 @@ type LocalOptions struct {
 	DryRun  bool
 	Verbose bool
 	Token   string
+	// Settings is optional. When supplied, the global exclude_repos list
+	// is honored in local mode; missing settings means only the per-repo
+	// .autoupdate.yaml controls whether the update runs.
+	Settings *entities.Settings
 }
 
 // remoteInfo holds the parsed components of a Git remote URL.
@@ -92,6 +97,25 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 		return fmt.Errorf("invalid path: %w", err)
 	}
 
+	if skipped, skipErr := checkLocalRepoConfigSkip(repoDir); skipErr != nil {
+		return skipErr
+	} else if skipped {
+		return nil
+	}
+
+	// Detect Git provider from remote URL — done early so the global
+	// exclude_repos list can short-circuit before paying the cost of
+	// language detection or any updater work.
+	remote, parseErr := parseGitRemote(ctx, repoDir)
+	if parseErr != nil {
+		return fmt.Errorf("failed to detect git provider: %w", parseErr)
+	}
+	logger.Infof("Detected provider: %s, org: %s, repo: %s", remote.ProviderType, remote.Org, remote.RepoName)
+
+	if isExcludedByGlobalList(opts.Settings, remote) {
+		return nil
+	}
+
 	// Detect project type using langforge's registry
 	langProvider, detectErr := langRegistry.NewDefaultRegistry().Detect(repoDir)
 	if detectErr != nil {
@@ -99,13 +123,6 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 	}
 	projType := langProvider.Language()
 	logger.Infof("Detected project type: %s", projType)
-
-	// Detect Git provider from remote URL
-	remote, parseErr := parseGitRemote(ctx, repoDir)
-	if parseErr != nil {
-		return fmt.Errorf("failed to detect git provider: %w", parseErr)
-	}
-	logger.Infof("Detected provider: %s, org: %s, repo: %s", remote.ProviderType, remote.Org, remote.RepoName)
 
 	// Resolve auth token
 	token := opts.Token
@@ -406,6 +423,51 @@ func parseRemoteURL(rawURL string) (*remoteInfo, error) {
 		Project:      parsed.Project,
 		RepoName:     parsed.RepoName,
 	}, nil
+}
+
+// checkLocalRepoConfigSkip reads the per-repository .autoupdate.yaml from
+// disk and reports whether the user requested that this project be
+// skipped. A missing file is not an error; a malformed file is, because
+// the user explicitly asked autoupdate to read it and we should surface
+// problems instead of silently running anyway.
+func checkLocalRepoConfigSkip(repoDir string) (bool, error) {
+	cfg, err := support.LoadLocalRepoConfig(repoDir)
+	if err != nil {
+		return false, err
+	}
+	if !cfg.IsSkipped() {
+		return false, nil
+	}
+	if cfg.Reason != "" {
+		logger.Infof("Skipping %s: %s requested skip (%s)",
+			repoDir, entities.RepoConfigFile, cfg.Reason)
+	} else {
+		logger.Infof("Skipping %s: %s requested skip", repoDir, entities.RepoConfigFile)
+	}
+	return true, nil
+}
+
+// isExcludedByGlobalList reports whether the parsed remote matches a
+// pattern in the user's global exclude_repos list. The check is a no-op
+// when no Settings were loaded (i.e. the user invoked local mode without
+// a config file), so per-repo .autoupdate.yaml remains the only source
+// of truth in that case.
+func isExcludedByGlobalList(settings *entities.Settings, remote *remoteInfo) bool {
+	if settings == nil || len(settings.ExcludeRepos) == 0 {
+		return false
+	}
+	repo := entities.Repository{
+		Organization: remote.Org,
+		Project:      remote.Project,
+		Name:         remote.RepoName,
+	}
+	excluded, pattern := settings.IsRepoExcluded(repo)
+	if !excluded {
+		return false
+	}
+	logger.Infof("Skipping %s/%s: matched exclude_repos pattern %q",
+		remote.Org, remote.RepoName, pattern)
+	return true
 }
 
 func detectDefaultBranch(ctx context.Context, repoDir string) (string, error) {

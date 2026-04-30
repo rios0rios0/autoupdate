@@ -24,6 +24,7 @@ type Settings struct {
 	Updaters               map[string]UpdaterConfig `yaml:"updaters"`
 	ExcludeForks           bool                     `yaml:"exclude_forks"`
 	ExcludeArchived        bool                     `yaml:"exclude_archived"`
+	ExcludeRepos           []string                 `yaml:"exclude_repos"`
 	GpgKeyPath             string                   `yaml:"gpg_key_path"`
 	GpgKeyPassphrase       string                   `yaml:"gpg_key_passphrase"`
 	GitHubAccessToken      string                   `yaml:"github_access_token"`
