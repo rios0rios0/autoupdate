@@ -14,6 +14,7 @@ type SettingsBuilder struct {
 	updaters        map[string]entities.UpdaterConfig
 	excludeForks    bool
 	excludeArchived bool
+	excludeRepos    []string
 }
 
 // NewSettingsBuilder creates a new settings builder with sensible defaults.
@@ -49,6 +50,12 @@ func (b *SettingsBuilder) WithExcludeArchived(exclude bool) *SettingsBuilder {
 	return b
 }
 
+// WithExcludeRepos sets the global repository exclusion patterns.
+func (b *SettingsBuilder) WithExcludeRepos(patterns []string) *SettingsBuilder {
+	b.excludeRepos = patterns
+	return b
+}
+
 // Build creates the settings (satisfies testkit.Builder interface).
 func (b *SettingsBuilder) Build() interface{} {
 	return b.BuildSettings()
@@ -61,6 +68,7 @@ func (b *SettingsBuilder) BuildSettings() *entities.Settings {
 		Updaters:        b.updaters,
 		ExcludeForks:    b.excludeForks,
 		ExcludeArchived: b.excludeArchived,
+		ExcludeRepos:    b.excludeRepos,
 	}
 }
 
@@ -71,6 +79,7 @@ func (b *SettingsBuilder) Reset() testkit.Builder {
 	b.updaters = map[string]entities.UpdaterConfig{}
 	b.excludeForks = false
 	b.excludeArchived = false
+	b.excludeRepos = nil
 	return b
 }
 
@@ -84,11 +93,15 @@ func (b *SettingsBuilder) Clone() testkit.Builder {
 		updaters[k] = v
 	}
 
+	excludeRepos := make([]string, len(b.excludeRepos))
+	copy(excludeRepos, b.excludeRepos)
+
 	return &SettingsBuilder{
 		BaseBuilder:     b.BaseBuilder.Clone().(*testkit.BaseBuilder),
 		providers:       providers,
 		updaters:        updaters,
 		excludeForks:    b.excludeForks,
 		excludeArchived: b.excludeArchived,
+		excludeRepos:    excludeRepos,
 	}
 }
