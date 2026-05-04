@@ -42,7 +42,7 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - **DI registration**: `internal/container.go` registers all layers bottom-up (repos -> entities -> commands -> controllers)
 - **Domain commands**: `internal/domain/commands/` — `LocalCommand` (single repo), `RunCommand` (batch mode), `SelfUpdateCommand`, and `VersionCommand`
 - **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `ProviderRepository`, and `SelfUpdateRepository` interfaces
-- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution) and `selfupdate`
+- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations for local and batch modes), and `selfupdate`
 - **Support utilities**: `internal/support/` — filesystem helpers and remote file checker bridging `langforge` with `gitforge`
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
 
@@ -74,6 +74,9 @@ The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` 
 ### Config System
 
 Auto-discovery searches `.`, `.config`, `configs`, `$HOME`, `$HOME/.config` for `autoupdate.yaml` / `.autoupdate.yaml`. Tokens support inline values, `${ENV_VAR}` expansion, and file path resolution.
+
+- **Global exclusions**: `exclude_repos` in config — right-anchored glob list matched against `<org>/<repo>` (or `<org>/<project>/<repo>` for ADO).
+- **Per-repo opt-out**: `.autoupdate.yaml` in the target repo root with `skip: true` (optional `reason` field). Read locally via `support.LoadLocalRepoConfig` and remotely via `support.LoadRemoteRepoConfig`. Remote fetch failures fail open.
 
 ## Testing Conventions
 

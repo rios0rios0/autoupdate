@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- refreshed `CLAUDE.md` to document `gitlocal` in infrastructure adapters and the `exclude_repos`/per-repo opt-out config features
+
 ## [0.15.2] - 2026-05-03
 
 ### Changed
