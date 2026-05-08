@@ -26,6 +26,10 @@ const (
 	maxDetailedUpgrades = 5
 	branchBatchFmt      = "chore/upgrade-%d-dependencies"
 	branchSingleFmt     = "chore/upgrade-%s-%s"
+
+	// terraformBlockModule is the HCL block type used to declare a Terraform
+	// module. Extracted as a constant to avoid repeated string literals (goconst).
+	terraformBlockModule = "module"
 )
 
 // depKind distinguishes Terraform module references (in .tf files) from
@@ -411,7 +415,7 @@ func scanTerraformFile(content, filePath string) []entities.Dependency {
 
 	bodyContent, _, partialDiags := body.PartialContent(&hcl.BodySchema{
 		Blocks: []hcl.BlockHeaderSchema{
-			{Type: "module", LabelNames: []string{"name"}},
+			{Type: terraformBlockModule, LabelNames: []string{"name"}},
 		},
 	})
 	if partialDiags.HasErrors() {
@@ -420,7 +424,7 @@ func scanTerraformFile(content, filePath string) []entities.Dependency {
 
 	var deps []entities.Dependency
 	for _, block := range bodyContent.Blocks {
-		if block.Type != "module" {
+		if block.Type != terraformBlockModule {
 			continue
 		}
 
@@ -892,7 +896,7 @@ func generatePRDescription(tasks []upgradeTask) string {
 		sb.WriteString("| Name | Type | Current Version | New Version | File |\n")
 		sb.WriteString("|------|------|-----------------|-------------|------|\n")
 		for _, t := range tasks {
-			kindLabel := "module"
+			kindLabel := terraformBlockModule
 			if t.kind == depKindImage {
 				kindLabel = "image"
 			}
