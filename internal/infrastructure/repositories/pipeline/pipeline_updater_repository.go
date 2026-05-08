@@ -27,6 +27,15 @@ const (
 	branchBatchFmt      = "chore/upgrade-%d-pipeline-versions"
 )
 
+// Language identifiers used as map keys in the version-fetcher and language-rule
+// tables. Extracted as constants to avoid repeated string literals (goconst).
+const (
+	languageGolang = "golang"
+	languagePython = "python"
+	languageNodeJS = "nodejs"
+	languageJava   = "java"
+)
+
 // ciSystem identifies the CI platform.
 type ciSystem string
 
@@ -281,11 +290,11 @@ func fetchAllLatestVersions(ctx context.Context) map[string]string {
 // languageFetchers returns the map of language name to version fetcher.
 func languageFetchers() map[string]langVersions.VersionFetcher {
 	return map[string]langVersions.VersionFetcher{
-		"golang":    langVersions.FetchLatestGoVersion,
-		"python":    langVersions.FetchLatestPythonVersion,
-		"nodejs":    langVersions.FetchLatestNodeVersion,
-		"java":      langVersions.FetchLatestJavaVersion,
-		"terraform": langVersions.FetchLatestTerraformVersion,
+		languageGolang: langVersions.FetchLatestGoVersion,
+		languagePython: langVersions.FetchLatestPythonVersion,
+		languageNodeJS: langVersions.FetchLatestNodeVersion,
+		languageJava:   langVersions.FetchLatestJavaVersion,
+		"terraform":    langVersions.FetchLatestTerraformVersion,
 	}
 }
 
@@ -487,25 +496,25 @@ func ciRules() map[ciSystem][]languageRule {
 func githubActionsRules() []languageRule {
 	return []languageRule{
 		{
-			Language: "golang",
+			Language: languageGolang,
 			Patterns: []*regexp.Regexp{
 				regexp.MustCompile(`go-version:\s*['"]([^'"]+)['"]`),
 			},
 		},
 		{
-			Language: "python",
+			Language: languagePython,
 			Patterns: []*regexp.Regexp{
 				regexp.MustCompile(`python-version:\s*['"]([^'"]+)['"]`),
 			},
 		},
 		{
-			Language: "nodejs",
+			Language: languageNodeJS,
 			Patterns: []*regexp.Regexp{
 				regexp.MustCompile(`node-version:\s*['"]([^'"]+)['"]`),
 			},
 		},
 		{
-			Language: "java",
+			Language: languageJava,
 			Patterns: []*regexp.Regexp{
 				regexp.MustCompile(`java-version:\s*['"]([^'"]+)['"]`),
 			},
@@ -516,25 +525,25 @@ func githubActionsRules() []languageRule {
 func azureDevOpsRules() []languageRule {
 	return []languageRule{
 		{
-			Language: "golang",
+			Language: languageGolang,
 			Patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?s)GoTool@\d.*?version:\s*'([^']+)'`),
 			},
 		},
 		{
-			Language: "python",
+			Language: languagePython,
 			Patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?s)UsePythonVersion@\d.*?versionSpec:\s*'([^']+)'`),
 			},
 		},
 		{
-			Language: "nodejs",
+			Language: languageNodeJS,
 			Patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?s)NodeTool@\d.*?version:\s*'([^']+)'`),
 			},
 		},
 		{
-			Language: "java",
+			Language: languageJava,
 			Patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?s)JavaToolInstaller@\d.*?versionSpec:\s*'([^']+)'`),
 			},
