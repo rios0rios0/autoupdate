@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -837,8 +838,7 @@ func findGoBinaryInGVM(home string) (string, bool) {
 		return "", false
 	}
 
-	for i := len(entries) - 1; i >= 0; i-- {
-		entry := entries[i]
+	for _, entry := range slices.Backward(entries) {
 		if entry.IsDir() && strings.HasPrefix(entry.Name(), "go") {
 			goBin := filepath.Join(gvmDir, entry.Name(), "bin", "go")
 			if _, statErr := os.Stat(goBin); statErr == nil {
