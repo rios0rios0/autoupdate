@@ -42,8 +42,8 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - **DI registration**: `internal/container.go` registers all layers bottom-up (repos -> entities -> commands -> controllers)
 - **Domain commands**: `internal/domain/commands/` — `LocalCommand` (single repo), `RunCommand` (batch mode), `SelfUpdateCommand`, and `VersionCommand`
 - **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `ProviderRepository`, and `SelfUpdateRepository` interfaces
-- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution) and `selfupdate`
-- **Support utilities**: `internal/support/` — filesystem helpers and remote file checker bridging `langforge` with `gitforge`
+- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations for local and batch modes), and `selfupdate`
+- **Support utilities**: `internal/support/` — filesystem helpers, remote file checker bridging `langforge` with `gitforge`, and repo config loader for per-repo opt-out
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
 
 ### Key External Libraries
@@ -74,6 +74,10 @@ The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` 
 ### Config System
 
 Auto-discovery searches `.`, `.config`, `configs`, `$HOME`, `$HOME/.config` for `autoupdate.yaml` / `.autoupdate.yaml`. Tokens support inline values, `${ENV_VAR}` expansion, and file path resolution.
+
+**Repository exclusions:**
+- **Global**: `exclude_repos` in user config — right-anchored glob list matched against `<org>/<repo>` (or `<org>/<project>/<repo>` for ADO). Honored in batch mode and in local mode when a config file is loadable.
+- **Per-repo**: `.autoupdate.yaml` in the target repository's root with `skip: true` (and optional `reason`). Checked in both `autoupdate run` (fetched via provider API) and `autoupdate .` (read from disk).
 
 ## Testing Conventions
 

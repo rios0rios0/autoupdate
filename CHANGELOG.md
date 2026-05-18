@@ -19,6 +19,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Changed
 
 - changed the Go module dependencies to their latest versions
+- refreshed `CLAUDE.md` to document the `gitlocal` infrastructure package, repo config loader in support utilities, and `exclude_repos`/per-repo opt-out config features
 
 ## [0.15.3] - 2026-05-08
 
