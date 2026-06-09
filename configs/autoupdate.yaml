@@ -18,13 +18,20 @@ providers:
   #   organizations:
   #     - "my-group"
 
+# Number of repositories to process in parallel within an organization.
+# Repository processing is I/O-bound (clone + remote API calls), so a small
+# fan-out shortens large-organization runs significantly. Omit it (or set 0)
+# to use the built-in default of 4; set 1 to process repositories sequentially.
+# The --concurrency CLI flag, when provided, overrides this value.
+# concurrency: 4
+
 # Skip specific repositories globally. Patterns are right-anchored
 # against <org>/<repo> (or <org>/<project>/<repo> on Azure DevOps), and
 # support `path.Match`-style globs (`*`, `?`, `[...]`) that do not cross
 # "/". A bare name matches the trailing segment of the key.
 # exclude_repos:
-#   - 'ZestSecurity/frontend/opensearch-dashboards'
-#   - '*/oui'
+#   - 'my-org/legacy-monorepo'
+#   - '*/sandbox'
 
 # All updaters are enabled by default with auto_complete disabled.
 # Users only need to override specific fields; omitted fields keep these defaults.

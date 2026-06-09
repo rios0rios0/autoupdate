@@ -91,6 +91,13 @@ providers:
     organizations:
       - "my-group"
 
+# Number of repositories to process in parallel within an organization.
+# Processing is I/O-bound (clone + remote API calls), so a small fan-out
+# shortens large-organization runs significantly. Omit it (or set 0) to use
+# the built-in default of 4; set 1 to process repositories sequentially. The
+# --concurrency CLI flag overrides this value when provided.
+concurrency: 4
+
 # Skip specific repos globally without touching each project. Patterns
 # are right-anchored against the canonical key:
 #   - GitHub/GitLab: <org>/<repo>
@@ -248,11 +255,12 @@ Standalone local mode -- update a single repository in place.
 
 Batch mode -- discover and update repositories using a config file.
 
-| Flag         | Description                                            |
-|--------------|--------------------------------------------------------|
-| `--provider` | Only process this provider (github/gitlab/azuredevops) |
-| `--org`      | Only process this organization/group                   |
-| `--updater`  | Only run this updater (terraform/golang)               |
+| Flag            | Description                                                       |
+|-----------------|------------------------------------------------------------------|
+| `--provider`    | Only process this provider (github/gitlab/azuredevops)           |
+| `--org`         | Only process this organization/group                             |
+| `--updater`     | Only run this updater (terraform/golang)                         |
+| `--concurrency` | Repositories processed in parallel (default 4; 1 = sequential)   |
 
 ## Contributing
 

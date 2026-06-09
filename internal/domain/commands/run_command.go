@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
@@ -17,6 +19,13 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/support"
 	gitops "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
 )
+
+// defaultRepoConcurrency is the number of repositories processed in parallel
+// within an organization when neither the config file nor the CLI overrides it.
+// Repository processing is I/O-bound (clone + remote API calls), so a small
+// fan-out yields a near-linear speedup without overwhelming provider rate
+// limits or local disk. Set concurrency to 1 to restore sequential processing.
+const defaultRepoConcurrency = 4
 
 // Run is the interface for the run command (batch mode).
 type Run interface {
@@ -30,6 +39,7 @@ type RunOptions struct {
 	ProviderName string // If set, only process this provider (CLI override)
 	OrgOverride  string // If set, only process this org (CLI override)
 	UpdaterName  string // If set, only run this updater (CLI override)
+	Concurrency  int    // If > 0, process this many repos in parallel (CLI override)
 }
 
 // RunCommand orchestrates the full dependency update flow:
@@ -131,17 +141,57 @@ func (it *RunCommand) processOrganization(
 	}
 
 	repos = filterRepositories(repos, settings)
-	logger.Infof("Found %d repositories in %q", len(repos), org)
+	concurrency := resolveConcurrency(settings, runOpts)
+	logger.Infof("Found %d repositories in %q (processing up to %d in parallel)",
+		len(repos), org, concurrency)
 
-	totalPRs, totalRepos, totalErrors := 0, 0, 0
+	// Repository processing is independent and I/O-bound (clone + remote API
+	// calls), so repos are processed concurrently with a bounded worker pool.
+	// Each repo clones into its own temp directory, the shared provider/updater
+	// instances are stateless, and the aggregate counters are guarded by a
+	// mutex, so the fan-out is safe. Per-repo failures are counted (not
+	// propagated) to preserve the "continue on error" behavior, so the
+	// goroutines never return an error and Wait cannot fail.
+	var (
+		mu          sync.Mutex
+		totalPRs    int
+		totalErrors int
+	)
+
+	var group errgroup.Group
+	group.SetLimit(concurrency)
 	for _, repo := range repos {
-		totalRepos++
-		prs, errs := it.processRepository(ctx, provider, repo, settings, runOpts)
-		totalPRs += len(prs)
-		totalErrors += errs
+		group.Go(func() error {
+			prs, errs := it.processRepository(ctx, provider, repo, settings, runOpts)
+			mu.Lock()
+			totalPRs += len(prs)
+			totalErrors += errs
+			mu.Unlock()
+			return nil
+		})
 	}
+	_ = group.Wait()
 
-	return totalPRs, totalRepos, totalErrors
+	return totalPRs, len(repos), totalErrors
+}
+
+// resolveConcurrency determines how many repositories to process in parallel.
+// Precedence: CLI override (runOpts) > config file (settings) > built-in
+// default. A zero value at a given level means "not set" and falls through to
+// the next level; any explicitly set value below 1 is clamped to 1 (fully
+// sequential).
+func resolveConcurrency(settings *entities.Settings, runOpts RunOptions) int {
+	concurrency := defaultRepoConcurrency
+	if settings != nil && settings.Concurrency != 0 {
+		concurrency = settings.Concurrency
+	}
+	if runOpts.Concurrency != 0 {
+		concurrency = runOpts.Concurrency
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	return concurrency
 }
 
 // filterRepositories removes repositories that match the exclusion criteria
