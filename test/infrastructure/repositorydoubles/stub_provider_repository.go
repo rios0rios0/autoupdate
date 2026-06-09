@@ -7,20 +7,26 @@ package repositorydoubles //nolint:revive,staticcheck // Test package naming fol
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 )
 
 // SpyProviderRepository implements repositories.ProviderRepository as a configurable spy.
+// The recorder slices are guarded by mu because the run command processes
+// repositories concurrently, so the provider methods may be called from
+// multiple goroutines against the same shared spy.
 type SpyProviderRepository struct {
+	mu sync.Mutex
+
 	// --- identity ---
 	ProviderName string
 	Token        string
 
 	// --- DiscoverRepositories ---
-	Repositories []entities.Repository
-	DiscoverErr  error
+	Repositories   []entities.Repository
+	DiscoverErr    error
 	DiscoveredOrgs []string
 
 	// --- GetFileContent ---
@@ -55,14 +61,16 @@ type SpyProviderRepository struct {
 
 var _ repositories.ProviderRepository = (*SpyProviderRepository)(nil)
 
-func (p *SpyProviderRepository) Name() string     { return p.ProviderName }
-func (p *SpyProviderRepository) AuthToken() string { return p.Token }
+func (p *SpyProviderRepository) Name() string             { return p.ProviderName }
+func (p *SpyProviderRepository) AuthToken() string        { return p.Token }
 func (p *SpyProviderRepository) MatchesURL(_ string) bool { return false }
 
 func (p *SpyProviderRepository) DiscoverRepositories(
 	_ context.Context, org string,
 ) ([]entities.Repository, error) {
+	p.mu.Lock()
 	p.DiscoveredOrgs = append(p.DiscoveredOrgs, org)
+	p.mu.Unlock()
 	return p.Repositories, p.DiscoverErr
 }
 
@@ -104,14 +112,18 @@ func (p *SpyProviderRepository) HasFile(
 func (p *SpyProviderRepository) CreateBranchWithChanges(
 	_ context.Context, _ entities.Repository, input entities.BranchInput,
 ) error {
+	p.mu.Lock()
 	p.BranchInputs = append(p.BranchInputs, input)
+	p.mu.Unlock()
 	return p.CreateBranchErr
 }
 
 func (p *SpyProviderRepository) CreatePullRequest(
 	_ context.Context, _ entities.Repository, input entities.PullRequestInput,
 ) (*entities.PullRequest, error) {
+	p.mu.Lock()
 	p.PRInputs = append(p.PRInputs, input)
+	p.mu.Unlock()
 	if p.CreatePRErr != nil {
 		return nil, p.CreatePRErr
 	}
@@ -128,7 +140,9 @@ func (p *SpyProviderRepository) CreatePullRequest(
 func (p *SpyProviderRepository) PullRequestExists(
 	_ context.Context, _ entities.Repository, branch string,
 ) (bool, error) {
+	p.mu.Lock()
 	p.PRExistsBranches = append(p.PRExistsBranches, branch)
+	p.mu.Unlock()
 	return p.PRExistsResult, p.PRExistsErr
 }
 
@@ -146,11 +160,11 @@ type DummyProviderRepository struct{}
 
 var _ repositories.ProviderRepository = (*DummyProviderRepository)(nil)
 
-func (d *DummyProviderRepository) Name() string                              { return "dummy" }
-func (d *DummyProviderRepository) MatchesURL(_ string) bool                  { return false }
-func (d *DummyProviderRepository) AuthToken() string                         { return "" }
-func (d *DummyProviderRepository) CloneURL(_ entities.Repository) string                { return "" }
-func (d *DummyProviderRepository) SSHCloneURL(_ entities.Repository, _ string) string   { return "" }
+func (d *DummyProviderRepository) Name() string                                       { return "dummy" }
+func (d *DummyProviderRepository) MatchesURL(_ string) bool                           { return false }
+func (d *DummyProviderRepository) AuthToken() string                                  { return "" }
+func (d *DummyProviderRepository) CloneURL(_ entities.Repository) string              { return "" }
+func (d *DummyProviderRepository) SSHCloneURL(_ entities.Repository, _ string) string { return "" }
 
 func (d *DummyProviderRepository) DiscoverRepositories(
 	_ context.Context, _ string,

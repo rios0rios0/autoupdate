@@ -5,6 +5,7 @@ package commands_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1137,9 +1138,14 @@ func TestRunCommandExecute(t *testing.T) {
 
 		// then
 		require.NoError(t, err)
-		assert.Len(t, updaterSpy.DetectedRepos, 2)
-		assert.Equal(t, "repo-alpha", updaterSpy.DetectedRepos[0].Name)
-		assert.Equal(t, "repo-beta", updaterSpy.DetectedRepos[1].Name)
+		require.Len(t, updaterSpy.DetectedRepos, 2)
+		// Repositories are processed concurrently, so the recorded order is
+		// not deterministic; assert on set membership instead of position.
+		detectedNames := []string{
+			updaterSpy.DetectedRepos[0].Name,
+			updaterSpy.DetectedRepos[1].Name,
+		}
+		assert.ElementsMatch(t, []string{"repo-alpha", "repo-beta"}, detectedNames)
 		assert.Len(t, updaterSpy.CreatePRsCalls, 2)
 	})
 
@@ -2197,5 +2203,213 @@ func TestFirstLine(t *testing.T) {
 
 		// then
 		assert.Equal(t, "single line", result)
+	})
+}
+
+func TestResolveConcurrency(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should use the built-in default when neither config nor CLI set it", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{}
+		opts := commands.RunOptions{}
+
+		// when
+		result := commands.ResolveConcurrency(settings, opts)
+
+		// then
+		assert.Equal(t, commands.DefaultRepoConcurrency, result)
+	})
+
+	t.Run("should use the built-in default when settings is nil", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		opts := commands.RunOptions{}
+
+		// when
+		result := commands.ResolveConcurrency(nil, opts)
+
+		// then
+		assert.Equal(t, commands.DefaultRepoConcurrency, result)
+	})
+
+	t.Run("should use the config value when only settings sets it", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{Concurrency: 8}
+		opts := commands.RunOptions{}
+
+		// when
+		result := commands.ResolveConcurrency(settings, opts)
+
+		// then
+		assert.Equal(t, 8, result)
+	})
+
+	t.Run("should let the CLI override take precedence over the config value", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{Concurrency: 8}
+		opts := commands.RunOptions{Concurrency: 2}
+
+		// when
+		result := commands.ResolveConcurrency(settings, opts)
+
+		// then
+		assert.Equal(t, 2, result)
+	})
+
+	t.Run("should honor an explicit concurrency of 1 (sequential)", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{Concurrency: 1}
+		opts := commands.RunOptions{}
+
+		// when
+		result := commands.ResolveConcurrency(settings, opts)
+
+		// then
+		assert.Equal(t, 1, result)
+	})
+
+	t.Run("should clamp a non-positive config value to 1", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{Concurrency: -4}
+		opts := commands.RunOptions{}
+
+		// when
+		result := commands.ResolveConcurrency(settings, opts)
+
+		// then
+		assert.Equal(t, 1, result)
+	})
+
+	t.Run("should clamp a non-positive CLI override to 1", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{Concurrency: 8}
+		opts := commands.RunOptions{Concurrency: -1}
+
+		// when
+		result := commands.ResolveConcurrency(settings, opts)
+
+		// then
+		assert.Equal(t, 1, result)
+	})
+}
+
+func TestRunCommandConcurrency(t *testing.T) {
+	t.Parallel()
+
+	// setupRun wires a run command to a provider serving repoCount repositories
+	// and a single detect-everything updater. It returns the command, the
+	// updater spy (for assertions), and the settings, keeping each subtest
+	// focused on the one thing that differs: how concurrency is configured.
+	setupRun := func(repoCount int) (
+		*commands.RunCommand, *doubles.SpyUpdaterRepository, *entities.Settings,
+	) {
+		repos := make([]entities.Repository, 0, repoCount)
+		for i := range repoCount {
+			repos = append(repos, entitybuilders.NewRepositoryBuilder().
+				WithID(fmt.Sprintf("repo-%d", i)).
+				WithName(fmt.Sprintf("repo-%d", i)).
+				WithOrganization("test-org").
+				WithDefaultBranch("refs/heads/main").
+				BuildRepository())
+		}
+
+		providerSpy := doubles.NewSpyProviderRepositoryBuilder().
+			WithProviderName("github").
+			WithToken("test-token").
+			WithRepositories(repos).
+			BuildSpy()
+		updaterSpy := doubles.NewSpyUpdaterRepositoryBuilder().
+			WithUpdaterName("terraform").
+			WithDetectResult(true).
+			WithPRs([]entities.PullRequest{{ID: 1, Title: "Update", URL: "https://example.com/pr/1"}}).
+			BuildSpy()
+
+		providerRegistry := infraRepos.NewProviderRegistry()
+		providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
+			return providerSpy
+		})
+		updaterRegistry := infraRepos.NewUpdaterRegistry()
+		updaterRegistry.Register(updaterSpy)
+
+		settings := entitybuilders.NewSettingsBuilder().
+			WithProviders([]entities.ProviderConfig{
+				entitybuilders.NewProviderConfigBuilder().
+					WithType("github").
+					WithToken("test-token").
+					WithOrganizations([]string{"test-org"}).
+					BuildProviderConfig(),
+			}).
+			BuildSettings()
+
+		return commands.NewRunCommand(providerRegistry, updaterRegistry), updaterSpy, settings
+	}
+
+	// assertAllProcessed checks that every repository was detected and turned
+	// into a CreateUpdatePRs call, regardless of the (non-deterministic)
+	// concurrent processing order.
+	assertAllProcessed := func(t *testing.T, updaterSpy *doubles.SpyUpdaterRepository, want int) {
+		t.Helper()
+		assert.Len(t, updaterSpy.DetectedRepos, want)
+		assert.Len(t, updaterSpy.CreatePRsCalls, want)
+	}
+
+	t.Run("should process every repository when running in parallel", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		const repoCount = 12
+		cmd, updaterSpy, settings := setupRun(repoCount)
+
+		// when
+		err := cmd.Execute(context.Background(), settings, commands.RunOptions{Concurrency: 4})
+
+		// then
+		require.NoError(t, err)
+		assertAllProcessed(t, updaterSpy, repoCount)
+	})
+
+	t.Run("should process every repository when forced sequential", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		const repoCount = 5
+		cmd, updaterSpy, settings := setupRun(repoCount)
+
+		// when
+		err := cmd.Execute(context.Background(), settings, commands.RunOptions{Concurrency: 1})
+
+		// then
+		require.NoError(t, err)
+		assertAllProcessed(t, updaterSpy, repoCount)
+	})
+
+	t.Run("should drive parallelism from settings when no CLI override is given", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		const repoCount = 8
+		cmd, updaterSpy, settings := setupRun(repoCount)
+		settings.Concurrency = 3
+
+		// when
+		err := cmd.Execute(context.Background(), settings, commands.RunOptions{})
+
+		// then
+		require.NoError(t, err)
+		assertAllProcessed(t, updaterSpy, repoCount)
 	})
 }

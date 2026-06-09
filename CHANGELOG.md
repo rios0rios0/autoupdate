@@ -16,6 +16,14 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added parallel repository processing to `autoupdate run`, configurable via the `concurrency` config field and the `--concurrency` flag, so large organizations finish well within CI time limits
+
+### Changed
+
+- changed `autoupdate run` to process repositories within an organization in parallel (default 4 at a time) instead of one at a time; set `concurrency: 1` to restore the previous sequential behavior
+
 ## [0.15.8] - 2026-06-03
 
 ### Changed
