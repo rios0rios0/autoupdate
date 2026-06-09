@@ -21,17 +21,22 @@ type ProviderConfig = configEntities.ProviderConfig
 
 // Settings is the top-level configuration for autoupdate, loaded from YAML.
 type Settings struct {
-	Providers              []ProviderConfig         `yaml:"providers"`
-	Updaters               map[string]UpdaterConfig `yaml:"updaters"`
-	ExcludeForks           bool                     `yaml:"exclude_forks"`
-	ExcludeArchived        bool                     `yaml:"exclude_archived"`
-	ExcludeRepos           []string                 `yaml:"exclude_repos"`
-	GpgKeyPath             string                   `yaml:"gpg_key_path"`
-	GpgKeyPassphrase       string                   `yaml:"gpg_key_passphrase"`
-	GitHubAccessToken      string                   `yaml:"github_access_token"`
-	GitLabAccessToken      string                   `yaml:"gitlab_access_token"`
-	AzureDevOpsAccessToken string                   `yaml:"azure_devops_access_token"`
-	GitLabCIJobToken       string                   `yaml:"-"`
+	Providers       []ProviderConfig         `yaml:"providers"`
+	Updaters        map[string]UpdaterConfig `yaml:"updaters"`
+	ExcludeForks    bool                     `yaml:"exclude_forks"`
+	ExcludeArchived bool                     `yaml:"exclude_archived"`
+	ExcludeRepos    []string                 `yaml:"exclude_repos"`
+	// Concurrency is how many repositories are processed in parallel within an
+	// organization. Zero (the default) lets the run command pick a sensible
+	// built-in default; 1 forces fully sequential processing. A CLI flag, when
+	// provided, takes precedence over this value.
+	Concurrency            int    `yaml:"concurrency"`
+	GpgKeyPath             string `yaml:"gpg_key_path"`
+	GpgKeyPassphrase       string `yaml:"gpg_key_passphrase"`
+	GitHubAccessToken      string `yaml:"github_access_token"`
+	GitLabAccessToken      string `yaml:"gitlab_access_token"`
+	AzureDevOpsAccessToken string `yaml:"azure_devops_access_token"`
+	GitLabCIJobToken       string `yaml:"-"`
 }
 
 // UpdaterConfig holds per-updater settings.
