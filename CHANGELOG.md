@@ -20,6 +20,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 - changed the Go module dependencies to their latest versions
 
+### Fixed
+
+- fixed the `gitleaks` security stage failing on `main` (which blocked releases) by suppressing 14 historical false-positive `Password in URL` findings via `.gitleaksignore` — these are git-remote auth URLs built from variables (`${AUTH_TOKEN}`, string concatenation) and fake test fixtures in pre-refactor commits, not real secrets
+
 ## [0.16.0] - 2026-06-08
 
 ### Added

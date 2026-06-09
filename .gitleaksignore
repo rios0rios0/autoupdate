@@ -31,3 +31,27 @@ internal/infrastructure/repositories/csharp/csharp_updater_repository.go:Passwor
 internal/infrastructure/repositories/csharp/csharp_updater_repository.go:Password in URL:592
 internal/infrastructure/repositories/csharp/csharp_updater_repository.go:Password in URL:596
 internal/infrastructure/repositories/csharp/csharp_updater_repository.go:Password in URL:600
+
+# 2026-06-09: historical false positives from gitleaks pass 2 (the GitLab-customised ruleset
+# scanning full history). All 14 are the "Password in URL" rule matching git-remote
+# authentication URLs that the code assembles at runtime from variables (an auth-token
+# environment variable and Go string concatenation) plus placeholder tokens in test
+# fixtures -- none are real secrets. The same code is already suppressed above at its
+# current-tree paths; these fingerprints cover the pre-refactor paths in commits 66f4a905
+# (2026-02-07) and 0839817b (2026-02-12) so the unchanged history stops failing the
+# main-branch pipeline. (Comment kept free of literal credential URLs so it does not itself
+# trip the scanner.)
+0839817b71019c9bd820d27a2bfa2dd2a96bf0bb:infrastructure/updater/javascript/local.go:Password in URL:272
+0839817b71019c9bd820d27a2bfa2dd2a96bf0bb:infrastructure/updater/javascript/local.go:Password in URL:276
+0839817b71019c9bd820d27a2bfa2dd2a96bf0bb:infrastructure/updater/python/local.go:Password in URL:257
+0839817b71019c9bd820d27a2bfa2dd2a96bf0bb:infrastructure/updater/python/local.go:Password in URL:261
+0839817b71019c9bd820d27a2bfa2dd2a96bf0bb:infrastructure/updater/javascript/javascript.go:Password in URL:519
+0839817b71019c9bd820d27a2bfa2dd2a96bf0bb:infrastructure/updater/javascript/javascript.go:Password in URL:523
+0839817b71019c9bd820d27a2bfa2dd2a96bf0bb:infrastructure/updater/python/python.go:Password in URL:487
+0839817b71019c9bd820d27a2bfa2dd2a96bf0bb:infrastructure/updater/python/python.go:Password in URL:491
+66f4a905e8d7fdff1c0c91da2429dfcd6d8b2340:infrastructure/provider/github/github.go:Password in URL:366
+66f4a905e8d7fdff1c0c91da2429dfcd6d8b2340:infrastructure/provider/github/github_test.go:Password in URL:124
+66f4a905e8d7fdff1c0c91da2429dfcd6d8b2340:infrastructure/updater/golang/golang.go:Password in URL:318
+66f4a905e8d7fdff1c0c91da2429dfcd6d8b2340:infrastructure/updater/golang/golang.go:Password in URL:323
+66f4a905e8d7fdff1c0c91da2429dfcd6d8b2340:infrastructure/provider/gitlab/gitlab_test.go:Password in URL:114
+66f4a905e8d7fdff1c0c91da2429dfcd6d8b2340:infrastructure/provider/gitlab/gitlab.go:Password in URL:386
