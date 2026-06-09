@@ -45,6 +45,7 @@ func (it *RunController) Execute(cmd *cobra.Command, _ []string) {
 	providerFilter, _ := cmd.Flags().GetString("provider")
 	orgOverride, _ := cmd.Flags().GetString("org")
 	updaterFilter, _ := cmd.Flags().GetString("updater")
+	concurrency, _ := cmd.Flags().GetInt("concurrency")
 
 	settings, err := findReadAndValidateConfig(configPath)
 	if err != nil {
@@ -60,6 +61,7 @@ func (it *RunController) Execute(cmd *cobra.Command, _ []string) {
 		ProviderName: providerFilter,
 		OrgOverride:  orgOverride,
 		UpdaterName:  updaterFilter,
+		Concurrency:  concurrency,
 	}); runErr != nil {
 		logger.Errorf("Run failed: %v", runErr)
 	}
@@ -71,5 +73,8 @@ func (it *RunController) AddFlags(cmd *cobra.Command) {
 	cmd.Flags().String("org", "", "Only process this organization/group")
 	cmd.Flags().String("updater", "",
 		"Only run this updater (terraform, golang, python, javascript, pipeline, dockerfile)",
+	)
+	cmd.Flags().Int("concurrency", 0,
+		"Number of repositories to process in parallel (default 4; 1 = sequential)",
 	)
 }

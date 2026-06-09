@@ -94,3 +94,9 @@ var FirstLine = firstLine //nolint:gochecknoglobals // test export
 
 // ResolveAggregateTargetBranch exports resolveAggregateTargetBranch for testing.
 var ResolveAggregateTargetBranch = resolveAggregateTargetBranch //nolint:gochecknoglobals // test export
+
+// ResolveConcurrency exports resolveConcurrency for testing.
+var ResolveConcurrency = resolveConcurrency //nolint:gochecknoglobals // test export
+
+// DefaultRepoConcurrency exports defaultRepoConcurrency for testing.
+const DefaultRepoConcurrency = defaultRepoConcurrency
