@@ -6,10 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 When a new release is proposed:
 
-1. Create a new branch `bump/x.x.x` (this isn't a long-lived branch!!!);
-2. The Unreleased section on `CHANGELOG.md` gets a version number and date;
+1. Create a new branch `chore/bump-x.x.x` (this isn't a long-lived branch!!!) — the name prefix matters: the release pipeline only tags merges whose branch is named `chore/bump-`;
+2. The Unreleased section on `CHANGELOG.md` gets a version number and date (AutoBump does this automatically);
 3. Open a Pull Request with the bump version changes targeting the `main` branch;
-4. When the Pull Request is merged, a new Git tag must be created using [GitHub environment](https://github.com/rios0rios0/autoupdate/tags).
+4. When the Pull Request is merged, the release pipeline detects the `chore/bump-x.x.x` branch in the merge commit and automatically creates the Git tag and GitHub release.
 
 Releases to productive environments should run from a tagged version.
 Exceptions are acceptable depending on the circumstances (critical bug fixes that can be cherry-picked, etc.).
