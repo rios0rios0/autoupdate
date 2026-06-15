@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-06-15
+
 ### Changed
 
 - refreshed `CLAUDE.md` and `.github/copilot-instructions.md` to document batch-mode concurrency (the `concurrency` config field / `--concurrency` flag and the mutex-guarded shared state in `RunCommand`)
