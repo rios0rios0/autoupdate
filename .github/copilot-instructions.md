@@ -119,6 +119,7 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - Supports multiple providers with organizations and tokens
 - Token resolution: inline values, `${ENV_VAR}` expansion, file paths
 - Updaters can be enabled/disabled with per-updater `auto_complete` and `target_branch`
+- Concurrency: `autoupdate run` processes repos within an org in parallel via `errgroup` (default 4), tuned by the `concurrency` config field or `--concurrency` flag (`< 1` clamps to sequential). `RunCommand` guards shared accumulators with a `sync.Mutex` — keep any new shared state goroutine-safe
 - Repository exclusions:
   - **Global**: `exclude_repos` in user config — right-anchored glob list matched against `<org>/<repo>` (or `<org>/<project>/<repo>` for ADO). Filtered by `filterRepositories` in `RunCommand`; honored in `LocalCommand` when settings load successfully.
   - **Per-repo**: `.autoupdate.yaml` in the target repository's root with `skip: true` (and optional `reason`). Read via `support.LoadLocalRepoConfig` (local mode) and `support.LoadRemoteRepoConfig` (batch mode, fetched through `FileAccessProvider.GetFileContent`). Remote fetch failures fail open so a flaky API does not silently disable all updates.
