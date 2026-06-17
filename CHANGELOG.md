@@ -19,6 +19,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Changed
 
 - refreshed `CLAUDE.md` and `.github/copilot-instructions.md` to document batch-mode concurrency (the `concurrency` config field / `--concurrency` flag and the mutex-guarded shared state in `RunCommand`)
+- changed the Go module dependencies to their latest versions
 
 ## [0.16.1] - 2026-06-09
 
