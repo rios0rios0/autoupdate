@@ -192,7 +192,7 @@ jobs:
 		content := `steps:
   - task: NodeTool@0
     inputs:
-      version: '18.0.0'
+      versionSpec: '18.0.0'
 `
 		require.NoError(t, os.WriteFile(adoDir+"/build.yml", []byte(content), 0o644))
 
@@ -211,6 +211,58 @@ jobs:
 		assert.Equal(t, "18.0.0", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
 		assert.Equal(t, "22.0.0", pipeline.UpgradeTaskNewVersion(upgrades[0]))
 		assert.Contains(t, fileContents, "azure-devops/build.yml")
+	})
+
+	t.Run("should not misclassify a Go task version as a Node.js version", func(t *testing.T) {
+		t.Parallel()
+
+		// given a pipeline that installs both Node.js (versionSpec) and Go
+		// (version) in separate tasks. The Node.js task must never absorb the
+		// Go task's version field.
+		root := t.TempDir()
+		content := `steps:
+  - task: NodeTool@0
+    inputs:
+      versionSpec: '18.0.0'
+    displayName: 'Install Node.js'
+  - task: GoTool@0
+    inputs:
+      version: '1.21'
+    displayName: 'Install Go'
+`
+		require.NoError(t, os.WriteFile(root+"/azure-pipelines.yml", []byte(content), 0o644))
+
+		latestVersions := map[string]string{
+			"golang": "1.24.1",
+			"nodejs": "22.0.0",
+		}
+
+		// when
+		upgrades, _ := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then each task is upgraded under its own language, and no Node.js
+		// upgrade ever carries the Go task's "1.21" version.
+		require.Len(t, upgrades, 2)
+		byLanguage := make(map[string]pipeline.UpgradeTask, len(upgrades))
+		for _, up := range upgrades {
+			byLanguage[pipeline.UpgradeTaskLanguage(up)] = up
+			if pipeline.UpgradeTaskLanguage(up) == "nodejs" {
+				assert.NotEqual(t, "1.21", pipeline.UpgradeTaskCurrentVer(up),
+					"the Go task version 1.21 must not be captured as a Node.js version")
+			}
+		}
+
+		golang, hasGo := byLanguage["golang"]
+		require.True(t, hasGo, "expected a golang upgrade")
+		assert.Equal(t, "1.21", pipeline.UpgradeTaskCurrentVer(golang))
+		assert.Equal(t, "1.24", pipeline.UpgradeTaskNewVersion(golang))
+
+		nodejs, hasNode := byLanguage["nodejs"]
+		require.True(t, hasNode, "expected a nodejs upgrade")
+		assert.Equal(t, "18.0.0", pipeline.UpgradeTaskCurrentVer(nodejs))
+		assert.Equal(t, "22.0.0", pipeline.UpgradeTaskNewVersion(nodejs))
 	})
 
 	t.Run("should skip non-pipeline YAML files", func(t *testing.T) {

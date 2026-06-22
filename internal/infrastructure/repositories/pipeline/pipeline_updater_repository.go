@@ -373,7 +373,7 @@ func findUpgradesInFile(
 	latestVersions map[string]string,
 ) []upgradeTask {
 	rules := rulesForCI(ci)
-	matches := scanFileForVersions(content, filePath, rules)
+	matches := scanForVersions(content, filePath, ci, rules)
 
 	var tasks []upgradeTask
 	for _, match := range matches {
@@ -411,6 +411,58 @@ func classifyFile(path string) ciSystem {
 		return ciAzureDevOps
 	}
 	return ""
+}
+
+// azureTaskDecl matches the start of an Azure DevOps task step (e.g.
+// "  - task: NodeTool@0"). It is used to slice a pipeline file into per-task
+// segments so that a task-scoped, multi-line version pattern can never capture
+// a version field that belongs to a *different* task further down the file.
+var azureTaskDecl = regexp.MustCompile(`(?m)^[ \t]*-[ \t]+task:[ \t]*\S+`)
+
+// scanForVersions dispatches version scanning by CI system. Azure DevOps rules
+// use multi-line `(?s)` patterns that match a task name and then the first
+// matching version field; to keep that match anchored to its own task, Azure
+// content is scanned per task segment. GitHub Actions rules are single-line
+// key matches and need no segmentation.
+func scanForVersions(content, filePath string, ci ciSystem, rules []languageRule) []versionMatch {
+	if ci == ciAzureDevOps {
+		return scanAzureDevOpsForVersions(content, filePath, rules)
+	}
+	return scanFileForVersions(content, filePath, rules)
+}
+
+// scanAzureDevOpsForVersions slices the file into per-task segments and scans
+// each one independently, so a task's version pattern cannot bleed into a
+// neighbouring task's version field.
+func scanAzureDevOpsForVersions(content, filePath string, rules []languageRule) []versionMatch {
+	var matches []versionMatch
+	for _, segment := range splitAzureTaskSegments(content) {
+		matches = append(matches, scanFileForVersions(segment, filePath, rules)...)
+	}
+	return matches
+}
+
+// splitAzureTaskSegments partitions content into contiguous, non-overlapping
+// segments: an optional preamble before the first task (holding non-task keys
+// such as terraformVersion) followed by one segment per task step.
+func splitAzureTaskSegments(content string) []string {
+	locs := azureTaskDecl.FindAllStringIndex(content, -1)
+	if len(locs) == 0 {
+		return []string{content}
+	}
+
+	segments := make([]string, 0, len(locs)+1)
+	if locs[0][0] > 0 {
+		segments = append(segments, content[:locs[0][0]])
+	}
+	for i, loc := range locs {
+		end := len(content)
+		if i+1 < len(locs) {
+			end = locs[i+1][0]
+		}
+		segments = append(segments, content[loc[0]:end])
+	}
+	return segments
 }
 
 // scanFileForVersions applies all language rules and returns matches.
@@ -539,7 +591,11 @@ func azureDevOpsRules() []languageRule {
 		{
 			Language: languageNodeJS,
 			Patterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?s)NodeTool@\d.*?version:\s*'([^']+)'`),
+				// The NodeTool task exposes its version through the "versionSpec"
+				// input, not "version" (which belongs to GoTool). Matching
+				// "version" here let the (?s) pattern bleed past NodeTool and
+				// capture an unrelated task's version field.
+				regexp.MustCompile(`(?s)NodeTool@\d.*?versionSpec:\s*'([^']+)'`),
 			},
 		},
 		{
