@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- changed the Go module dependencies to their latest versions
+
 ### Fixed
 
 - fixed the CI/CD pipeline updater misreporting an Azure DevOps `GoTool` version as a Node.js upgrade: the `NodeTool` rule matched the wrong input field (`version` instead of `versionSpec`), so its multi-line pattern bled past the Node.js task and captured a later Go task's `version` (e.g. proposing a Node.js bump for a Go version such as `1.21`). Node.js versions are now read from the `NodeTool` `versionSpec` input, and each Azure DevOps task is scanned in isolation so a language rule can no longer capture a neighbouring task's version field
