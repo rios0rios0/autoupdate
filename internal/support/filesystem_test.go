@@ -81,7 +81,8 @@ func TestWalkFilesByExtension(t *testing.T) {
 		root := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(root, "main.tf"), []byte(""), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "other.go"), []byte(""), 0o600))
-		require.NoError(t, os.MkdirAll(filepath.Join(root, "modules"), 0o750))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "modules"), 0o700))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "modules", "vpc.tf"), []byte(""), 0o600))
 
 		// when
@@ -99,7 +100,8 @@ func TestWalkFilesByExtension(t *testing.T) {
 
 		// given
 		root := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o750))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Join(root, ".git"), 0o700))
 		require.NoError(t, os.WriteFile(filepath.Join(root, ".git", "config.tf"), []byte(""), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "main.tf"), []byte(""), 0o600))
 
@@ -172,7 +174,8 @@ func TestWalkFilesByPredicate(t *testing.T) {
 
 		// given
 		root := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(root, ".hidden"), 0o750))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Join(root, ".hidden"), 0o700))
 		require.NoError(t, os.WriteFile(filepath.Join(root, ".hidden", "Dockerfile"), []byte(""), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "Dockerfile"), []byte(""), 0o600))
 
