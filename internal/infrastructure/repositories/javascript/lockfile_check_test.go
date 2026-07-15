@@ -39,7 +39,8 @@ func initGitRepo(t *testing.T, dir string, files map[string]string) {
 
 	for path, content := range files {
 		full := filepath.Join(dir, path)
-		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o750))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o700))
 		require.NoError(t, os.WriteFile(full, []byte(content), 0o600))
 	}
 
