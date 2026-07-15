@@ -72,7 +72,10 @@ func WriteFileChanges(rootDir string, changes []entities.FileChange) error {
 	for _, c := range changes {
 		fullPath := filepath.Join(rootDir, c.Path)
 		dir := filepath.Dir(fullPath)
-		if err := os.MkdirAll(dir, 0o750); err != nil {
+		// A directory needs the owner execute (search) bit, so 0o700 (not the rule's 0o600
+		// file threshold) is the least-privilege mode; owner-only access is sufficient here.
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("failed to create directory for %s: %w", c.Path, err)
 		}
 		if err := os.WriteFile(fullPath, []byte(c.Content), 0o600); err != nil {

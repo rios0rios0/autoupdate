@@ -1172,7 +1172,8 @@ func TestLocalScanAllDockerfiles(t *testing.T) {
 		// given
 		tmpDir := t.TempDir()
 		hiddenDir := filepath.Join(tmpDir, ".hidden")
-		require.NoError(t, os.MkdirAll(hiddenDir, 0o750))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(hiddenDir, 0o700))
 		content := "FROM golang:1.25-alpine\n"
 		require.NoError(t, os.WriteFile(filepath.Join(hiddenDir, "Dockerfile"), []byte(content), 0o600))
 
@@ -1206,7 +1207,8 @@ func TestLocalScanAllDockerfiles(t *testing.T) {
 		// given
 		tmpDir := t.TempDir()
 		subDir := filepath.Join(tmpDir, "build")
-		require.NoError(t, os.MkdirAll(subDir, 0o750))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(subDir, 0o700))
 		content := "FROM alpine:3.19\nRUN apk add curl\n"
 		require.NoError(t, os.WriteFile(filepath.Join(subDir, "Dockerfile"), []byte(content), 0o600))
 
