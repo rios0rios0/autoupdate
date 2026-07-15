@@ -25,7 +25,8 @@ func TestLocalScanAndDetermineUpgrades(t *testing.T) {
 		// given
 		root := t.TempDir()
 		adoDir := root + "/azure-devops"
-		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(adoDir, 0o700))
 
 		content := `steps:
   - task: UsePythonVersion@0
@@ -58,7 +59,8 @@ func TestLocalScanAndDetermineUpgrades(t *testing.T) {
 		// given
 		root := t.TempDir()
 		ghDir := root + "/.github/workflows"
-		require.NoError(t, os.MkdirAll(ghDir, 0o755))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(ghDir, 0o700))
 
 		content := `name: CI
 on: push
@@ -93,7 +95,8 @@ jobs:
 		// given
 		root := t.TempDir()
 		adoDir := root + "/azure-devops"
-		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(adoDir, 0o700))
 
 		content := `steps:
   - script: echo "Hello World"
@@ -122,7 +125,8 @@ jobs:
 		// given
 		root := t.TempDir()
 		adoDir := root + "/azure-devops"
-		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(adoDir, 0o700))
 
 		content := `steps:
   - task: UsePythonVersion@0
@@ -151,7 +155,8 @@ jobs:
 		// given
 		root := t.TempDir()
 		adoDir := root + "/azure-devops"
-		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(adoDir, 0o700))
 
 		pythonContent := `steps:
   - task: UsePythonVersion@0
@@ -187,7 +192,8 @@ jobs:
 		// given
 		root := t.TempDir()
 		adoDir := root + "/azure-devops"
-		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(adoDir, 0o700))
 
 		content := `steps:
   - task: NodeTool@0
@@ -295,7 +301,8 @@ func TestApplyUpdatesLocal(t *testing.T) {
 		// given
 		root := t.TempDir()
 		adoDir := root + "/azure-devops"
-		require.NoError(t, os.MkdirAll(adoDir, 0o755))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(adoDir, 0o700))
 
 		content := `steps:
   - script: echo "Hello"
