@@ -49,7 +49,6 @@ func BuildLocalGoScript(providerName string, hasConfigSH bool) string {
 	return buildLocalGoScript(providerName, hasConfigSH)
 }
 
-
 // UpgradeParams is exported for testing.
 type UpgradeParams = upgradeParams
 
@@ -153,4 +152,34 @@ func RunLanguageUpgradeScript(
 	opts LocalUpgradeOptions,
 ) (string, error) {
 	return runLanguageUpgradeScript(ctx, repoDir, vCtx, opts)
+}
+
+// ResolveClosestGolangTag is exported for testing.
+func ResolveClosestGolangTag(available []string, goVersion, suffix string) (string, bool) {
+	return resolveClosestGolangTag(available, goVersion, suffix)
+}
+
+// ParseGolangTag is exported for testing.
+func ParseGolangTag(tag string) (string, string, bool) {
+	return parseGolangTag(tag)
+}
+
+// RewriteGolangTags is exported for testing.
+func RewriteGolangTags(content, goVersion string, available []string, relPath string) string {
+	return rewriteGolangTags(content, goVersion, available, relPath)
+}
+
+// IsDockerfileName is exported for testing.
+func IsDockerfileName(name string) bool {
+	return isDockerfileName(name)
+}
+
+// UpdateDockerfileGolangTags is exported for testing. The tag lister is
+// injected directly so tests avoid shared global state and run in parallel.
+func UpdateDockerfileGolangTags(
+	ctx context.Context,
+	repoDir, goVersion string,
+	listTags func(ctx context.Context) ([]string, error),
+) (bool, error) {
+	return updateDockerfileGolangTags(ctx, repoDir, goVersion, listTags)
 }
