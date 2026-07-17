@@ -228,6 +228,19 @@ func TestRewriteGolangTags(t *testing.T) {
 		assert.Equal(t, content, got)
 	})
 
+	t.Run("should skip digest-pinned images to avoid a tag/digest mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "FROM golang:1.25.6@sha256:0123456789abcdef AS builder\n"
+
+		// when
+		got := golang.RewriteGolangTags(content, "1.25.7", realisticGolangTags(), "Dockerfile")
+
+		// then
+		assert.Equal(t, content, got)
+	})
+
 	t.Run("should not downgrade when the pin is already newer", func(t *testing.T) {
 		t.Parallel()
 

@@ -29,12 +29,13 @@ const (
 
 // golangFromPattern matches the tag of an official `golang` base image in a
 // Dockerfile FROM clause, e.g. `FROM golang:1.24-alpine`. Group 1 is the
-// literal prefix up to and including `golang:`; group 2 is the tag. Only the
-// official Docker Hub `golang` image is matched — a registry- or namespace-
-// qualified `.../golang:` is intentionally excluded because its tags cannot be
-// verified against Docker Hub's `library` namespace.
+// literal prefix up to and including `golang:`; group 2 is the tag; group 3 is
+// an optional `@sha256:...` digest. Only the official Docker Hub `golang` image
+// is matched — a registry- or namespace-qualified `.../golang:` is
+// intentionally excluded because its tags cannot be verified against Docker
+// Hub's `library` namespace.
 var golangFromPattern = regexp.MustCompile(
-	`(?im)^(FROM\s+(?:--platform=\S+\s+)?golang:)([A-Za-z0-9][A-Za-z0-9._-]*)`,
+	`(?im)^(FROM\s+(?:--platform=\S+\s+)?golang:)([A-Za-z0-9][A-Za-z0-9._-]*)(@[A-Za-z0-9]+:[A-Za-z0-9]+)?`,
 )
 
 // golangVersionPattern splits a golang tag into its leading version and the
@@ -114,7 +115,14 @@ func updateDockerfileGolangTags(
 func rewriteGolangTags(content, goVersion string, available []string, relPath string) string {
 	return golangFromPattern.ReplaceAllStringFunc(content, func(match string) string {
 		groups := golangFromPattern.FindStringSubmatch(match)
-		prefix, currentTag := groups[1], groups[2]
+		prefix, currentTag, digest := groups[1], groups[2], groups[3]
+
+		// Skip digest-pinned images (`golang:<tag>@sha256:...`): rewriting only
+		// the tag would leave the digest — which pins the exact image — pointing
+		// at a different version, a misleading and effectively no-op change.
+		if digest != "" {
+			return match
+		}
 
 		currentVersion, suffix, ok := parseGolangTag(currentTag)
 		if !ok {
@@ -187,7 +195,7 @@ func resolveClosestGolangTag(available []string, goVersion, suffix string) (stri
 // returning ok=false when the tag is not version-pinned (e.g. "latest").
 func parseGolangTag(tag string) (string, string, bool) {
 	m := golangVersionPattern.FindStringSubmatch(tag)
-	if len(m) < golangVersionMinParts { // full match + 2 capture groups
+	if m == nil { // tag has no leading numeric version (e.g. "latest")
 		return "", "", false
 	}
 
