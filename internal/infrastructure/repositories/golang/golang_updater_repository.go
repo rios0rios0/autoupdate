@@ -201,6 +201,22 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	goVersionUpdated := strings.Contains(outputStr, "GO_VERSION_UPDATED=true")
 
+	// Rewrite Dockerfile golang base-image tags in Go, verifying each target
+	// tag exists on Docker Hub (falling back to the closest published one)
+	// instead of blindly writing the go.dev version, which may not have a
+	// published image yet or may lack the requested Alpine variant.
+	if goVersionUpdated {
+		dfChanged, dfErr := updateDockerfileGolangTags(
+			ctx, repoDir, vCtx.LatestVersion, fetchGolangTags,
+		)
+		switch {
+		case dfErr != nil:
+			logger.Warnf("[golang] Failed to update Dockerfile golang image tags: %v", dfErr)
+		case dfChanged:
+			logger.Infof("[golang] Updated Dockerfile golang base image tags to match Go %s", vCtx.LatestVersion)
+		}
+	}
+
 	// Return early if the upgrade script made no filesystem changes
 	if !support.HasUncommittedChanges(ctx, repoDir) {
 		logger.Infof("[golang] No filesystem changes detected after upgrade script")
@@ -297,7 +313,8 @@ func buildLocalGoScript(providerName string, hasConfigSH bool) string {
 	}
 
 	writeGoUpgradeCommands(&sb)
-	writeDockerfileUpdate(&sb)
+	// Dockerfile golang image tags are rewritten in Go (registry-verified) by
+	// updateDockerfileGolangTags after this script runs — see ApplyUpdates.
 
 	return sb.String()
 }
@@ -633,8 +650,10 @@ func buildUpgradeScript(
 	// Go upgrade commands
 	writeGoUpgradeCommands(&sb)
 
-	// Update Dockerfile golang image tags (only when version was bumped)
-	writeDockerfileUpdate(&sb)
+	// NOTE: Dockerfile golang image tags are no longer rewritten from bash.
+	// This monolithic clone-and-push flow is legacy (the golang updater
+	// implements LocalUpdater, so ApplyUpdates handles live runs and performs
+	// the registry-verified Dockerfile rewrite in Go).
 
 	// Overwrite CHANGELOG.md with the pre-generated content (if provided)
 	writeChangelogUpdate(&sb)
@@ -726,26 +745,6 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("if [ -d \"vendor\" ]; then\n")
 	sb.WriteString("    echo \"Running go mod vendor...\"\n")
 	sb.WriteString("    \"$GO_BINARY\" mod vendor 2>&1 || echo \"WARNING: go mod vendor had some errors\"\n")
-	sb.WriteString("fi\n\n")
-}
-
-func writeDockerfileUpdate(sb *strings.Builder) {
-	sb.WriteString("# Update Dockerfile golang image tags when the Go version was bumped.\n")
-	sb.WriteString("# Uses -print0 / read -d '' to handle paths with spaces or special characters.\n")
-	sb.WriteString("if [ \"$GO_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString("    echo \"Updating Dockerfile golang image tags to $GO_VERSION...\"\n")
-	sb.WriteString(
-		"    find . -type f -not -path './.git/*' " +
-			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
-			"-print0 | while IFS= read -r -d '' df; do\n",
-	)
-	sb.WriteString("        if grep -q 'golang:[0-9]' \"$df\"; then\n")
-	sb.WriteString(
-		"            sed \"s|golang:[0-9][0-9.]*|golang:${GO_VERSION}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("            echo \"  Updated $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("    done\n")
 	sb.WriteString("fi\n\n")
 }
 

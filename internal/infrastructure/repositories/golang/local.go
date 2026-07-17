@@ -160,6 +160,22 @@ func executeLocalUpgrade(
 
 	goVersionUpdated := strings.Contains(outputStr, "GO_VERSION_UPDATED=true")
 
+	// Rewrite Dockerfile golang base-image tags in Go, verifying each target
+	// tag exists on Docker Hub (falling back to the closest published one)
+	// instead of blindly writing the go.dev version, which may not have a
+	// published image yet or may lack the requested Alpine variant.
+	if goVersionUpdated {
+		dfChanged, dfErr := updateDockerfileGolangTags(
+			ctx, repoDir, vCtx.LatestVersion, fetchGolangTags,
+		)
+		switch {
+		case dfErr != nil:
+			logger.Warnf("[golang] Failed to update Dockerfile golang image tags: %v", dfErr)
+		case dfChanged:
+			logger.Infof("[golang] Updated Dockerfile golang base image tags to match Go %s", vCtx.LatestVersion)
+		}
+	}
+
 	// --- Git Finalize (go-git) ---
 	commitMsg := goCommitMsgDeps
 	if goVersionUpdated {
@@ -290,8 +306,9 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	// Go upgrade commands (reuse existing)
 	writeGoUpgradeCommands(&sb)
 
-	// Update Dockerfile golang image tags (only when version was bumped)
-	writeDockerfileUpdate(&sb)
+	// NOTE: Dockerfile golang image tags are updated in Go (registry-verified)
+	// by updateDockerfileGolangTags after this script runs — never via a blind
+	// tag rewrite here, which could point FROM at a non-existent image.
 
 	// Changelog update (reuse existing)
 	writeChangelogUpdate(&sb)
