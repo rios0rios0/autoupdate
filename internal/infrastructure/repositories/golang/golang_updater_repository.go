@@ -213,7 +213,10 @@ func (u *UpdaterRepository) ApplyUpdates(
 		case dfErr != nil:
 			logger.Warnf("[golang] Failed to update Dockerfile golang image tags: %v", dfErr)
 		case dfChanged:
-			logger.Infof("[golang] Updated Dockerfile golang base image tags to match Go %s", vCtx.LatestVersion)
+			logger.Infof(
+				"[golang] Updated Dockerfile golang base image tags to the closest published tags for Go %s",
+				vCtx.LatestVersion,
+			)
 		}
 	}
 
