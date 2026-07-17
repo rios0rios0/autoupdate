@@ -516,9 +516,9 @@ func TestOpenPullRequest(t *testing.T) {
 			BranchName:          "chore/upgrade-go-1.25.7",
 		}
 		result := &goUpdater.UpgradeResult{
-			HasChanges:      true,
+			HasChanges:       true,
 			GoVersionUpdated: true,
-			Output:          "",
+			Output:           "",
 		}
 
 		// when
@@ -798,4 +798,3 @@ func TestPrepareLocalChangelogGo(t *testing.T) {
 		assert.Empty(t, result)
 	})
 }
-
