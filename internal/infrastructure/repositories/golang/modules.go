@@ -44,7 +44,11 @@ func moduleDirsFromPaths(paths []string) []string {
 	dirs := make([]string, 0, len(paths))
 
 	for _, p := range paths {
-		normalized := strings.TrimPrefix(path.Clean(strings.ReplaceAll(p, "\\", "/")), "./")
+		normalized := path.Clean(strings.ReplaceAll(p, "\\", "/"))
+		// Azure DevOps returns absolute item paths ("/go.mod") while GitHub and
+		// GitLab return repo-relative ones; without this the root module would
+		// be recorded as "/" and never recognised as the root.
+		normalized = strings.TrimPrefix(normalized, "/")
 		if path.Base(normalized) != goModFileName || isSkippedModulePath(normalized) {
 			continue
 		}
@@ -102,31 +106,45 @@ func goModPathFor(dir string) string {
 	return path.Join(dir, goModFileName)
 }
 
-// resolveCurrentGoDirective returns the go directive that drives branch naming
-// and changelog wording, the module directory it was read from, and whether
-// any module could be read at all. The root module is preferred so that
-// single-module repositories keep costing a single lookup; nested modules are
-// only scanned when the root has no go.mod.
-func resolveCurrentGoDirective(
+// resolveVersionUpgradeNeed reports whether *any* module in the repository
+// declares a go directive other than targetVersion, the module directory the
+// decision was based on, and whether a module could be read at all.
+//
+// The answer has to span every module because the upgrade runs in every
+// module: deciding from the root alone would label a run "dependencies only"
+// while the script bumps the go directive of a nested module, which then
+// contradicts itself across the branch name, the changelog entry and the PR
+// title. A stale root short-circuits the scan, so the common single-module
+// case still costs one lookup.
+func resolveVersionUpgradeNeed(
 	read func(dir string) (string, error),
-	nestedDirs func() []string,
-) (string, string, bool) {
-	if content, err := read(rootModuleDir); err == nil {
-		return parseGoDirective(content), rootModuleDir, true
+	moduleDirs func() []string,
+	targetVersion string,
+) (bool, string, bool) {
+	rootContent, rootErr := read(rootModuleDir)
+	if rootErr == nil && parseGoDirective(rootContent) != targetVersion {
+		return true, rootModuleDir, true
 	}
 
-	for _, dir := range nestedDirs() {
+	sourceDir, found := rootModuleDir, rootErr == nil
+	for _, dir := range moduleDirs() {
 		if dir == rootModuleDir {
-			continue
+			continue // already read above
 		}
+
 		content, err := read(dir)
 		if err != nil {
 			continue
 		}
-		return parseGoDirective(content), dir, true
+		if !found {
+			sourceDir, found = dir, true
+		}
+		if parseGoDirective(content) != targetVersion {
+			return true, dir, true
+		}
 	}
 
-	return "", "", false
+	return false, sourceDir, found
 }
 
 // discoverLocalModuleDirs walks an on-disk repository and returns every
@@ -138,8 +156,14 @@ func discoverLocalModuleDirs(repoDir string) []string {
 		return name == goModFileName
 	})
 	if err != nil {
-		logger.Warnf("[golang] Failed to scan %s for go.mod files: %v", repoDir, err)
-		return nil
+		// An unreadable subtree aborts the walk with whatever it collected so
+		// far. Discarding that would strand modules that were found and are
+		// perfectly upgradable, so the partial result is kept — matching the
+		// upgrade script, which also tolerates unreadable subtrees.
+		logger.Warnf(
+			"[golang] Scan of %s ended early (%v); continuing with the %d path(s) found",
+			repoDir, err, len(paths),
+		)
 	}
 
 	return moduleDirsFromPaths(paths)
