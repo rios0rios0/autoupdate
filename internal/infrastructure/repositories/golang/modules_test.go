@@ -23,6 +23,9 @@ func writeModule(t *testing.T, repoDir, relDir, goVersion string) {
 	t.Helper()
 
 	dir := filepath.Join(repoDir, filepath.FromSlash(relDir))
+	// A directory needs the owner execute (search) bit, so 0o700 (not the rule's
+	// 0o600 file threshold) is the least-privilege mode; owner-only is sufficient.
+	// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "go.mod"),
@@ -414,6 +417,9 @@ func TestWriteGoUpgradeCommands(t *testing.T) {
 
 		// given a module whose go.mod has no go directive, ordered before a stale one
 		repoDir := t.TempDir()
+		// A directory needs the owner execute (search) bit, so 0o700 (not the rule's
+		// 0o600 file threshold) is the least-privilege mode; owner-only is sufficient.
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		require.NoError(t, os.MkdirAll(filepath.Join(repoDir, "broken"), 0o700))
 		require.NoError(t, os.WriteFile(
 			filepath.Join(repoDir, "broken", "go.mod"), []byte("module example.com/broken\n"), 0o600))
