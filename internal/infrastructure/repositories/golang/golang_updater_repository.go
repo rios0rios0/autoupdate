@@ -277,17 +277,18 @@ func (u *UpdaterRepository) ApplyUpdates(
 // context instead of using the provider API.
 func localResolveVersionContext(repoDir, latestGoVersion string) *versionContext {
 	needsVersionUpgrade := true
-	currentGoVersion, sourceDir, found := resolveCurrentGoDirective(
+	needsUpgrade, sourceDir, found := resolveVersionUpgradeNeed(
 		localGoModReader(repoDir),
 		func() []string { return discoverLocalModuleDirs(repoDir) },
+		latestGoVersion,
 	)
 	if !found {
 		logger.Warnf("[golang] Could not read any local go.mod, assuming version upgrade")
 	} else {
-		needsVersionUpgrade = currentGoVersion != latestGoVersion
+		needsVersionUpgrade = needsUpgrade
 		logger.Infof(
-			"[golang] Current go directive in %s: %s (upgrade needed: %v)",
-			goModPathFor(sourceDir), currentGoVersion, needsVersionUpgrade,
+			"[golang] Go version upgrade needed: %v (decided by %s)",
+			needsVersionUpgrade, goModPathFor(sourceDir),
 		)
 	}
 
@@ -449,19 +450,20 @@ func resolveVersionContext(
 	// version upgrade or a deps-only refresh — before cloning. When the root
 	// holds no go.mod the first nested module answers the same question.
 	needsVersionUpgrade := true // safe default when go.mod cannot be read
-	currentGoVersion, sourceDir, found := resolveCurrentGoDirective(
+	needsUpgrade, sourceDir, found := resolveVersionUpgradeNeed(
 		func(dir string) (string, error) {
 			return provider.GetFileContent(ctx, repo, goModPathFor(dir))
 		},
 		func() []string { return discoverRemoteModuleDirs(ctx, provider, repo) },
+		latestGoVersion,
 	)
 	if !found {
 		logger.Warnf("[golang] Could not read any remote go.mod, assuming version upgrade")
 	} else {
-		needsVersionUpgrade = currentGoVersion != latestGoVersion
+		needsVersionUpgrade = needsUpgrade
 		logger.Infof(
-			"[golang] Current go directive in %s: %s (upgrade needed: %v)",
-			goModPathFor(sourceDir), currentGoVersion, needsVersionUpgrade,
+			"[golang] Go version upgrade needed: %v (decided by %s)",
+			needsVersionUpgrade, goModPathFor(sourceDir),
 		)
 	}
 
@@ -727,7 +729,9 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("while IFS= read -r MODULE_DIR; do\n")
 	sb.WriteString("    [ -n \"$MODULE_DIR\" ] || continue\n")
 	sb.WriteString("    echo \"=== Upgrading Go module in ${MODULE_DIR} ===\"\n")
-	sb.WriteString("    pushd \"$MODULE_DIR\" > /dev/null\n\n")
+	// "./" guards against a directory whose name starts with "-", which bash
+	// would otherwise parse as pushd's stack-index option.
+	sb.WriteString("    pushd \"./$MODULE_DIR\" > /dev/null\n\n")
 
 	writeGoModuleUpgradeCommands(sb)
 
@@ -764,9 +768,13 @@ func writeGoModuleDiscovery(sb *strings.Builder) {
 // with the working directory already set to that module's directory, so every
 // path stays module-relative.
 func writeGoModuleUpgradeCommands(sb *strings.Builder) {
-	// Read the current go version from go.mod and compare with the target
+	// Read the current go version from go.mod and compare with the target.
+	// "|| true" is required: a go.mod without a go directive makes grep exit 1,
+	// which under `set -o pipefail` would abort the script and leave the
+	// modules already rewritten in this run only half-upgraded. It also keeps
+	// the "no directive" branch below reachable.
 	sb.WriteString("    # Read current Go version from go.mod\n")
-	sb.WriteString("    CURRENT_GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
+	sb.WriteString("    CURRENT_GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}' || true)\n")
 	sb.WriteString("    echo \"Current Go version in go.mod: ${CURRENT_GO_VERSION:-<not found>}\"\n")
 
 	// Only update the go directive if the versions differ.
@@ -791,7 +799,7 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder) {
 		"        sed \"s/^go [0-9][0-9.]*$/go ${GO_VERSION}/\" go.mod > go.mod.tmp && mv go.mod.tmp go.mod\n",
 	)
 	sb.WriteString("        # Verify the substitution actually took effect\n")
-	sb.WriteString("        UPDATED_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
+	sb.WriteString("        UPDATED_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}' || true)\n")
 	sb.WriteString("        if [ \"$UPDATED_VERSION\" = \"$GO_VERSION\" ]; then\n")
 	sb.WriteString("            GO_VERSION_CHANGED=true\n")
 	sb.WriteString("            echo \"GO_VERSION_UPDATED=true\"\n")
@@ -819,7 +827,7 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder) {
 	// Re-apply the Go version after go mod tidy, because older Go binaries
 	// may normalise the three-part version back to two-part during tidy.
 	sb.WriteString("    # Re-apply Go version if go mod tidy normalised it\n")
-	sb.WriteString("    AFTER_TIDY_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
+	sb.WriteString("    AFTER_TIDY_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}' || true)\n")
 	sb.WriteString(
 		"    if [ -n \"$AFTER_TIDY_VERSION\" ] && [ \"$AFTER_TIDY_VERSION\" != \"$GO_VERSION\" ]; then\n",
 	)
@@ -853,8 +861,11 @@ func writeCommitAndPush(sb *strings.Builder) {
 	sb.WriteString("    echo \"Changes detected, committing and pushing...\"\n")
 	sb.WriteString("    git add -A\n")
 	sb.WriteString("    if [ \"$GO_VERSION_CHANGED\" = \"true\" ]; then\n")
+	// The backticks must be escaped: unescaped, bash treats them as command
+	// substitution and the version silently vanishes from the commit subject.
 	sb.WriteString(
-		"        git commit -m \"chore(deps): upgraded Go version to `$GO_VERSION` and updated all dependencies\"\n",
+		"        git commit -m \"chore(deps): upgraded Go version to \\`$GO_VERSION\\` " +
+			"and updated all dependencies\"\n",
 	)
 	sb.WriteString("    else\n")
 	sb.WriteString("        git commit -m \"chore(deps): update Go module dependencies\"\n")

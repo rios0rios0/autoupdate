@@ -86,6 +86,19 @@ func TestModuleDirsFromPaths(t *testing.T) {
 		assert.Equal(t, []string{".", "-tools"}, dirs)
 	})
 
+	t.Run("should strip the leading slash of absolute provider item paths", func(t *testing.T) {
+		t.Parallel()
+
+		// given paths in the absolute form Azure DevOps returns
+		paths := []string{"/go.mod", "/tests/harness/go.mod", "/vendor/dep/go.mod"}
+
+		// when
+		dirs := goUpdater.ModuleDirsFromPaths(paths)
+
+		// then
+		assert.Equal(t, []string{".", "tests/harness"}, dirs)
+	})
+
 	t.Run("should skip vendored, fixture and hidden modules", func(t *testing.T) {
 		t.Parallel()
 
@@ -396,6 +409,39 @@ func TestWriteGoUpgradeCommands(t *testing.T) {
 		assert.Equal(t, "1.19", goDirectiveOf(t, repoDir, "vendor/example.com/dep"))
 	})
 
+	t.Run("should keep upgrading other modules when one declares no go directive", func(t *testing.T) {
+		t.Parallel()
+
+		// given a module whose go.mod has no go directive, ordered before a stale one
+		repoDir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(repoDir, "broken"), 0o700))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(repoDir, "broken", "go.mod"), []byte("module example.com/broken\n"), 0o600))
+		writeModule(t, repoDir, "tools", "1.23.1")
+
+		// when
+		output := runUpgradeScript(t, repoDir, "1.25.7")
+
+		// then
+		assert.Contains(t, output, "no go directive found in go.mod")
+		assert.Equal(t, "1.25.7", goDirectiveOf(t, repoDir, "tools"),
+			"a module without a directive must not abort the modules after it")
+	})
+
+	t.Run("should upgrade a module directory whose name starts with a dash", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := t.TempDir()
+		writeModule(t, repoDir, "-tools", "1.23.1")
+
+		// when
+		runUpgradeScript(t, repoDir, "1.25.7")
+
+		// then
+		assert.Equal(t, "1.25.7", goDirectiveOf(t, repoDir, "-tools"))
+	})
+
 	t.Run("should exit cleanly when the repository holds no Go module", func(t *testing.T) {
 		t.Parallel()
 
@@ -412,48 +458,105 @@ func TestWriteGoUpgradeCommands(t *testing.T) {
 	})
 }
 
-func TestResolveCurrentGoDirective(t *testing.T) {
+// moduleReader returns a reader over a directory-to-go-directive map.
+func moduleReader(modules map[string]string) func(string) (string, error) {
+	return func(dir string) (string, error) {
+		version, ok := modules[dir]
+		if !ok {
+			return "", errors.New("no such module")
+		}
+		return "module example.com/m\n\ngo " + version + "\n", nil
+	}
+}
+
+func TestWriteCommitAndPush(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should read the root module without scanning for nested modules", func(t *testing.T) {
+	t.Run("should keep the Go version in the commit subject", func(t *testing.T) {
+		t.Parallel()
+
+		// given the version-bump commit subject wraps the version in backticks,
+		// which bash treats as command substitution unless they are escaped
+		var sb strings.Builder
+		goUpdater.WriteCommitAndPush(&sb)
+
+		// when
+		script := sb.String()
+
+		// then
+		assert.Contains(t, script, "\\`$GO_VERSION\\`")
+		assert.NotContains(t, script, "to `$GO_VERSION`")
+	})
+}
+
+func TestResolveVersionUpgradeNeed(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should short-circuit on a stale root without scanning for modules", func(t *testing.T) {
 		t.Parallel()
 
 		// given
 		scanned := false
-		read := func(_ string) (string, error) { return "module m\n\ngo 1.24.0\n", nil }
-		nested := func() []string {
+		read := moduleReader(map[string]string{".": "1.24.0"})
+		dirs := func() []string {
 			scanned = true
 			return nil
 		}
 
 		// when
-		version, sourceDir, found := goUpdater.ResolveCurrentGoDirective(read, nested)
+		needed, sourceDir, found := goUpdater.ResolveVersionUpgradeNeed(read, dirs, "1.25.7")
 
 		// then
 		require.True(t, found)
-		assert.Equal(t, "1.24.0", version)
+		assert.True(t, needed)
 		assert.Equal(t, ".", sourceDir)
-		assert.False(t, scanned, "nested modules should not be scanned when a root module exists")
+		assert.False(t, scanned, "a stale root already settles the decision")
 	})
 
-	t.Run("should fall back to the first nested module when the root has no go.mod", func(t *testing.T) {
+	t.Run("should require an upgrade when only a nested module is behind", func(t *testing.T) {
+		t.Parallel()
+
+		// given the root is already current but a nested module is not
+		read := moduleReader(map[string]string{".": "1.25.7", "tools": "1.23.1"})
+		dirs := func() []string { return []string{".", "tools"} }
+
+		// when
+		needed, sourceDir, found := goUpdater.ResolveVersionUpgradeNeed(read, dirs, "1.25.7")
+
+		// then
+		require.True(t, found)
+		assert.True(t, needed, "the script bumps every module, so the decision must span them all")
+		assert.Equal(t, "tools", sourceDir)
+	})
+
+	t.Run("should not require an upgrade when every module is current", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		read := func(dir string) (string, error) {
-			if dir == "tests/harness" {
-				return "module m\n\ngo 1.23.1\n", nil
-			}
-			return "", errors.New("not found")
-		}
-		nested := func() []string { return []string{"tests/harness"} }
+		read := moduleReader(map[string]string{".": "1.25.7", "tools": "1.25.7"})
+		dirs := func() []string { return []string{".", "tools"} }
 
 		// when
-		version, sourceDir, found := goUpdater.ResolveCurrentGoDirective(read, nested)
+		needed, _, found := goUpdater.ResolveVersionUpgradeNeed(read, dirs, "1.25.7")
 
 		// then
 		require.True(t, found)
-		assert.Equal(t, "1.23.1", version)
+		assert.False(t, needed)
+	})
+
+	t.Run("should decide from a nested module when the root has no go.mod", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		read := moduleReader(map[string]string{"tests/harness": "1.23.1"})
+		dirs := func() []string { return []string{"tests/harness"} }
+
+		// when
+		needed, sourceDir, found := goUpdater.ResolveVersionUpgradeNeed(read, dirs, "1.25.7")
+
+		// then
+		require.True(t, found)
+		assert.True(t, needed)
 		assert.Equal(t, "tests/harness", sourceDir)
 	})
 
@@ -461,11 +564,11 @@ func TestResolveCurrentGoDirective(t *testing.T) {
 		t.Parallel()
 
 		// given
-		read := func(_ string) (string, error) { return "", errors.New("not found") }
-		nested := func() []string { return []string{"tests/harness"} }
+		read := moduleReader(map[string]string{})
+		dirs := func() []string { return []string{"tests/harness"} }
 
 		// when
-		_, _, found := goUpdater.ResolveCurrentGoDirective(read, nested)
+		_, _, found := goUpdater.ResolveVersionUpgradeNeed(read, dirs, "1.25.7")
 
 		// then
 		assert.False(t, found)

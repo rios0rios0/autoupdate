@@ -40,12 +40,18 @@ func GoModPathFor(dir string) string {
 	return goModPathFor(dir)
 }
 
-// ResolveCurrentGoDirective is exported for testing.
-func ResolveCurrentGoDirective(
+// ResolveVersionUpgradeNeed is exported for testing.
+func ResolveVersionUpgradeNeed(
 	read func(dir string) (string, error),
-	nestedDirs func() []string,
-) (string, string, bool) {
-	return resolveCurrentGoDirective(read, nestedDirs)
+	moduleDirs func() []string,
+	targetVersion string,
+) (bool, string, bool) {
+	return resolveVersionUpgradeNeed(read, moduleDirs, targetVersion)
+}
+
+// WriteCommitAndPush is exported for testing.
+func WriteCommitAndPush(sb *strings.Builder) {
+	writeCommitAndPush(sb)
 }
 
 // WriteGoUpgradeCommands is exported for testing.
