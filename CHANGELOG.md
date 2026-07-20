@@ -16,8 +16,17 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added nested Go module support to the Go updater: it now discovers every `go.mod` in a repository instead of only the one at the root, and applies the `go` directive bump, `go get -u -t ./...` and `go mod tidy` inside each module directory — `go get ./...` never crosses a module boundary, so a repository that keeps a Go module in a subdirectory (for example an integration-test harness living inside an infrastructure repository) had that module left permanently outdated; vendored, `testdata`, `node_modules` and hidden directories are skipped so their pinned manifests are not rewritten; whether a run counts as a Go version upgrade is now decided across every module rather than from the root alone, so a stale nested module no longer produces a PR whose title and changelog entry contradict each other
+
 ### Fixed
 
+- fixed Go ecosystem detection skipping any repository whose only `go.mod` lives in a subdirectory: detection previously asked the provider for a root `go.mod` alone, so such repositories were never processed by the Go updater at all; the version context that drives the branch name and changelog wording now falls back to the first nested module when the root declares no module
+- fixed the Go upgrade script aborting midway when a `go.mod` declares no `go` directive: `grep` exits non-zero on no match, which under `set -o pipefail` killed the run and left the modules already processed half-upgraded — the reads now tolerate a missing directive, which also makes the existing "no directive" branch reachable
+- fixed the Go version being dropped from the generated commit subject: the backticks around `$GO_VERSION` were unescaped, so bash expanded them as command substitution and committed `upgraded Go version to  and updated all dependencies`
+- fixed the Go updater failing on a module directory whose name starts with `-`, which bash parsed as a `pushd` stack-index option
+- fixed the Go updater treating the repository root as a nested module on Azure DevOps, whose API returns absolute item paths (`/go.mod`) rather than repo-relative ones
 - fixed the Go updater writing non-existent Docker base image tags into `Dockerfile` `FROM` clauses: it now verifies each target `golang:<version>` tag is published on Docker Hub before rewriting, falls back to the closest published patch within the same minor and suffix, and leaves the clause untouched when no suitable image exists — instead of blindly applying the latest `go.dev` version via `sed`, which could point `FROM` at an unpublished patch (registry lag) or a dropped Alpine variant such as `golang:1.25.7-alpine3.20`
 
 ## [0.16.9] - 2026-07-16

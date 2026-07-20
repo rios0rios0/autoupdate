@@ -71,16 +71,20 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) (*versionCo
 	}
 	logger.Infof("[golang] Latest stable Go version: %s", latestGoVersion)
 
-	goModContent, err := os.ReadFile(filepath.Join(repoDir, "go.mod"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read go.mod: %w", err)
+	// Every module counts, not just the root one: the repository may have no
+	// root module at all, and a nested module may be the only stale one.
+	needsVersionUpgrade, sourceDir, found := resolveVersionUpgradeNeed(
+		localGoModReader(repoDir),
+		func() []string { return discoverLocalModuleDirs(repoDir) },
+		latestGoVersion,
+	)
+	if !found {
+		return nil, fmt.Errorf("no readable %s found in %s", goModFileName, repoDir)
 	}
 
-	currentGoVersion := parseGoDirective(string(goModContent))
-	needsVersionUpgrade := currentGoVersion != latestGoVersion
 	logger.Infof(
-		"[golang] Current go directive: %s (upgrade needed: %v)",
-		currentGoVersion, needsVersionUpgrade,
+		"[golang] Go version upgrade needed: %v (decided by %s)",
+		needsVersionUpgrade, goModPathFor(sourceDir),
 	)
 
 	branchName := branchGoDepsFmt
