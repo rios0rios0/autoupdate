@@ -16,6 +16,43 @@ func ParseGoDirective(content string) string {
 	return parseGoDirective(content)
 }
 
+// ModuleDirsFromPaths is exported for testing.
+func ModuleDirsFromPaths(paths []string) []string {
+	return moduleDirsFromPaths(paths)
+}
+
+// DiscoverLocalModuleDirs is exported for testing.
+func DiscoverLocalModuleDirs(repoDir string) []string {
+	return discoverLocalModuleDirs(repoDir)
+}
+
+// DiscoverRemoteModuleDirs is exported for testing.
+func DiscoverRemoteModuleDirs(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+) []string {
+	return discoverRemoteModuleDirs(ctx, provider, repo)
+}
+
+// GoModPathFor is exported for testing.
+func GoModPathFor(dir string) string {
+	return goModPathFor(dir)
+}
+
+// ResolveCurrentGoDirective is exported for testing.
+func ResolveCurrentGoDirective(
+	read func(dir string) (string, error),
+	nestedDirs func() []string,
+) (string, string, bool) {
+	return resolveCurrentGoDirective(read, nestedDirs)
+}
+
+// WriteGoUpgradeCommands is exported for testing.
+func WriteGoUpgradeCommands(sb *strings.Builder) {
+	writeGoUpgradeCommands(sb)
+}
+
 // ResolveVersionContext is exported for testing.
 func ResolveVersionContext(
 	ctx context.Context,

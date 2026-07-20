@@ -52,12 +52,46 @@ func TestDetect(t *testing.T) {
 		assert.True(t, detected)
 	})
 
+	t.Run("should return true when the only go.mod is in a subdirectory", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{}).
+			WithFiles([]entities.File{{Path: "tests/harness/go.mod"}}).
+			BuildSpy()
+		repo := entities.Repository{Organization: "org", Name: "repo"}
+
+		// when
+		detected := goUpdater.NewUpdaterRepository().Detect(t.Context(), provider, repo)
+
+		// then
+		assert.True(t, detected)
+	})
+
 	t.Run("should return false when no Go files exist", func(t *testing.T) {
 		t.Parallel()
 
 		// given
 		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
 			WithExistingFiles(map[string]bool{}).
+			BuildSpy()
+		repo := entities.Repository{Organization: "org", Name: "repo"}
+
+		// when
+		detected := goUpdater.NewUpdaterRepository().Detect(t.Context(), provider, repo)
+
+		// then
+		assert.False(t, detected)
+	})
+
+	t.Run("should return false when only a vendored go.mod exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{}).
+			WithFiles([]entities.File{{Path: "vendor/example.com/dep/go.mod"}}).
 			BuildSpy()
 		repo := entities.Repository{Organization: "org", Name: "repo"}
 

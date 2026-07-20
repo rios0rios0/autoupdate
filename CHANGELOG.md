@@ -16,8 +16,13 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added nested Go module support to the Go updater: it now discovers every `go.mod` in a repository instead of only the one at the root, and applies the `go` directive bump, `go get -u -t ./...` and `go mod tidy` inside each module directory — `go get ./...` never crosses a module boundary, so a repository that keeps a Go module in a subdirectory (for example an integration-test harness living inside an infrastructure repository) had that module left permanently outdated; vendored, `testdata`, `node_modules` and hidden directories are skipped so their pinned manifests are not rewritten
+
 ### Fixed
 
+- fixed Go ecosystem detection skipping any repository whose only `go.mod` lives in a subdirectory: detection previously asked the provider for a root `go.mod` alone, so such repositories were never processed by the Go updater at all; the version context that drives the branch name and changelog wording now falls back to the first nested module when the root declares no module
 - fixed the Go updater writing non-existent Docker base image tags into `Dockerfile` `FROM` clauses: it now verifies each target `golang:<version>` tag is published on Docker Hub before rewriting, falls back to the closest published patch within the same minor and suffix, and leaves the clause untouched when no suitable image exists — instead of blindly applying the latest `go.dev` version via `sed`, which could point `FROM` at an unpublished patch (registry lag) or a dropped Alpine variant such as `golang:1.25.7-alpine3.20`
 
 ## [0.16.9] - 2026-07-16
