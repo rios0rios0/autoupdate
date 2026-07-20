@@ -1615,12 +1615,12 @@ func TestFilterRepositories(t *testing.T) {
 
 		// given
 		repos := []entities.Repository{
-			{Organization: "ZestSecurity", Project: "frontend", Name: "opensearch-dashboards"},
-			{Organization: "ZestSecurity", Project: "frontend", Name: "oui"},
-			{Organization: "ZestSecurity", Project: "frontend", Name: "regular"},
+			{Organization: "ContosoSecurity", Project: "frontend", Name: "opensearch-dashboards"},
+			{Organization: "ContosoSecurity", Project: "frontend", Name: "oui"},
+			{Organization: "ContosoSecurity", Project: "frontend", Name: "regular"},
 		}
 		settings := &entities.Settings{ExcludeRepos: []string{
-			"ZestSecurity/frontend/opensearch-dashboards",
+			"ContosoSecurity/frontend/opensearch-dashboards",
 			"*/oui",
 		}}
 
@@ -1643,7 +1643,7 @@ func TestRunCommandRunsExcludeRepos(t *testing.T) {
 		excluded := entitybuilders.NewRepositoryBuilder().
 			WithID("excl").
 			WithName("opensearch-dashboards").
-			WithOrganization("ZestSecurity").
+			WithOrganization("ContosoSecurity").
 			WithDefaultBranch("refs/heads/main").
 			BuildRepository()
 		excluded.Project = "frontend"
@@ -1651,7 +1651,7 @@ func TestRunCommandRunsExcludeRepos(t *testing.T) {
 		kept := entitybuilders.NewRepositoryBuilder().
 			WithID("kept").
 			WithName("regular").
-			WithOrganization("ZestSecurity").
+			WithOrganization("ContosoSecurity").
 			WithDefaultBranch("refs/heads/main").
 			BuildRepository()
 
@@ -1682,10 +1682,10 @@ func TestRunCommandRunsExcludeRepos(t *testing.T) {
 				entitybuilders.NewProviderConfigBuilder().
 					WithType("azuredevops").
 					WithToken("ado-token").
-					WithOrganizations([]string{"ZestSecurity"}).
+					WithOrganizations([]string{"ContosoSecurity"}).
 					BuildProviderConfig(),
 			}).
-			WithExcludeRepos([]string{"ZestSecurity/frontend/opensearch-dashboards"}).
+			WithExcludeRepos([]string{"ContosoSecurity/frontend/opensearch-dashboards"}).
 			BuildSettings()
 
 		// when
@@ -1708,7 +1708,7 @@ func TestRunCommandRunsRepoConfigSkip(t *testing.T) {
 		repo := entitybuilders.NewRepositoryBuilder().
 			WithID("opted-out").
 			WithName("opensearch-dashboards").
-			WithOrganization("ZestSecurity").
+			WithOrganization("ContosoSecurity").
 			WithDefaultBranch("refs/heads/main").
 			BuildRepository()
 
@@ -1742,7 +1742,7 @@ func TestRunCommandRunsRepoConfigSkip(t *testing.T) {
 				entitybuilders.NewProviderConfigBuilder().
 					WithType("github").
 					WithToken("test-token").
-					WithOrganizations([]string{"ZestSecurity"}).
+					WithOrganizations([]string{"ContosoSecurity"}).
 					BuildProviderConfig(),
 			}).
 			BuildSettings()

@@ -30,7 +30,7 @@ func RepoKey(repo Repository) string {
 //     regardless of org/project prefix.
 //   - `*/oui` matches `<anything>/oui`, including the trailing two
 //     segments of an Azure DevOps `org/project/oui` key.
-//   - `zestsecurity/frontend/opensearch-dashboards` only matches that
+//   - `contososecurity/frontend/opensearch-dashboards` only matches that
 //     exact ADO path.
 //
 // `*` follows `path.Match` semantics (it does not cross `/`). The first

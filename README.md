@@ -105,7 +105,7 @@ concurrency: 4
 # Glob wildcards (*, ?, [...]) follow path.Match semantics and do not
 # cross "/". A bare name matches the repo's trailing segment.
 exclude_repos:
-  - 'ZestSecurity/frontend/opensearch-dashboards'  # exact ADO path
+  - 'ContosoSecurity/frontend/opensearch-dashboards'  # exact ADO path
   - '*/oui'                                         # any org or org/project ending in /oui
   - 'rios0rios0/private-fork'                       # exact GitHub path
 

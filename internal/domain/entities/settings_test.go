@@ -318,7 +318,7 @@ func TestValidateSettings(t *testing.T) {
 			ExcludeRepos: []string{
 				"rios0rios0/autoupdate",
 				"*/oui",
-				"zestsecurity/frontend/*",
+				"contososecurity/frontend/*",
 				"opensearch-dashboards",
 			},
 		}

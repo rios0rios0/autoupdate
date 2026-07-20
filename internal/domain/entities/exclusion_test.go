@@ -31,7 +31,7 @@ func TestRepoKey(t *testing.T) {
 
 		// given
 		repo := entities.Repository{
-			Organization: "ZestSecurity",
+			Organization: "ContosoSecurity",
 			Project:      "frontend",
 			Name:         "opensearch-dashboards",
 		}
@@ -40,7 +40,7 @@ func TestRepoKey(t *testing.T) {
 		key := entities.RepoKey(repo)
 
 		// then
-		assert.Equal(t, "zestsecurity/frontend/opensearch-dashboards", key)
+		assert.Equal(t, "contososecurity/frontend/opensearch-dashboards", key)
 	})
 
 	t.Run("should lowercase every segment for case-insensitive matching", func(t *testing.T) {
@@ -62,7 +62,7 @@ func TestMatchesExcludePattern(t *testing.T) {
 
 	githubRepo := entities.Repository{Organization: "rios0rios0", Name: "autoupdate"}
 	adoRepo := entities.Repository{
-		Organization: "ZestSecurity",
+		Organization: "ContosoSecurity",
 		Project:      "frontend",
 		Name:         "opensearch-dashboards",
 	}
@@ -99,14 +99,14 @@ func TestMatchesExcludePattern(t *testing.T) {
 		t.Parallel()
 
 		// given
-		patterns := []string{"ZestSecurity/frontend/opensearch-dashboards"}
+		patterns := []string{"ContosoSecurity/frontend/opensearch-dashboards"}
 
 		// when
 		matched, pattern := entities.MatchesExcludePattern(adoRepo, patterns)
 
 		// then
 		assert.True(t, matched)
-		assert.Equal(t, "ZestSecurity/frontend/opensearch-dashboards", pattern)
+		assert.Equal(t, "ContosoSecurity/frontend/opensearch-dashboards", pattern)
 	})
 
 	t.Run("should support glob wildcards on the org segment", func(t *testing.T) {
@@ -114,7 +114,7 @@ func TestMatchesExcludePattern(t *testing.T) {
 
 		// given
 		patterns := []string{"*/oui"}
-		repo := entities.Repository{Organization: "ZestSecurity", Name: "oui"}
+		repo := entities.Repository{Organization: "ContosoSecurity", Name: "oui"}
 
 		// when
 		matched, pattern := entities.MatchesExcludePattern(repo, patterns)
@@ -128,14 +128,14 @@ func TestMatchesExcludePattern(t *testing.T) {
 		t.Parallel()
 
 		// given
-		patterns := []string{"zestsecurity/frontend/*"}
+		patterns := []string{"contososecurity/frontend/*"}
 
 		// when
 		matched, pattern := entities.MatchesExcludePattern(adoRepo, patterns)
 
 		// then
 		assert.True(t, matched)
-		assert.Equal(t, "zestsecurity/frontend/*", pattern)
+		assert.Equal(t, "contososecurity/frontend/*", pattern)
 	})
 
 	t.Run("should match a bare repo name against the trailing segment", func(t *testing.T) {

@@ -564,7 +564,7 @@ func TestIsExcludedByGlobalList(t *testing.T) {
 	t.Parallel()
 
 	github := &commands.RemoteInfo{Org: "rios0rios0", RepoName: "autoupdate"}
-	ado := &commands.RemoteInfo{Org: "ZestSecurity", Project: "frontend", RepoName: "opensearch-dashboards"}
+	ado := &commands.RemoteInfo{Org: "ContosoSecurity", Project: "frontend", RepoName: "opensearch-dashboards"}
 
 	t.Run("should return false when settings is nil", func(t *testing.T) {
 		t.Parallel()
@@ -607,7 +607,7 @@ func TestIsExcludedByGlobalList(t *testing.T) {
 
 		// given
 		settings := &entities.Settings{ExcludeRepos: []string{
-			"ZestSecurity/frontend/opensearch-dashboards",
+			"ContosoSecurity/frontend/opensearch-dashboards",
 		}}
 
 		// when

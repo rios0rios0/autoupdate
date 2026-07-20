@@ -16,6 +16,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- replaced the sample organization name used across the test fixtures, `README.md` and the `exclusion.go` doc comments with a neutral `ContosoSecurity` placeholder, so the examples no longer reference a real private Azure DevOps organization
+
 ### Fixed
 
 - fixed the Go updater writing non-existent Docker base image tags into `Dockerfile` `FROM` clauses: it now verifies each target `golang:<version>` tag is published on Docker Hub before rewriting, falls back to the closest published patch within the same minor and suffix, and leaves the clause untouched when no suitable image exists — instead of blindly applying the latest `go.dev` version via `sed`, which could point `FROM` at an unpublished patch (registry lag) or a dropped Alpine variant such as `golang:1.25.7-alpine3.20`
