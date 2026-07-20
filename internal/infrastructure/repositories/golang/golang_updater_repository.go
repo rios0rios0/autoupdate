@@ -71,6 +71,10 @@ func NewUpdaterRepositoryWithDeps(vf VersionFetcher) repositories.UpdaterReposit
 func (u *UpdaterRepository) Name() string { return updaterName }
 
 // Detect returns true if the repository has Go marker files (e.g. go.mod).
+// The langforge detector only inspects the repository root, so a repository
+// that keeps its module in a subdirectory — such as a Terraform or
+// infrastructure repository with a Go test harness nested under it — is
+// detected through a full listing of go.mod files instead.
 func (u *UpdaterRepository) Detect(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
@@ -79,9 +83,21 @@ func (u *UpdaterRepository) Detect(
 	found, err := support.DetectRemote(ctx, &langGolang.Detector{}, provider, repo)
 	if err != nil {
 		logger.Warnf("[golang] detection error for %s/%s: %v", repo.Organization, repo.Name, err)
+	}
+	if found {
+		return true
+	}
+
+	moduleDirs := discoverRemoteModuleDirs(ctx, provider, repo)
+	if len(moduleDirs) == 0 {
 		return false
 	}
-	return found
+
+	logger.Infof(
+		"[golang] %s/%s has no root go.mod but %d nested module(s): %s",
+		repo.Organization, repo.Name, len(moduleDirs), strings.Join(moduleDirs, ", "),
+	)
+	return true
 }
 
 // CreateUpdatePRs clones the repo, upgrades Go version and
@@ -261,14 +277,18 @@ func (u *UpdaterRepository) ApplyUpdates(
 // context instead of using the provider API.
 func localResolveVersionContext(repoDir, latestGoVersion string) *versionContext {
 	needsVersionUpgrade := true
-	goModPath := filepath.Join(repoDir, "go.mod")
-	data, err := os.ReadFile(goModPath)
-	if err != nil {
-		logger.Warnf("[golang] Could not read local go.mod, assuming version upgrade: %v", err)
+	currentGoVersion, sourceDir, found := resolveCurrentGoDirective(
+		localGoModReader(repoDir),
+		func() []string { return discoverLocalModuleDirs(repoDir) },
+	)
+	if !found {
+		logger.Warnf("[golang] Could not read any local go.mod, assuming version upgrade")
 	} else {
-		currentGoVersion := parseGoDirective(string(data))
 		needsVersionUpgrade = currentGoVersion != latestGoVersion
-		logger.Infof("[golang] Current go directive: %s (upgrade needed: %v)", currentGoVersion, needsVersionUpgrade)
+		logger.Infof(
+			"[golang] Current go directive in %s: %s (upgrade needed: %v)",
+			goModPathFor(sourceDir), currentGoVersion, needsVersionUpgrade,
+		)
 	}
 
 	branchName := branchGoDepsFmt
@@ -426,15 +446,23 @@ func resolveVersionContext(
 	latestGoVersion string,
 ) *versionContext {
 	// Read the current go.mod from the remote to decide whether this is a
-	// version upgrade or a deps-only refresh — before cloning.
+	// version upgrade or a deps-only refresh — before cloning. When the root
+	// holds no go.mod the first nested module answers the same question.
 	needsVersionUpgrade := true // safe default when go.mod cannot be read
-	goModContent, goModErr := provider.GetFileContent(ctx, repo, "go.mod")
-	if goModErr != nil {
-		logger.Warnf("[golang] Could not read remote go.mod, assuming version upgrade: %v", goModErr)
+	currentGoVersion, sourceDir, found := resolveCurrentGoDirective(
+		func(dir string) (string, error) {
+			return provider.GetFileContent(ctx, repo, goModPathFor(dir))
+		},
+		func() []string { return discoverRemoteModuleDirs(ctx, provider, repo) },
+	)
+	if !found {
+		logger.Warnf("[golang] Could not read any remote go.mod, assuming version upgrade")
 	} else {
-		currentGoVersion := parseGoDirective(goModContent)
 		needsVersionUpgrade = currentGoVersion != latestGoVersion
-		logger.Infof("[golang] Current go directive: %s (upgrade needed: %v)", currentGoVersion, needsVersionUpgrade)
+		logger.Infof(
+			"[golang] Current go directive in %s: %s (upgrade needed: %v)",
+			goModPathFor(sourceDir), currentGoVersion, needsVersionUpgrade,
+		)
 	}
 
 	// Choose the branch name pattern based on the kind of change, following
@@ -684,12 +712,62 @@ func writeGitLabAuth(sb *strings.Builder) {
 	sb.WriteString("echo '    insteadOf = https://gitlab.com/' >> \"$TEMP_GITCONFIG\"\n")
 }
 
+// writeGoUpgradeCommands emits the Go upgrade commands for every module in
+// the repository. A repository may declare more than one module — for example
+// an infrastructure repository whose integration-test harness lives in its own
+// module under a subdirectory — and `go get ./...` never crosses a module
+// boundary, so each module has to be upgraded in its own directory.
 func writeGoUpgradeCommands(sb *strings.Builder) {
-	// Read the current go version from go.mod and compare with the target
-	sb.WriteString("# Read current Go version from go.mod\n")
-	sb.WriteString("CURRENT_GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
-	sb.WriteString("echo \"Current Go version in go.mod: ${CURRENT_GO_VERSION:-<not found>}\"\n")
+	writeGoModuleDiscovery(sb)
+
 	sb.WriteString("GO_VERSION_CHANGED=false\n\n")
+
+	// The module list is fed through a heredoc rather than a pipe so the loop
+	// body runs in the current shell and GO_VERSION_CHANGED survives it.
+	sb.WriteString("while IFS= read -r MODULE_DIR; do\n")
+	sb.WriteString("    [ -n \"$MODULE_DIR\" ] || continue\n")
+	sb.WriteString("    echo \"=== Upgrading Go module in ${MODULE_DIR} ===\"\n")
+	sb.WriteString("    pushd \"$MODULE_DIR\" > /dev/null\n\n")
+
+	writeGoModuleUpgradeCommands(sb)
+
+	sb.WriteString("    popd > /dev/null\n")
+	// The delimiter is deliberately unquoted so that GO_MODULE_DIRS expands.
+	sb.WriteString("done <<GO_MODULE_LIST_END\n")
+	sb.WriteString("${GO_MODULE_DIRS}\n")
+	sb.WriteString("GO_MODULE_LIST_END\n\n")
+}
+
+// writeGoModuleDiscovery emits the discovery of every go.mod in the checkout,
+// skipping vendored trees, test fixtures and hidden directories.
+func writeGoModuleDiscovery(sb *strings.Builder) {
+	sb.WriteString("# Discover every Go module in the repository (root and nested).\n")
+	sb.WriteString("# Unreadable subtrees make find exit non-zero; under `set -e` that would\n")
+	sb.WriteString("# abort the whole upgrade, so the pipeline result is deliberately ignored\n")
+	sb.WriteString("# and the modules that were found are still upgraded.\n")
+	sb.WriteString("GO_MODULE_DIRS=$(find . -type f -name go.mod \\\n")
+	sb.WriteString("    -not -path '*/vendor/*' \\\n")
+	sb.WriteString("    -not -path '*/testdata/*' \\\n")
+	sb.WriteString("    -not -path '*/node_modules/*' \\\n")
+	sb.WriteString("    -not -path '*/.*/*' \\\n")
+	sb.WriteString("    -exec dirname {} \\; 2>/dev/null | sed 's|^\\./||' | sort -u || true)\n")
+	sb.WriteString("if [ -z \"$GO_MODULE_DIRS\" ]; then\n")
+	sb.WriteString("    echo \"WARNING: no go.mod found in the repository, nothing to upgrade\"\n")
+	sb.WriteString("    echo \"GO_VERSION_UPDATED=false\"\n")
+	sb.WriteString("    exit 0\n")
+	sb.WriteString("fi\n")
+	sb.WriteString("echo \"Go modules to upgrade:\"\n")
+	sb.WriteString("echo \"$GO_MODULE_DIRS\" | sed 's/^/  - /'\n\n")
+}
+
+// writeGoModuleUpgradeCommands emits the upgrade of a single module. It runs
+// with the working directory already set to that module's directory, so every
+// path stays module-relative.
+func writeGoModuleUpgradeCommands(sb *strings.Builder) {
+	// Read the current go version from go.mod and compare with the target
+	sb.WriteString("    # Read current Go version from go.mod\n")
+	sb.WriteString("    CURRENT_GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
+	sb.WriteString("    echo \"Current Go version in go.mod: ${CURRENT_GO_VERSION:-<not found>}\"\n")
 
 	// Only update the go directive if the versions differ.
 	// Use sed + redirect-and-move instead of "go mod edit -go=" to preserve
@@ -704,51 +782,57 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 	//   • Missing go directive — warn and let "go mod tidy" insert it later.
 	//   • sed no-op (pattern didn't match) — verify the file was actually
 	//     modified before setting GO_VERSION_CHANGED.
-	sb.WriteString("if [ -z \"$CURRENT_GO_VERSION\" ]; then\n")
-	sb.WriteString("    echo \"WARNING: no go directive found in go.mod, skipping version update\"\n")
-	sb.WriteString("    echo \"GO_VERSION_UPDATED=false\"\n")
-	sb.WriteString("elif [ \"$CURRENT_GO_VERSION\" != \"$GO_VERSION\" ]; then\n")
-	sb.WriteString("    echo \"Updating Go version from $CURRENT_GO_VERSION to $GO_VERSION...\"\n")
-	sb.WriteString("    sed \"s/^go [0-9][0-9.]*$/go ${GO_VERSION}/\" go.mod > go.mod.tmp && mv go.mod.tmp go.mod\n")
-	sb.WriteString("    # Verify the substitution actually took effect\n")
-	sb.WriteString("    UPDATED_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
-	sb.WriteString("    if [ \"$UPDATED_VERSION\" = \"$GO_VERSION\" ]; then\n")
-	sb.WriteString("        GO_VERSION_CHANGED=true\n")
-	sb.WriteString("        echo \"GO_VERSION_UPDATED=true\"\n")
-	sb.WriteString("    else\n")
-	sb.WriteString("        echo \"WARNING: failed to update go directive (sed pattern did not match)\"\n")
+	sb.WriteString("    if [ -z \"$CURRENT_GO_VERSION\" ]; then\n")
+	sb.WriteString("        echo \"WARNING: no go directive found in go.mod, skipping version update\"\n")
 	sb.WriteString("        echo \"GO_VERSION_UPDATED=false\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"Go version already at $GO_VERSION, skipping directive update\"\n")
-	sb.WriteString("    echo \"GO_VERSION_UPDATED=false\"\n")
-	sb.WriteString("fi\n\n")
-
-	sb.WriteString("echo \"Running go get -u -t ./...\"\n")
+	sb.WriteString("    elif [ \"$CURRENT_GO_VERSION\" != \"$GO_VERSION\" ]; then\n")
+	sb.WriteString("        echo \"Updating Go version from $CURRENT_GO_VERSION to $GO_VERSION...\"\n")
 	sb.WriteString(
-		"\"$GO_BINARY\" get -u -t ./... 2>&1 || echo \"WARNING: go get -u -t had some errors (continuing anyway)\"\n\n",
+		"        sed \"s/^go [0-9][0-9.]*$/go ${GO_VERSION}/\" go.mod > go.mod.tmp && mv go.mod.tmp go.mod\n",
+	)
+	sb.WriteString("        # Verify the substitution actually took effect\n")
+	sb.WriteString("        UPDATED_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
+	sb.WriteString("        if [ \"$UPDATED_VERSION\" = \"$GO_VERSION\" ]; then\n")
+	sb.WriteString("            GO_VERSION_CHANGED=true\n")
+	sb.WriteString("            echo \"GO_VERSION_UPDATED=true\"\n")
+	sb.WriteString("        else\n")
+	sb.WriteString("            echo \"WARNING: failed to update go directive (sed pattern did not match)\"\n")
+	sb.WriteString("            echo \"GO_VERSION_UPDATED=false\"\n")
+	sb.WriteString("        fi\n")
+	sb.WriteString("    else\n")
+	sb.WriteString("        echo \"Go version already at $GO_VERSION, skipping directive update\"\n")
+	sb.WriteString("        echo \"GO_VERSION_UPDATED=false\"\n")
+	sb.WriteString("    fi\n\n")
+
+	sb.WriteString("    echo \"Running go get -u -t ./...\"\n")
+	sb.WriteString(
+		"    \"$GO_BINARY\" get -u -t ./... 2>&1 || " +
+			"echo \"WARNING: go get -u -t had some errors (continuing anyway)\"\n\n",
 	)
 
-	sb.WriteString("echo \"Running go mod tidy...\"\n")
+	sb.WriteString("    echo \"Running go mod tidy...\"\n")
 	sb.WriteString(
-		"\"$GO_BINARY\" mod tidy 2>&1 || echo \"WARNING: go mod tidy had some errors (continuing anyway)\"\n\n",
+		"    \"$GO_BINARY\" mod tidy 2>&1 || " +
+			"echo \"WARNING: go mod tidy had some errors (continuing anyway)\"\n\n",
 	)
 
 	// Re-apply the Go version after go mod tidy, because older Go binaries
 	// may normalise the three-part version back to two-part during tidy.
-	sb.WriteString("# Re-apply Go version if go mod tidy normalised it\n")
-	sb.WriteString("AFTER_TIDY_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
-	sb.WriteString("if [ -n \"$AFTER_TIDY_VERSION\" ] && [ \"$AFTER_TIDY_VERSION\" != \"$GO_VERSION\" ]; then\n")
-	sb.WriteString("    echo \"Re-applying Go version (go mod tidy changed it to $AFTER_TIDY_VERSION)...\"\n")
+	sb.WriteString("    # Re-apply Go version if go mod tidy normalised it\n")
+	sb.WriteString("    AFTER_TIDY_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}')\n")
 	sb.WriteString(
-		"    sed \"s/^go [0-9][0-9.]*$/go ${GO_VERSION}/\" go.mod > go.mod.tmp && mv go.mod.tmp go.mod\n",
+		"    if [ -n \"$AFTER_TIDY_VERSION\" ] && [ \"$AFTER_TIDY_VERSION\" != \"$GO_VERSION\" ]; then\n",
 	)
-	sb.WriteString("fi\n\n")
+	sb.WriteString("        echo \"Re-applying Go version (go mod tidy changed it to $AFTER_TIDY_VERSION)...\"\n")
+	sb.WriteString(
+		"        sed \"s/^go [0-9][0-9.]*$/go ${GO_VERSION}/\" go.mod > go.mod.tmp && mv go.mod.tmp go.mod\n",
+	)
+	sb.WriteString("    fi\n\n")
 
-	sb.WriteString("if [ -d \"vendor\" ]; then\n")
-	sb.WriteString("    echo \"Running go mod vendor...\"\n")
-	sb.WriteString("    \"$GO_BINARY\" mod vendor 2>&1 || echo \"WARNING: go mod vendor had some errors\"\n")
-	sb.WriteString("fi\n\n")
+	sb.WriteString("    if [ -d \"vendor\" ]; then\n")
+	sb.WriteString("        echo \"Running go mod vendor...\"\n")
+	sb.WriteString("        \"$GO_BINARY\" mod vendor 2>&1 || echo \"WARNING: go mod vendor had some errors\"\n")
+	sb.WriteString("    fi\n\n")
 }
 
 func writeChangelogUpdate(sb *strings.Builder) {
@@ -869,10 +953,10 @@ func GenerateGoPRDescription(goVersion string, hasConfigSH, goVersionUpdated boo
 	}
 	sb.WriteString("### Changes\n\n")
 	if goVersionUpdated {
-		sb.WriteString("- Updated `go.mod` Go directive to `" + goVersion + "`\n")
+		sb.WriteString("- Updated the `go` directive to `" + goVersion + "` in every `go.mod`\n")
 	}
-	sb.WriteString("- Ran `go get -u -t ./...` to update all dependencies\n")
-	sb.WriteString("- Ran `go mod tidy` to clean up\n")
+	sb.WriteString("- Ran `go get -u -t ./...` in each module directory to update all dependencies\n")
+	sb.WriteString("- Ran `go mod tidy` in each module directory to clean up\n")
 	if hasConfigSH {
 		sb.WriteString("- `config.sh` was sourced before running Go commands (private package settings)\n")
 	}
