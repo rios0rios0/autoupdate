@@ -22,7 +22,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
   branch for the current run, every remote branch carrying the aggregate prefix is deleted and the
   pull request attached to each one is closed (on Azure DevOps, abandoned). Because the aggregate
   branch is dated, an unattended daily run previously stacked up one abandoned branch per day for as
-  long as nobody merged
+  long as nobody merged. A branch whose pull request could not be closed is left in place, so the
+  pair stays retryable instead of stranding an open pull request whose source branch is gone
 - added the `cleanup_stale_branches` configuration key and the `--skip-cleanup` flag to turn that
   cleanup off. Cleanup is opt-out, so it runs unless explicitly disabled; the flag overrides the
   configuration for a single run

@@ -103,3 +103,6 @@ var ResolveConcurrency = resolveConcurrency //nolint:gochecknoglobals // test ex
 
 // DefaultRepoConcurrency exports defaultRepoConcurrency for testing.
 const DefaultRepoConcurrency = defaultRepoConcurrency
+
+// CleanupStaleAggregateBranches exports cleanupStaleAggregateBranches for testing.
+var CleanupStaleAggregateBranches = cleanupStaleAggregateBranches //nolint:gochecknoglobals // test export

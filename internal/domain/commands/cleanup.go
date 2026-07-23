@@ -76,9 +76,18 @@ func cleanupStaleAggregateBranches(
 		// can no longer resolve the pull request that belonged to it.
 		closed, closeErr := provider.ClosePullRequest(ctx, repo, branch)
 		if closeErr != nil {
-			logger.Warnf("[autoupdate] Could not close the pull request for %q in %s/%s: %v",
-				branch, repo.Organization, repo.Name, closeErr)
-		} else if closed {
+			// The branch stays put so the pair remains retryable. Deleting it now would
+			// strand an open pull request whose source branch no longer exists, and the
+			// next run would not even see the branch to try closing it again.
+			logger.Warnf(
+				"[autoupdate] Could not close the pull request for %q in %s/%s, "+
+					"keeping the branch so a later run can retry: %v",
+				branch, repo.Organization, repo.Name, closeErr,
+			)
+			continue
+		}
+
+		if closed {
 			logger.Infof("[autoupdate] Closed the pull request for the stale branch %q in %s/%s",
 				branch, repo.Organization, repo.Name)
 		}

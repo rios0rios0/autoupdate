@@ -22,9 +22,9 @@ providers:
 # attached to them, before creating the branch for the current run. The aggregate
 # branch carries the run date, so without this an unattended daily run leaves one
 # abandoned branch per day for as long as nobody merges.
-# Enabled by default, so set it to false to keep those branches, or pass
-# --skip-cleanup to disable it for a single run.
-#cleanup_stale_branches: true
+# Enabled by default; uncomment the line below to keep those branches instead,
+# or pass --skip-cleanup to disable it for a single run.
+#cleanup_stale_branches: false
 
 # Prefix of the consolidated branch each run creates; the run date is appended to
 # it. The same prefix decides which branches the cleanup above removes.
