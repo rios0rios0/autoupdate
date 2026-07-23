@@ -79,6 +79,10 @@ Auto-discovery searches `.`, `.config`, `configs`, `$HOME`, `$HOME/.config` for 
 - **Global**: `exclude_repos` in user config — right-anchored glob list matched against `<org>/<repo>` (or `<org>/<project>/<repo>` for ADO). Honored in batch mode and in local mode when a config file is loadable.
 - **Per-repo**: `.autoupdate.yaml` in the target repository's root with `skip: true` (and optional `reason`). Checked in both `autoupdate run` (fetched via provider API) and `autoupdate .` (read from disk).
 
+### Stale Branch Cleanup
+
+Because the aggregate branch is dated (`chore/autoupdate-YYYY-MM-DD`), every run on a new day creates a new branch, so unattended runs stack up abandoned branches. `cleanupStaleAggregateBranches` (`internal/domain/commands/cleanup.go`) runs in `processLocalUpdaters` right after the clone and before `CreateBranchFromDefault`: it lists the remote branches, keeps those carrying the aggregate prefix (never the target branch), closes each one's PR via `ForgeProvider.ClosePullRequest`, then deletes the branch through `BatchGitContext.DeleteBranch` (remote **and** local — a leftover local branch would make the branch still look like it exists). It sits after the same-day `PullRequestExists` check, so a PR is never closed without a replacement being opened. It is opt-out: `entities.CleanupEnabled` treats an unset `cleanup_stale_branches` as enabled, and the persistent `--skip-cleanup` flag (applied by `applySkipCleanupFlag` in `controllers/config_helpers.go`) overrides the config per run. `entities.ResolveAggregateBranchPrefix` (`aggregate_branch_prefix`, default `chore/autoupdate-`) feeds both `buildAggregateBranchName` and the cleanup filter so they cannot diverge. Cleanup is best-effort: failures are logged and skipped, never aborting the update run.
+
 ### Batch Mode Concurrency
 
 `autoupdate run` processes repositories within an org in parallel via `errgroup` (default 4), set by the `concurrency` config field or `--concurrency` flag; values `< 1` are clamped to 1 (sequential). `RunCommand` guards its shared accumulators with a `sync.Mutex` — keep new shared state goroutine-safe when editing the per-repo loop.

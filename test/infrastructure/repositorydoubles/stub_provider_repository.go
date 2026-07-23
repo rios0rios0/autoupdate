@@ -57,6 +57,11 @@ type SpyProviderRepository struct {
 	PRExistsResult   bool
 	PRExistsErr      error
 	PRExistsBranches []string
+
+	// --- ClosePullRequest ---
+	PRClosedResult   bool
+	PRCloseErr       error
+	PRClosedBranches []string
 }
 
 var _ repositories.ProviderRepository = (*SpyProviderRepository)(nil)
@@ -146,6 +151,15 @@ func (p *SpyProviderRepository) PullRequestExists(
 	return p.PRExistsResult, p.PRExistsErr
 }
 
+func (p *SpyProviderRepository) ClosePullRequest(
+	_ context.Context, _ entities.Repository, branch string,
+) (bool, error) {
+	p.mu.Lock()
+	p.PRClosedBranches = append(p.PRClosedBranches, branch)
+	p.mu.Unlock()
+	return p.PRClosedResult, p.PRCloseErr
+}
+
 func (p *SpyProviderRepository) SSHCloneURL(_ entities.Repository, _ string) string { return "" }
 
 func (p *SpyProviderRepository) CloneURL(repo entities.Repository) string {
@@ -209,6 +223,12 @@ func (d *DummyProviderRepository) CreatePullRequest(
 }
 
 func (d *DummyProviderRepository) PullRequestExists(
+	_ context.Context, _ entities.Repository, _ string,
+) (bool, error) {
+	return false, nil
+}
+
+func (d *DummyProviderRepository) ClosePullRequest(
 	_ context.Context, _ entities.Repository, _ string,
 ) (bool, error) {
 	return false, nil

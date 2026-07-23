@@ -52,6 +52,7 @@ func (it *RunController) Execute(cmd *cobra.Command, _ []string) {
 		logger.Errorf("failed to load config: %v", err)
 		return
 	}
+	applySkipCleanupFlag(cmd, settings)
 
 	logger.Info("Starting autoupdate run...")
 

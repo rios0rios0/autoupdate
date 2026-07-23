@@ -16,6 +16,11 @@ import (
 const DefaultConfigURL = "https://raw.githubusercontent.com/rios0rios0/autoupdate/" +
 	"main/configs/autoupdate.yaml"
 
+// DefaultAggregateBranchPrefix is the prefix of the consolidated branch each run
+// creates. The run date is appended to it, giving "chore/autoupdate-YYYY-MM-DD",
+// and stale-branch cleanup matches the same prefix.
+const DefaultAggregateBranchPrefix = "chore/autoupdate-"
+
 // ProviderConfig is a type alias for gitforge's ProviderConfig, preserving backward compatibility.
 type ProviderConfig = configEntities.ProviderConfig
 
@@ -30,13 +35,43 @@ type Settings struct {
 	// organization. Zero (the default) lets the run command pick a sensible
 	// built-in default; 1 forces fully sequential processing. A CLI flag, when
 	// provided, takes precedence over this value.
-	Concurrency            int    `yaml:"concurrency"`
+	Concurrency int `yaml:"concurrency"`
+	// CleanupStaleBranches controls whether the aggregate branches left over by
+	// earlier runs are deleted, and their pull requests closed, before the branch
+	// for the current run is created. Nil (not set in config) defaults to true.
+	CleanupStaleBranches *bool `yaml:"cleanup_stale_branches"`
+	// AggregateBranchPrefix overrides the prefix of the dated aggregate branch. The
+	// same value decides which branches the cleanup above removes.
+	AggregateBranchPrefix  string `yaml:"aggregate_branch_prefix"`
 	GpgKeyPath             string `yaml:"gpg_key_path"`
 	GpgKeyPassphrase       string `yaml:"gpg_key_passphrase"`
 	GitHubAccessToken      string `yaml:"github_access_token"`
 	GitLabAccessToken      string `yaml:"gitlab_access_token"`
 	AzureDevOpsAccessToken string `yaml:"azure_devops_access_token"`
 	GitLabCIJobToken       string `yaml:"-"`
+}
+
+// CleanupEnabled reports whether stale aggregate-branch cleanup should run.
+// Cleanup is opt-out, so an absent setting means enabled; only an explicit
+// "cleanup_stale_branches: false" (or the --skip-cleanup flag) turns it off.
+func CleanupEnabled(settings *Settings) bool {
+	if settings == nil || settings.CleanupStaleBranches == nil {
+		return true
+	}
+	return *settings.CleanupStaleBranches
+}
+
+// ResolveAggregateBranchPrefix returns the configured aggregate branch prefix,
+// falling back to DefaultAggregateBranchPrefix. The same prefix names the branch a
+// run creates and selects the branches cleanup removes, so a custom prefix can never
+// leave cleanup sweeping branches autoupdate no longer makes.
+func ResolveAggregateBranchPrefix(settings *Settings) string {
+	if settings != nil {
+		if prefix := strings.TrimSpace(settings.AggregateBranchPrefix); prefix != "" {
+			return prefix
+		}
+	}
+	return DefaultAggregateBranchPrefix
 }
 
 // UpdaterConfig holds per-updater settings.

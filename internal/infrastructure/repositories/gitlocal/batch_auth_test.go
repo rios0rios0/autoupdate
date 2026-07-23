@@ -236,6 +236,12 @@ func (s *stubLocalGitAuthProvider) PullRequestExists(
 	return false, nil
 }
 
+func (s *stubLocalGitAuthProvider) ClosePullRequest(
+	_ context.Context, _ globalEntities.Repository, _ string,
+) (bool, error) {
+	return false, nil
+}
+
 func (s *stubLocalGitAuthProvider) GetServiceType() globalEntities.ServiceType {
 	return s.serviceType
 }

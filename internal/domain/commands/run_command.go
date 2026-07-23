@@ -381,7 +381,9 @@ func (it *RunCommand) processLocalUpdaters(
 
 	// Same-day idempotency: short-circuit before touching git if the aggregate
 	// PR already exists for the target branch on this day.
-	aggregateBranch := buildAggregateBranchName(time.Now())
+	aggregateBranch := buildAggregateBranchName(
+		entities.ResolveAggregateBranchPrefix(settings), time.Now(),
+	)
 
 	exists, checkErr := provider.PullRequestExists(ctx, repo, aggregateBranch)
 	if checkErr != nil {
@@ -415,6 +417,15 @@ func (it *RunCommand) processLocalUpdaters(
 		return nil, 1
 	}
 	defer batchCtx.Close()
+
+	// Drop the dated branches left behind by earlier runs, closing their pull requests,
+	// before today's branch is created. Reaching this point means no pull request exists
+	// for today yet, so nothing is closed without a replacement being opened for it.
+	if entities.CleanupEnabled(settings) {
+		cleanupStaleAggregateBranches(
+			ctx, batchCtx, provider, repo, settings, targetBranch, authMethods,
+		)
+	}
 
 	if branchErr := batchCtx.CreateBranchFromDefault(aggregateBranch); branchErr != nil {
 		logger.Errorf("[autoupdate] Failed to create branch %s for %s/%s: %v",
@@ -589,18 +600,16 @@ func (it *RunCommand) commitPushAndOpenPR(
 	return pr, 0
 }
 
-// aggregateBranchPrefix is the prefix used for every consolidated branch
-// name produced by the aggregate pipeline. The full name is
-// `chore/autoupdate-YYYY-MM-DD` (UTC), making same-day re-runs idempotent
-// without force-pushing over an under-review pull request.
-const aggregateBranchPrefix = "chore/autoupdate-"
-
-// buildAggregateBranchName returns the deterministic consolidated branch
-// name for a given run timestamp. Two invocations on the same UTC day for
-// the same repo land on the same branch, which together with the
-// PullRequestExists pre-check makes same-day re-runs idempotent.
-func buildAggregateBranchName(now time.Time) string {
-	return aggregateBranchPrefix + now.UTC().Format("2006-01-02")
+// buildAggregateBranchName returns the deterministic consolidated branch name for a
+// given prefix and run timestamp, as `<prefix>YYYY-MM-DD` in UTC. Two invocations on
+// the same UTC day for the same repo land on the same branch, which together with the
+// PullRequestExists pre-check makes same-day re-runs idempotent without force-pushing
+// over an under-review pull request.
+//
+// The prefix comes from entities.ResolveAggregateBranchPrefix, so the branch a run
+// creates and the branches cleanup removes are always named by the same value.
+func buildAggregateBranchName(prefix string, now time.Time) string {
+	return prefix + now.UTC().Format("2006-01-02")
 }
 
 // buildAggregateCommitMessage synthesizes a single commit message that

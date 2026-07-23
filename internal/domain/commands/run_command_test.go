@@ -1844,7 +1844,7 @@ func TestBuildAggregateBranchName(t *testing.T) {
 		ts := time.Date(2026, time.July, 15, 23, 30, 0, 0, loc)
 
 		// when
-		branch := commands.BuildAggregateBranchName(ts)
+		branch := commands.BuildAggregateBranchName(entities.DefaultAggregateBranchPrefix, ts)
 
 		// then
 		// 23:30 EDT (UTC-4) on July 15 → 03:30 UTC on July 16
@@ -1859,8 +1859,8 @@ func TestBuildAggregateBranchName(t *testing.T) {
 		evening := time.Date(2026, time.April, 15, 22, 0, 0, 0, time.UTC)
 
 		// when
-		branchA := commands.BuildAggregateBranchName(morning)
-		branchB := commands.BuildAggregateBranchName(evening)
+		branchA := commands.BuildAggregateBranchName(entities.DefaultAggregateBranchPrefix, morning)
+		branchB := commands.BuildAggregateBranchName(entities.DefaultAggregateBranchPrefix, evening)
 
 		// then
 		assert.Equal(t, branchA, branchB)
