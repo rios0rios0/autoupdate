@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
@@ -12,6 +13,26 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
 )
+
+// closePullRequestTimeout caps a single close call against the forge API.
+const closePullRequestTimeout = 30 * time.Second
+
+// closeStalePullRequest closes the pull request opened from the given branch under a
+// deadline, so an unresponsive provider degrades cleanup to best-effort instead of
+// stalling the update run behind housekeeping. The caller's context is still honoured,
+// so a cancelled run stops immediately rather than waiting out the timeout.
+func closeStalePullRequest(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+	branch string,
+) (bool, error) {
+	closeCtx, cancel := context.WithTimeout(ctx, closePullRequestTimeout)
+	defer cancel()
+
+	//nolint:wrapcheck // the caller logs this error with the branch and repository context
+	return provider.ClosePullRequest(closeCtx, repo, branch)
+}
 
 // filterStaleAggregateBranches returns the aggregate branches autoupdate owns and may
 // safely remove: every branch carrying the aggregate prefix, except the target branch
@@ -74,7 +95,7 @@ func cleanupStaleAggregateBranches(
 	for _, branch := range stale {
 		// The pull request is closed first: once the source branch is gone, a provider
 		// can no longer resolve the pull request that belonged to it.
-		closed, closeErr := provider.ClosePullRequest(ctx, repo, branch)
+		closed, closeErr := closeStalePullRequest(ctx, provider, repo, branch)
 		if closeErr != nil {
 			// The branch stays put so the pair remains retryable. Deleting it now would
 			// strand an open pull request whose source branch no longer exists, and the

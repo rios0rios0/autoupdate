@@ -25,7 +25,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
   long as nobody merged. A branch with no pull request at all is still deleted, because having
   nothing to close is a no-op rather than a failure; only a branch whose pull request could not be
   closed is left in place, so the pair stays retryable instead of stranding an open pull request
-  whose source branch is gone
+  whose source branch is gone. Each close call is bounded by a timeout, so an unresponsive provider
+  degrades cleanup to best-effort rather than stalling the update run behind housekeeping
 - added the `cleanup_stale_branches` configuration key and the `--skip-cleanup` flag to turn that
   cleanup off. Cleanup is opt-out, so it runs unless explicitly disabled; the flag overrides the
   configuration for a single run
