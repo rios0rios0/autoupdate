@@ -15,6 +15,9 @@ type SettingsBuilder struct {
 	excludeForks    bool
 	excludeArchived bool
 	excludeRepos    []string
+
+	cleanupStaleBranches  *bool
+	aggregateBranchPrefix string
 }
 
 // NewSettingsBuilder creates a new settings builder with sensible defaults.
@@ -56,6 +59,18 @@ func (b *SettingsBuilder) WithExcludeRepos(patterns []string) *SettingsBuilder {
 	return b
 }
 
+// WithCleanupStaleBranches sets the stale aggregate-branch cleanup toggle.
+func (b *SettingsBuilder) WithCleanupStaleBranches(cleanup bool) *SettingsBuilder {
+	b.cleanupStaleBranches = &cleanup
+	return b
+}
+
+// WithAggregateBranchPrefix sets the aggregate branch prefix.
+func (b *SettingsBuilder) WithAggregateBranchPrefix(prefix string) *SettingsBuilder {
+	b.aggregateBranchPrefix = prefix
+	return b
+}
+
 // Build creates the settings (satisfies testkit.Builder interface).
 func (b *SettingsBuilder) Build() interface{} {
 	return b.BuildSettings()
@@ -69,6 +84,9 @@ func (b *SettingsBuilder) BuildSettings() *entities.Settings {
 		ExcludeForks:    b.excludeForks,
 		ExcludeArchived: b.excludeArchived,
 		ExcludeRepos:    b.excludeRepos,
+
+		CleanupStaleBranches:  b.cleanupStaleBranches,
+		AggregateBranchPrefix: b.aggregateBranchPrefix,
 	}
 }
 
@@ -80,6 +98,8 @@ func (b *SettingsBuilder) Reset() testkit.Builder {
 	b.excludeForks = false
 	b.excludeArchived = false
 	b.excludeRepos = nil
+	b.cleanupStaleBranches = nil
+	b.aggregateBranchPrefix = ""
 	return b
 }
 
@@ -96,6 +116,14 @@ func (b *SettingsBuilder) Clone() testkit.Builder {
 	excludeRepos := make([]string, len(b.excludeRepos))
 	copy(excludeRepos, b.excludeRepos)
 
+	// The clone gets its own bool so the two builders never share the pointer:
+	// a deep copy that hands out the same address is not a deep copy.
+	var cleanupStaleBranches *bool
+	if b.cleanupStaleBranches != nil {
+		cleanup := *b.cleanupStaleBranches
+		cleanupStaleBranches = &cleanup
+	}
+
 	return &SettingsBuilder{
 		BaseBuilder:     b.BaseBuilder.Clone().(*testkit.BaseBuilder),
 		providers:       providers,
@@ -103,5 +131,8 @@ func (b *SettingsBuilder) Clone() testkit.Builder {
 		excludeForks:    b.excludeForks,
 		excludeArchived: b.excludeArchived,
 		excludeRepos:    excludeRepos,
+
+		cleanupStaleBranches:  cleanupStaleBranches,
+		aggregateBranchPrefix: b.aggregateBranchPrefix,
 	}
 }

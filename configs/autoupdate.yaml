@@ -18,6 +18,18 @@ providers:
   #   organizations:
   #     - "my-group"
 
+# Delete the dated branches left over by earlier runs, closing any pull request
+# attached to them, before creating the branch for the current run. The aggregate
+# branch carries the run date, so without this an unattended daily run leaves one
+# abandoned branch per day for as long as nobody merges.
+# Enabled by default, so set it to false to keep those branches, or pass
+# --skip-cleanup to disable it for a single run.
+#cleanup_stale_branches: true
+
+# Prefix of the consolidated branch each run creates; the run date is appended to
+# it. The same prefix decides which branches the cleanup above removes.
+#aggregate_branch_prefix: 'chore/autoupdate-'
+
 # Number of repositories to process in parallel within an organization.
 # Repository processing is I/O-bound (clone + remote API calls), so a small
 # fan-out shortens large-organization runs significantly. Omit it (or set 0)

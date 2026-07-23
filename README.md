@@ -246,6 +246,7 @@ steps:
 | `--token`   |       | Auth token for the Git provider (overrides env var)      |
 | `--dry-run` |       | Preview changes without applying                         |
 | `--verbose` | `-v`  | Enable verbose output                                    |
+| `--skip-cleanup` |  | Keep the dated branches from previous runs instead of deleting them and closing their PRs |
 
 ### `autoupdate [path]`
 

@@ -48,6 +48,8 @@ Usage modes:
 		"Show what would be done without making changes")
 	cmd.PersistentFlags().BoolP("verbose", "v", false,
 		"Enable verbose output")
+	cmd.PersistentFlags().Bool("skip-cleanup", false,
+		"Keep the dated branches from previous runs instead of deleting them and closing their PRs")
 
 	_ = bind // suppress unused warning
 	return cmd

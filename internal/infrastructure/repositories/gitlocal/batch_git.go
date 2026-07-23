@@ -110,6 +110,33 @@ func (c *BatchGitContext) CreateBranchFromDefault(branchName string) error {
 	return gitops.CreateAndSwitchBranch(c.repo, c.workTree, branchName, head.Hash())
 }
 
+// ListRemoteBranches returns the names of the branches published on the origin
+// remote, queried from the remote itself rather than from the clone's refs.
+func (c *BatchGitContext) ListRemoteBranches(authMethods []transport.AuthMethod) ([]string, error) {
+	branches, err := gitops.ListRemoteBranches(c.repo, authMethods)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list remote branches: %w", err)
+	}
+	return branches, nil
+}
+
+// DeleteBranch removes branchName from the origin remote and then locally.
+//
+// Both halves are needed: deleting the branch on the remote leaves the local one
+// behind, and a leftover local branch makes the branch still look like it exists,
+// which would stop it from being recreated afterwards.
+func (c *BatchGitContext) DeleteBranch(branchName string, authMethods []transport.AuthMethod) error {
+	if err := gitops.DeleteRemoteBranch(c.repo, branchName, authMethods); err != nil {
+		return fmt.Errorf("failed to delete remote branch %s: %w", branchName, err)
+	}
+
+	if err := gitops.DeleteLocalBranch(c.repo, branchName); err != nil {
+		return fmt.Errorf("failed to delete local branch %s: %w", branchName, err)
+	}
+
+	return nil
+}
+
 // SwitchToDefault switches back to the default branch. This is used after
 // a successful commit+push where the worktree is already clean.
 func (c *BatchGitContext) SwitchToDefault() error {

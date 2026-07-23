@@ -74,6 +74,9 @@ func NewApplicableUpdaterForTest(
 // BuildAggregateBranchName exports buildAggregateBranchName for testing.
 var BuildAggregateBranchName = buildAggregateBranchName //nolint:gochecknoglobals // test export
 
+// FilterStaleAggregateBranches exports filterStaleAggregateBranches for testing.
+var FilterStaleAggregateBranches = filterStaleAggregateBranches //nolint:gochecknoglobals // test export
+
 // BuildAggregateCommitMessage exports buildAggregateCommitMessage for testing.
 var BuildAggregateCommitMessage = buildAggregateCommitMessage //nolint:gochecknoglobals // test export
 

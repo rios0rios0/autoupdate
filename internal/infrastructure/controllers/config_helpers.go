@@ -6,9 +6,24 @@ import (
 	configHelpers "github.com/rios0rios0/gitforge/pkg/config/domain/helpers"
 	downloadHelpers "github.com/rios0rios0/gitforge/pkg/config/infrastructure/helpers"
 	logger "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 )
+
+// applySkipCleanupFlag turns off stale aggregate-branch cleanup when --skip-cleanup is
+// set. The flag is a per-run override, so it wins over the configuration file; without it
+// the configured value stands, and cleanup stays enabled when nothing is configured.
+func applySkipCleanupFlag(cmd *cobra.Command, settings *entities.Settings) {
+	skipCleanup, _ := cmd.Flags().GetBool("skip-cleanup")
+	if !skipCleanup {
+		return
+	}
+
+	disabled := false
+	settings.CleanupStaleBranches = &disabled
+	logger.Info("Stale branch cleanup is disabled for this run by --skip-cleanup")
+}
 
 // downloadDefaultConfig fetches and decodes the default autoupdate configuration.
 func downloadDefaultConfig() (*entities.Settings, error) {
