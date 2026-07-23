@@ -39,6 +39,13 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 - changed cleanup to run only after the same-day pull request check has passed, so a pull request is
   never closed without a replacement being opened for it
 
+### Fixed
+
+- fixed the Gitleaks stage failing every build on `main`. The allowlisted fingerprints in
+  `.gitleaksignore` embed the hash of the commit a finding came from, so when a rebase moved the two
+  commits holding the historical git-remote URL false positives, all 14 entries stopped matching and
+  the long-suppressed findings came back. Re-pointed every entry at the commits' current hashes
+
 ## [0.17.0] - 2026-07-22
 
 ### Added
