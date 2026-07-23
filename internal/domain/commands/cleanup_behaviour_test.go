@@ -139,6 +139,31 @@ func TestCleanupStaleAggregateBranchesBehaviour(t *testing.T) {
 		assert.Contains(t, remaining, "main")
 	})
 
+	t.Run("should delete an orphan branch that never had a pull request", func(t *testing.T) {
+		t.Parallel()
+
+		// given a provider reporting no open pull request for the branch, which is what
+		// a branch pushed by a run that never opened one looks like
+		bareDir := newBareRemoteWithBranches(t, "chore/autoupdate-2026-07-21")
+		batchCtx := cloneBatchContext(t, bareDir)
+
+		spy := repositorydoubles.NewSpyProviderRepositoryBuilder().BuildSpy()
+		spy.PRClosedResult = false
+		spy.PRCloseErr = nil
+
+		// when
+		commands.CleanupStaleAggregateBranches(
+			context.Background(), batchCtx, spy, entities.Repository{Organization: "org", Name: "repo"},
+			&entities.Settings{}, "main", localAuthMethods(),
+		)
+
+		// then the branch is still swept: having no pull request to close is a no-op,
+		// not a failure, so an orphan branch is exactly what cleanup exists to remove
+		remaining, err := batchCtx.ListRemoteBranches(localAuthMethods())
+		require.NoError(t, err)
+		assert.NotContains(t, remaining, "chore/autoupdate-2026-07-21")
+	})
+
 	t.Run("should keep the branch when closing its pull request fails", func(t *testing.T) {
 		t.Parallel()
 
