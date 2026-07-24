@@ -37,6 +37,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Changed
 
 - changed cleanup to run only after the same-day pull request check has passed, so a pull request is
+- changed the Go module dependencies to their latest versions
   never closed without a replacement being opened for it
 
 ### Fixed
