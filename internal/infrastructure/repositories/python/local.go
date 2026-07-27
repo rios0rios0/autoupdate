@@ -33,6 +33,7 @@ type LocalResult struct {
 	PythonVersionUpdated bool
 	LatestVersion        string
 	BranchName           string
+	Toolchain            string // dependency manager used: "pdm" or "pip"
 	Output               string
 }
 
@@ -113,6 +114,7 @@ func handleDryRun(vCtx *versionContext, repoDir string) *LocalResult {
 		LatestVersion:        vCtx.LatestVersion,
 		BranchName:           vCtx.BranchName,
 		PythonVersionUpdated: vCtx.NeedsVersionUpgrade,
+		Toolchain:            toolchainFor(hasPDMLocal(repoDir)),
 	}
 }
 
@@ -181,6 +183,7 @@ func executeLocalUpgrade(
 		PythonVersionUpdated: pythonVersionUpdated,
 		LatestVersion:        vCtx.LatestVersion,
 		BranchName:           vCtx.BranchName,
+		Toolchain:            toolchainFor(hasPDMLocal(repoDir)),
 		Output:               outputStr,
 	}, nil
 }
@@ -222,6 +225,7 @@ func runLanguageUpgradeScript(
 		ProviderName:    opts.ProviderName,
 		HasRequirements: hasRequirements,
 		HasPyproject:    hasPyproject,
+		HasPDM:          hasPyproject && hasPDMLocal(repoDir),
 		PythonBinary:    pythonBinary,
 	}
 
@@ -271,6 +275,7 @@ type localUpgradeParams struct {
 	ProviderName    string
 	HasRequirements bool
 	HasPyproject    bool
+	HasPDM          bool
 	PythonBinary    string
 }
 
@@ -292,7 +297,11 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	writePythonUpgradeCommands(&sb, upgradeParams{
 		HasRequirements: params.HasRequirements,
 		HasPyproject:    params.HasPyproject,
+		HasPDM:          params.HasPDM,
 	})
+
+	// Keep generated build metadata out of the commit
+	writeEggInfoGitignore(&sb)
 
 	// Update Dockerfile python image tags
 	writeDockerfileUpdate(&sb)

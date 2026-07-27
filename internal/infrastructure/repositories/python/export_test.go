@@ -66,8 +66,37 @@ func BuildUpgradeScript(params UpgradeParamsExported, repoDir string) string {
 }
 
 // BuildBatchPythonScript is exported for testing.
-func BuildBatchPythonScript(hasRequirements, hasPyproject bool) string {
-	return buildBatchPythonScript(hasRequirements, hasPyproject)
+func BuildBatchPythonScript(hasRequirements, hasPyproject, hasPDM bool) string {
+	return buildBatchPythonScript(hasRequirements, hasPyproject, hasPDM)
+}
+
+// PyprojectUsesPDM is exported for testing.
+func PyprojectUsesPDM(content string) bool {
+	return pyprojectUsesPDM(content)
+}
+
+// HasPDMLocal is exported for testing.
+func HasPDMLocal(repoDir string) bool {
+	return hasPDMLocal(repoDir)
+}
+
+// HasPDMRemote is exported for testing.
+func HasPDMRemote(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+) bool {
+	return hasPDMRemote(ctx, provider, repo)
+}
+
+// ToolchainFor is exported for testing.
+func ToolchainFor(hasPDM bool) string {
+	return toolchainFor(hasPDM)
+}
+
+// WriteEggInfoGitignore is exported for testing.
+func WriteEggInfoGitignore(sb *strings.Builder) {
+	writeEggInfoGitignore(sb)
 }
 
 // WriteGitAuth is exported for testing.
