@@ -1507,6 +1507,72 @@ func TestPyprojectUsesPDM(t *testing.T) {
 		// then
 		assert.False(t, detected)
 	})
+
+	t.Run("should ignore a marker named only in a trailing inline comment", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "[build-system]\nbuild-backend = \"setuptools.build_meta\" # pdm.backend\n"
+
+		// when
+		detected := pyUpdater.PyprojectUsesPDM(content)
+
+		// then
+		assert.False(t, detected)
+	})
+
+	t.Run("should ignore a table only named in a trailing inline comment", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "[project]\nname = \"demo\" # unlike [tool.pdm] projects\n"
+
+		// when
+		detected := pyUpdater.PyprojectUsesPDM(content)
+
+		// then
+		assert.False(t, detected)
+	})
+
+	t.Run("should not treat an unrelated table sharing the prefix as PDM", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "[tool.pdmx]\nsetting = 1\n"
+
+		// when
+		detected := pyUpdater.PyprojectUsesPDM(content)
+
+		// then
+		assert.False(t, detected)
+	})
+
+	t.Run("should still detect a marker followed by an inline comment", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "[build-system]\nbuild-backend = \"pdm.backend\" # the PDM build backend\n"
+
+		// when
+		detected := pyUpdater.PyprojectUsesPDM(content)
+
+		// then
+		assert.True(t, detected)
+	})
+
+	t.Run("should not mistake a hash inside a quoted value for a comment", func(t *testing.T) {
+		t.Parallel()
+
+		// given — the '#' belongs to the value, so the [tool.pdm] table that
+		// follows must still be reached.
+		content := "[project]\nname = \"demo#1\"\n[tool.pdm]\n"
+
+		// when
+		detected := pyUpdater.PyprojectUsesPDM(content)
+
+		// then
+		assert.True(t, detected)
+	})
 }
 
 func TestHasPDMLocal(t *testing.T) {

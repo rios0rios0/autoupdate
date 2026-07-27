@@ -381,13 +381,18 @@ type upgradeResult struct {
 // project. PDM keeps its own configuration under a [tool.pdm] table, and the
 // pdm-backend build backend is only ever declared by PDM projects, so either
 // marker identifies the project without needing a TOML parser.
+//
+// Comments are discarded before matching, so a marker named only in prose does
+// not select the PDM upgrade path. The table match is anchored to [tool.pdm]
+// and its sub-tables so an unrelated table such as [tool.pdmx] is not mistaken
+// for one of PDM's.
 func pyprojectUsesPDM(content string) bool {
 	for line := range strings.SplitSeq(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") {
+		trimmed := strings.TrimSpace(stripTOMLComment(line))
+		if trimmed == "" {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "[tool.pdm") {
+		if trimmed == "[tool.pdm]" || strings.HasPrefix(trimmed, "[tool.pdm.") {
 			return true
 		}
 		if strings.Contains(trimmed, "pdm.backend") || strings.Contains(trimmed, "pdm-backend") {
@@ -395,6 +400,36 @@ func pyprojectUsesPDM(content string) bool {
 		}
 	}
 	return false
+}
+
+// stripTOMLComment removes an inline comment from a TOML line. A '#' carried
+// inside a quoted value is part of that value rather than the start of a
+// comment, so quoting is tracked while scanning; basic (double-quoted) strings
+// additionally honour backslash escapes, while literal (single-quoted) strings
+// have none. This is a best-effort scan, which is all the marker matching above
+// needs — it never has to interpret the values themselves.
+func stripTOMLComment(line string) string {
+	var quote rune
+	escaped := false
+
+	for i, r := range line {
+		switch {
+		case escaped:
+			escaped = false
+		case quote == '"' && r == '\\':
+			escaped = true
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == '#':
+			return line[:i]
+		}
+	}
+
+	return line
 }
 
 // hasPDMRemote reports whether the remote repository is PDM-managed. A
