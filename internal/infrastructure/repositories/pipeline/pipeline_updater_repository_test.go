@@ -947,6 +947,89 @@ func TestApplyUpgrades(t *testing.T) {
 		assert.NotContains(t, changes[0].Content, "3.11")
 	})
 
+	t.Run("should not rewrite the label of a script step following the task", func(t *testing.T) {
+		t.Parallel()
+
+		// given — a non-task step owns its own label, which the task before it
+		// must not rewrite. The task carries no label of its own, so nothing
+		// absorbs the rewrite before it reaches the script step.
+		content := `steps:
+  - task: 'UsePythonVersion@0'
+    inputs:
+      versionSpec: '3.11'
+  - script: echo build
+    displayName: 'Build against Python 3.11'
+`
+		fullMatch := "UsePythonVersion@0'\n    inputs:\n      versionSpec: '3.11'"
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.11", "3.14", "azure-pipelines.yml", fullMatch),
+		}
+		fileContents := map[string]string{"azure-pipelines.yml": content}
+
+		// when
+		changes := pipeline.ApplyUpgrades(upgrades, fileContents)
+
+		// then
+		require.Len(t, changes, 1)
+		assert.Contains(t, changes[0].Content, "versionSpec: '3.14'")
+		assert.Contains(t, changes[0].Content, "displayName: 'Build against Python 3.11'")
+	})
+
+	t.Run("should rewrite the task label but not a later script step label", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `steps:
+  - task: 'UsePythonVersion@0'
+    inputs:
+      versionSpec: '3.11'
+    displayName: 'Use Python 3.11'
+  - script: echo build
+    displayName: 'Build against Python 3.11'
+`
+		fullMatch := "UsePythonVersion@0'\n    inputs:\n      versionSpec: '3.11'"
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.11", "3.14", "azure-pipelines.yml", fullMatch),
+		}
+		fileContents := map[string]string{"azure-pipelines.yml": content}
+
+		// when
+		changes := pipeline.ApplyUpgrades(upgrades, fileContents)
+
+		// then
+		require.Len(t, changes, 1)
+		assert.Contains(t, changes[0].Content, "displayName: 'Use Python 3.14'")
+		assert.Contains(t, changes[0].Content, "displayName: 'Build against Python 3.11'")
+	})
+
+	t.Run("should not let a nested list entry cut the step short", func(t *testing.T) {
+		t.Parallel()
+
+		// given — `- name: a` is a nested entry inside the task's own inputs,
+		// not the start of the next step, so the label below it is still part
+		// of this task.
+		content := `steps:
+  - task: 'UsePythonVersion@0'
+    inputs:
+      versionSpec: '3.11'
+      args:
+        - name: a
+    displayName: 'Use Python 3.11'
+`
+		fullMatch := "UsePythonVersion@0'\n    inputs:\n      versionSpec: '3.11'"
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.11", "3.14", "azure-pipelines.yml", fullMatch),
+		}
+		fileContents := map[string]string{"azure-pipelines.yml": content}
+
+		// when
+		changes := pipeline.ApplyUpgrades(upgrades, fileContents)
+
+		// then
+		require.Len(t, changes, 1)
+		assert.Contains(t, changes[0].Content, "displayName: 'Use Python 3.14'")
+	})
+
 	t.Run("should not rewrite a displayName version that merely shares a prefix", func(t *testing.T) {
 		t.Parallel()
 

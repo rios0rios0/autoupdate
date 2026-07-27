@@ -45,9 +45,9 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
   untouched, so the file described a version it no longer used. The label is now upgraded alongside
   the version field rather than having its version stripped out, and it is upgraded whether it is
   written above or below that field — a label written below sat outside the scan match and was never
-  reached at all. The rewrite stops at the enclosing task boundary, so a neighbouring task mentioning
-  the same version keeps its own label, and a label reading `3.110` is left alone when the upgrade is
-  from `3.11`
+  reached at all. The rewrite stops at the end of the enclosing step, so a later step mentioning the
+  same version keeps its own label — including a non-task step such as `- script:`, which owns a
+  label of its own — and a label reading `3.110` is left alone when the upgrade is from `3.11`
 
 ## [0.18.0] - 2026-07-27
 
