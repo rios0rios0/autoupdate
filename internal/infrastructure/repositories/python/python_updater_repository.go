@@ -34,6 +34,12 @@ const (
 	// Commit/PR messages and changelog entries used across remote and local modes.
 	pyCommitMsgDeps      = "chore(deps): updated Python dependencies"
 	pyChangelogEntryDeps = "- changed the Python dependencies to their latest versions"
+
+	// Toolchain identifiers. A repository is upgraded either through PDM (when
+	// it is PDM-managed) or through plain pip, and the two produce different
+	// commands, changelog wording and PR descriptions.
+	toolchainPDM = "pdm"
+	toolchainPip = "pip"
 )
 
 // UpdaterRepository implements repositories.UpdaterRepository for Python dependencies.
@@ -153,6 +159,7 @@ func cloneAndUpgrade(
 	}
 	hasRequirements := provider.HasFile(ctx, repo, "requirements.txt")
 	hasPyproject := provider.HasFile(ctx, repo, "pyproject.toml")
+	hasPDM := hasPyproject && hasPDMRemote(ctx, provider, repo)
 
 	cloneURL := provider.CloneURL(repo)
 	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
@@ -172,11 +179,14 @@ func cloneAndUpgrade(
 		ChangelogFile:   changelogFile,
 		HasRequirements: hasRequirements,
 		HasPyproject:    hasPyproject,
+		HasPDM:          hasPDM,
 		PythonBinary:    pythonBinary,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade: %w", err)
 	}
+
+	result.Toolchain = toolchainFor(hasPDM)
 
 	return result, nil
 }
@@ -203,7 +213,7 @@ func openPullRequest(
 			vCtx.LatestVersion,
 		)
 	}
-	prDesc := GeneratePRDescription(vCtx.LatestVersion, result.PythonVersionUpdated)
+	prDesc := GeneratePRDescription(vCtx.LatestVersion, result.Toolchain, result.PythonVersionUpdated)
 
 	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
 		SourceBranch: "refs/heads/" + vCtx.BranchName,
@@ -248,12 +258,14 @@ func (u *UpdaterRepository) ApplyUpdates(
 		hasPyproject = true
 	}
 
+	hasPDM := hasPyproject && hasPDMLocal(repoDir)
+
 	pythonBinary, binErr := findPythonBinary()
 	if binErr != nil {
 		return nil, fmt.Errorf("python binary not found: %w", binErr)
 	}
 
-	script := buildBatchPythonScript(hasRequirements, hasPyproject)
+	script := buildBatchPythonScript(hasRequirements, hasPyproject, hasPDM)
 	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
 	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
 		return nil, fmt.Errorf("failed to write script: %w", writeErr)
@@ -291,8 +303,8 @@ func (u *UpdaterRepository) ApplyUpdates(
 	var entry string
 	if pyVersionUpdated {
 		entry = fmt.Sprintf(
-			"- changed the Python version to `%s` and updated all pip dependencies",
-			vCtx.LatestVersion,
+			"- changed the Python version to `%s` and updated all %s dependencies",
+			vCtx.LatestVersion, toolchainFor(hasPDM),
 		)
 	} else {
 		entry = pyChangelogEntryDeps
@@ -313,13 +325,13 @@ func (u *UpdaterRepository) ApplyUpdates(
 		BranchName:    vCtx.BranchName,
 		CommitMessage: commitMsg,
 		PRTitle:       prTitle,
-		PRDescription: GeneratePRDescription(vCtx.LatestVersion, pyVersionUpdated),
+		PRDescription: GeneratePRDescription(vCtx.LatestVersion, toolchainFor(hasPDM), pyVersionUpdated),
 	}, nil
 }
 
 // buildBatchPythonScript generates a bash script with only language-specific
 // operations (no git clone, branch, commit, or push) for the batch pipeline.
-func buildBatchPythonScript(hasRequirements, hasPyproject bool) string {
+func buildBatchPythonScript(hasRequirements, hasPyproject, hasPDM bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("#!/bin/bash\n")
@@ -328,7 +340,9 @@ func buildBatchPythonScript(hasRequirements, hasPyproject bool) string {
 	writePythonUpgradeCommands(&sb, upgradeParams{
 		HasRequirements: hasRequirements,
 		HasPyproject:    hasPyproject,
+		HasPDM:          hasPDM,
 	})
+	writeEggInfoGitignore(&sb)
 	writeDockerfileUpdate(&sb)
 
 	return sb.String()
@@ -352,13 +366,76 @@ type upgradeParams struct {
 	ChangelogFile   string
 	HasRequirements bool
 	HasPyproject    bool
+	HasPDM          bool
 	PythonBinary    string
 }
 
 type upgradeResult struct {
 	HasChanges           bool
 	PythonVersionUpdated bool
+	Toolchain            string
 	Output               string
+}
+
+// pyprojectUsesPDM reports whether a pyproject.toml belongs to a PDM-managed
+// project. PDM keeps its own configuration under a [tool.pdm] table, and the
+// pdm-backend build backend is only ever declared by PDM projects, so either
+// marker identifies the project without needing a TOML parser.
+func pyprojectUsesPDM(content string) bool {
+	for line := range strings.SplitSeq(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[tool.pdm") {
+			return true
+		}
+		if strings.Contains(trimmed, "pdm.backend") || strings.Contains(trimmed, "pdm-backend") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasPDMRemote reports whether the remote repository is PDM-managed. A
+// pdm.lock is conclusive on its own; otherwise the pyproject.toml is inspected
+// for PDM's markers.
+func hasPDMRemote(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+) bool {
+	if provider.HasFile(ctx, repo, "pdm.lock") {
+		return true
+	}
+
+	content, err := provider.GetFileContent(ctx, repo, "pyproject.toml")
+	if err != nil {
+		return false
+	}
+	return pyprojectUsesPDM(content)
+}
+
+// hasPDMLocal reports whether a checked-out repository is PDM-managed, using
+// the same markers as [hasPDMRemote].
+func hasPDMLocal(repoDir string) bool {
+	if _, err := os.Stat(filepath.Join(repoDir, "pdm.lock")); err == nil {
+		return true
+	}
+
+	content, err := os.ReadFile(filepath.Clean(filepath.Join(repoDir, "pyproject.toml")))
+	if err != nil {
+		return false
+	}
+	return pyprojectUsesPDM(string(content))
+}
+
+// toolchainFor names the dependency manager used to upgrade a repository.
+func toolchainFor(hasPDM bool) string {
+	if hasPDM {
+		return toolchainPDM
+	}
+	return toolchainPip
 }
 
 // parsePythonVersionFile extracts the Python version from a .python-version
@@ -535,6 +612,9 @@ func buildUpgradeScript(
 	// Python upgrade commands
 	writePythonUpgradeCommands(&sb, params)
 
+	// Keep generated build metadata out of the commit
+	writeEggInfoGitignore(&sb)
+
 	// Update Dockerfile python image tags
 	writeDockerfileUpdate(&sb)
 
@@ -601,6 +681,16 @@ func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 	sb.WriteString("source \"$VENV_DIR/bin/activate\"\n")
 	sb.WriteString("pip install --upgrade pip 2>&1 || echo \"WARNING: pip upgrade had some errors\"\n\n")
 
+	// A PDM-managed project is upgraded exclusively through PDM: pip has no
+	// view of the PDM lock file, so running both would leave the lock stale
+	// while still producing the local-install artefacts pip leaves behind.
+	if params.HasPDM {
+		writePDMUpgradeCommands(sb)
+		sb.WriteString("deactivate 2>/dev/null || true\n")
+		sb.WriteString("rm -rf \"$VENV_DIR\"\n\n")
+		return
+	}
+
 	if params.HasRequirements {
 		sb.WriteString("# Upgrade dependencies from requirements.txt\n")
 		sb.WriteString("if [ -f \"requirements.txt\" ]; then\n")
@@ -630,6 +720,48 @@ func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 
 	sb.WriteString("deactivate 2>/dev/null || true\n")
 	sb.WriteString("rm -rf \"$VENV_DIR\"\n\n")
+}
+
+// writePDMUpgradeCommands emits the upgrade step for a PDM-managed project.
+//
+// `--no-sync` keeps the run to a dependency resolution: the updated pdm.lock is
+// the only artefact worth committing, and skipping the sync also avoids
+// building the project locally — the build is what leaves a *.egg-info
+// directory behind for `git add -A` to sweep into the commit.
+//
+// The `-G :all` form covers every optional-dependency group; projects that
+// declare none reject it, so the plain form is retried before giving up.
+func writePDMUpgradeCommands(sb *strings.Builder) {
+	sb.WriteString("# Upgrade dependencies with PDM (project is PDM-managed)\n")
+	sb.WriteString("if ! command -v pdm > /dev/null 2>&1; then\n")
+	sb.WriteString("    echo \"Installing PDM into the temporary virtual environment...\"\n")
+	sb.WriteString("    pip install --upgrade pdm 2>&1 || echo \"WARNING: PDM installation had some errors\"\n")
+	sb.WriteString("fi\n")
+	sb.WriteString("echo \"Running pdm update...\"\n")
+	sb.WriteString("pdm update --update-all --no-sync -G :all 2>&1 \\\n")
+	sb.WriteString("    || pdm update --update-all --no-sync 2>&1 \\\n")
+	sb.WriteString("    || echo \"WARNING: pdm update had some errors (continuing anyway)\"\n\n")
+}
+
+// writeEggInfoGitignore appends the setuptools build-metadata pattern to
+// .gitignore when the upgrade left an *.egg-info directory behind. Those files
+// are generated, so without the entry they are untracked-but-not-ignored and
+// the `git add -A` further down commits them as though they were a dependency
+// change. The entry is only added when such a directory actually exists, so
+// repositories that never build the project keep their .gitignore untouched.
+func writeEggInfoGitignore(sb *strings.Builder) {
+	sb.WriteString("# Ignore setuptools build metadata so it is never committed as a change.\n")
+	sb.WriteString("if ls -d ./*.egg-info > /dev/null 2>&1; then\n")
+	sb.WriteString("    if ! grep -qE '^\\*\\.egg-info/?$' .gitignore 2>/dev/null; then\n")
+	sb.WriteString("        echo \"Adding *.egg-info/ to .gitignore...\"\n")
+	// A .gitignore whose last line lacks a trailing newline would otherwise
+	// have the new pattern appended onto the end of that line.
+	sb.WriteString("        if [ -s .gitignore ] && [ -n \"$(tail -c1 .gitignore)\" ]; then\n")
+	sb.WriteString("            echo \"\" >> .gitignore\n")
+	sb.WriteString("        fi\n")
+	sb.WriteString("        echo \"*.egg-info/\" >> .gitignore\n")
+	sb.WriteString("    fi\n")
+	sb.WriteString("fi\n\n")
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
@@ -735,29 +867,40 @@ func findPythonBinary() (string, error) {
 
 // GeneratePRDescription builds a markdown PR description for a Python
 // dependency upgrade. Exported so that the local-mode CLI handler can
-// reuse the same description format.
-func GeneratePRDescription(pyVersion string, pyVersionUpdated bool) string {
+// reuse the same description format. The toolchain ("pdm" or "pip") selects
+// the commands and the review target named in the body, so the description
+// always reports what the run actually did.
+func GeneratePRDescription(pyVersion, toolchain string, pyVersionUpdated bool) string {
 	var sb strings.Builder
 	sb.WriteString("## Summary\n\n")
 	if pyVersionUpdated {
 		sb.WriteString(
-			"This PR upgrades the Python version to **" + pyVersion + "** and updates all pip dependencies.\n\n",
+			"This PR upgrades the Python version to **" + pyVersion +
+				"** and updates all " + toolchain + " dependencies.\n\n",
 		)
 	} else {
 		sb.WriteString(
-			"This PR updates all Python pip dependencies to their latest versions.\n\n",
+			"This PR updates all Python " + toolchain + " dependencies to their latest versions.\n\n",
 		)
 	}
 	sb.WriteString("### Changes\n\n")
 	if pyVersionUpdated {
 		sb.WriteString("- Updated `.python-version` to `" + pyVersion + "`\n")
 	}
-	sb.WriteString("- Ran `pip install --upgrade -r requirements.txt` to update all dependencies\n")
-	sb.WriteString("- Ran `pip freeze` to capture updated versions\n")
+	if toolchain == toolchainPDM {
+		sb.WriteString("- Ran `pdm update --update-all --no-sync` to resolve the latest dependency versions\n")
+	} else {
+		sb.WriteString("- Ran `pip install --upgrade -r requirements.txt` to update all dependencies\n")
+		sb.WriteString("- Ran `pip freeze` to capture updated versions\n")
+	}
 	sb.WriteString("\n### Review Checklist\n\n")
 	sb.WriteString("- [ ] Verify build passes\n")
 	sb.WriteString("- [ ] Verify tests pass\n")
-	sb.WriteString("- [ ] Review dependency changes in `requirements.txt`\n")
+	if toolchain == toolchainPDM {
+		sb.WriteString("- [ ] Review dependency changes in `pdm.lock`\n")
+	} else {
+		sb.WriteString("- [ ] Review dependency changes in `requirements.txt`\n")
+	}
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()

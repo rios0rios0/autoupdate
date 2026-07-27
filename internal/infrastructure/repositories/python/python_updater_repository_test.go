@@ -326,7 +326,7 @@ func TestGeneratePRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		result := pyUpdater.GeneratePRDescription("3.13.1", true)
+		result := pyUpdater.GeneratePRDescription("3.13.1", "pip", true)
 
 		// then
 		assert.Contains(t, result, "3.13.1")
@@ -337,7 +337,7 @@ func TestGeneratePRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		result := pyUpdater.GeneratePRDescription("3.13.1", false)
+		result := pyUpdater.GeneratePRDescription("3.13.1", "pip", false)
 
 		// then
 		assert.Contains(t, result, "dependencies")
@@ -421,7 +421,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(true, true)
+		script := pyUpdater.BuildBatchPythonScript(true, true, false)
 
 		// then
 		assert.True(t, strings.HasPrefix(script, "#!/bin/bash\n"))
@@ -434,7 +434,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false)
 
 		// then
 		assert.NotContains(t, script, "pip install -r requirements.txt")
@@ -445,7 +445,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(true, false)
+		script := pyUpdater.BuildBatchPythonScript(true, false, false)
 
 		// then
 		assert.Contains(t, script, "pip install -r requirements.txt")
@@ -456,7 +456,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, false)
+		script := pyUpdater.BuildBatchPythonScript(false, false, false)
 
 		// then
 		assert.Contains(t, script, "set -euo pipefail")
@@ -1450,5 +1450,259 @@ func TestRunLanguageUpgradeScript(t *testing.T) { //nolint:paralleltest // mutat
 		// then
 		require.NoError(t, err)
 		assert.Equal(t, "verbose output\n", output)
+	})
+}
+
+func TestPyprojectUsesPDM(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should detect a project configured through a tool.pdm table", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "[project]\nname = \"demo\"\n\n[tool.pdm.dev-dependencies]\ntest = [\"pytest\"]\n"
+
+		// when
+		detected := pyUpdater.PyprojectUsesPDM(content)
+
+		// then
+		assert.True(t, detected)
+	})
+
+	t.Run("should detect a project built with the pdm backend", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "[build-system]\nrequires = [\"pdm-backend\"]\nbuild-backend = \"pdm.backend\"\n"
+
+		// when
+		detected := pyUpdater.PyprojectUsesPDM(content)
+
+		// then
+		assert.True(t, detected)
+	})
+
+	t.Run("should not detect a setuptools project", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "[build-system]\nrequires = [\"setuptools\"]\nbuild-backend = \"setuptools.build_meta\"\n"
+
+		// when
+		detected := pyUpdater.PyprojectUsesPDM(content)
+
+		// then
+		assert.False(t, detected)
+	})
+
+	t.Run("should ignore markers that appear only inside comments", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := "[project]\nname = \"demo\"\n# migrate to [tool.pdm] one day\n"
+
+		// when
+		detected := pyUpdater.PyprojectUsesPDM(content)
+
+		// then
+		assert.False(t, detected)
+	})
+}
+
+func TestHasPDMLocal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should detect PDM from a lock file alone", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "pdm.lock"), []byte("[metadata]\n"), 0o600))
+
+		// when
+		detected := pyUpdater.HasPDMLocal(repoDir)
+
+		// then
+		assert.True(t, detected)
+	})
+
+	t.Run("should detect PDM from pyproject markers when no lock file exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(repoDir, "pyproject.toml"), []byte("[tool.pdm]\n"), 0o600,
+		))
+
+		// when
+		detected := pyUpdater.HasPDMLocal(repoDir)
+
+		// then
+		assert.True(t, detected)
+	})
+
+	t.Run("should not detect PDM in a plain pip project", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := t.TempDir()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(repoDir, "pyproject.toml"), []byte("[project]\nname = \"demo\"\n"), 0o600,
+		))
+
+		// when
+		detected := pyUpdater.HasPDMLocal(repoDir)
+
+		// then
+		assert.False(t, detected)
+	})
+}
+
+func TestHasPDMRemote(t *testing.T) {
+	t.Parallel()
+
+	repo := entities.Repository{Organization: "org", Name: "repo"}
+
+	t.Run("should detect PDM when the remote carries a lock file", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"pdm.lock": true}).
+			BuildSpy()
+
+		// when
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo)
+
+		// then
+		assert.True(t, detected)
+	})
+
+	t.Run("should detect PDM from the remote pyproject when no lock file exists", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"pyproject.toml": true}).
+			WithFileContents(map[string]string{"pyproject.toml": "[tool.pdm]\n"}).
+			BuildSpy()
+
+		// when
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo)
+
+		// then
+		assert.True(t, detected)
+	})
+
+	t.Run("should not detect PDM when the remote pyproject is unreadable", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"pyproject.toml": true}).
+			WithFileContentErr(errors.New("not found")).
+			BuildSpy()
+
+		// when
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo)
+
+		// then
+		assert.False(t, detected)
+	})
+}
+
+func TestBuildBatchPythonScriptWithPDM(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should upgrade through PDM when the project is PDM-managed", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := pyUpdater.BuildBatchPythonScript(false, true, true)
+
+		// then
+		assert.Contains(t, script, "pdm update --update-all --no-sync")
+		assert.Contains(t, script, "pip install --upgrade pdm")
+	})
+
+	t.Run("should not run the pip local install for a PDM project", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := pyUpdater.BuildBatchPythonScript(true, true, true)
+
+		// then
+		assert.NotContains(t, script, "pip install --upgrade .")
+		assert.NotContains(t, script, "pip install -r requirements.txt")
+	})
+
+	t.Run("should keep using pip when the project is not PDM-managed", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := pyUpdater.BuildBatchPythonScript(false, true, false)
+
+		// then
+		assert.Contains(t, script, "pip install --upgrade .")
+		assert.NotContains(t, script, "pdm update")
+	})
+}
+
+func TestWriteEggInfoGitignore(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should append the egg-info pattern guarded by an existence check", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+
+		// when
+		pyUpdater.WriteEggInfoGitignore(&sb)
+		script := sb.String()
+
+		// then
+		assert.Contains(t, script, "ls -d ./*.egg-info")
+		assert.Contains(t, script, "echo \"*.egg-info/\" >> .gitignore")
+		assert.Contains(t, script, "grep -qE '^\\*\\.egg-info/?$' .gitignore")
+	})
+
+	t.Run("should be part of the batch script so artefacts never reach a commit", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := pyUpdater.BuildBatchPythonScript(false, true, false)
+
+		// then
+		assert.Contains(t, script, "*.egg-info/")
+	})
+}
+
+func TestGeneratePRDescriptionToolchain(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should describe the PDM commands and lock file for a PDM project", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pyUpdater.GeneratePRDescription("3.13.1", "pdm", false)
+
+		// then
+		assert.Contains(t, result, "pdm update --update-all --no-sync")
+		assert.Contains(t, result, "`pdm.lock`")
+		assert.NotContains(t, result, "requirements.txt")
+	})
+
+	t.Run("should describe the pip commands and requirements file for a pip project", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pyUpdater.GeneratePRDescription("3.13.1", "pip", false)
+
+		// then
+		assert.Contains(t, result, "pip install --upgrade -r requirements.txt")
+		assert.Contains(t, result, "`requirements.txt`")
+		assert.NotContains(t, result, "pdm")
 	})
 }

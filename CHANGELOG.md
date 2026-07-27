@@ -16,6 +16,30 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added automatic PDM detection to the Python updater: a repository carrying a `pdm.lock`, a
+  `[tool.pdm]` table or the `pdm.backend` build backend is now upgraded with
+  `pdm update --update-all --no-sync` instead of raw pip. PDM resolves against its own lock file,
+  which pip cannot see, so a PDM project previously had its lock left untouched no matter how often
+  the updater ran. `--no-sync` keeps the run to a resolution, because the refreshed `pdm.lock` is the
+  only artefact worth committing
+
+### Changed
+
+- changed the Python pull request description and changelog entry to name the dependency manager the
+  run actually used. The description previously advertised `pip install --upgrade -r
+  requirements.txt` and asked reviewers to review `requirements.txt` even for projects that have no
+  such file
+
+### Fixed
+
+- fixed the Python updater committing the `*.egg-info/` directory as though it were a dependency
+  change. Installing a `pyproject.toml` project locally makes setuptools generate that directory;
+  because it was untracked but not ignored, `git add -A` swept it into the commit, so a repository
+  with no dependency movement at all still produced a pull request. The pattern is now added to
+  `.gitignore`, and only when such a directory actually exists, so repositories that never build the
+  project keep their `.gitignore` untouched
 ## [0.18.0] - 2026-07-27
 
 ### Added

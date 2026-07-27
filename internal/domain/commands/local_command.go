@@ -72,7 +72,7 @@ type localPRInfo struct {
 	BranchName     string
 	LatestVersion  string
 	VersionUpdated bool
-	PackageManager string // JavaScript only
+	PackageManager string // JavaScript package manager, or Python dependency manager
 	ProjectType    langEntities.Language
 	HasChanges     bool
 }
@@ -259,6 +259,7 @@ func runPythonLocalUpgrade(
 		BranchName:     result.BranchName,
 		LatestVersion:  result.LatestVersion,
 		VersionUpdated: result.PythonVersionUpdated,
+		PackageManager: result.Toolchain,
 		ProjectType:    langEntities.LanguagePython,
 		HasChanges:     result.HasChanges,
 	}, nil
@@ -351,7 +352,7 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 				)
 			}
 			desc := pyRepo.GeneratePRDescription(
-				info.LatestVersion, info.VersionUpdated,
+				info.LatestVersion, info.PackageManager, info.VersionUpdated,
 			)
 			return title, desc
 		},
