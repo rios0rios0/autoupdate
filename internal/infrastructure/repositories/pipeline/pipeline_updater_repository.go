@@ -419,6 +419,13 @@ func classifyFile(path string) ciSystem {
 // a version field that belongs to a *different* task further down the file.
 var azureTaskDecl = regexp.MustCompile(`(?m)^[ \t]*-[ \t]+task:[ \t]*\S+`)
 
+// azureStepDecl matches the start of any step in a steps list — `- task:`,
+// `- script:`, `- bash:`, `- checkout:` and so on — capturing the leading
+// indentation so a step can be told apart from a nested list entry belonging to
+// the step above it. Scanning stays keyed on azureTaskDecl; this pattern only
+// bounds how far a label rewrite may reach.
+var azureStepDecl = regexp.MustCompile(`(?m)^([ \t]*)-[ \t]+[A-Za-z][A-Za-z0-9_-]*:`)
+
 // scanForVersions dispatches version scanning by CI system. Azure DevOps rules
 // use multi-line `(?s)` patterns that match a task name and then the first
 // matching version field; to keep that match anchored to its own task, Azure
@@ -820,14 +827,73 @@ func replaceLastOccurrence(s, old, replacement string) string {
 	return s[:idx] + replacement + s[idx+len(old):]
 }
 
-// stripDisplayNameVersion removes the version number from displayName lines
-// within a matched task block. For example, "displayName: '🐍 Use Python 3.12'"
-// becomes "displayName: '🐍 Use Python'".
-func stripDisplayNameVersion(s, version string) string {
+// updateDisplayNameVersion rewrites the version carried by displayName labels
+// so the label keeps describing the version the task actually uses. For
+// example, upgrading 3.11 to 3.14 turns "displayName: '🐍 Use Python 3.11'"
+// into "displayName: '🐍 Use Python 3.14'".
+//
+// The trailing group refuses to start with a digit or a dot, so a label reading
+// "3.110" is not rewritten when the upgraded version is "3.11". No part of the
+// match may cross a newline, which keeps a label confined to its own line
+// instead of letting one match reach into the next label's quotes.
+func updateDisplayNameVersion(s, oldVersion, newVersion string) string {
 	pattern := regexp.MustCompile(
-		`(displayName:\s*['"][^'"]*?)\s+` + regexp.QuoteMeta(version) + `([^'"]*['"])`,
+		`(displayName:[ \t]*['"][^'"\n]*?)` + regexp.QuoteMeta(oldVersion) + `((?:[^0-9.\n][^'"\n]*)?['"])`,
 	)
-	return pattern.ReplaceAllString(s, "${1}${2}")
+	return pattern.ReplaceAllString(s, "${1}"+newVersion+"${2}")
+}
+
+// lineIndentAt returns the indentation width of the line holding idx.
+func lineIndentAt(content string, idx int) int {
+	lineStart := strings.LastIndexByte(content[:idx], '\n') + 1
+	prefix := content[lineStart:idx]
+	return len(prefix) - len(strings.TrimLeft(prefix, " \t"))
+}
+
+// stepBlockEnd returns the offset in tail at which the step owning the match
+// ends — the next step declaration indented no deeper than that step. Bounding
+// on any step rather than only on the next `- task:` matters because a
+// non-task step (`- script:`, `- bash:`, `- pwsh:`) between two tasks owns its
+// own label, which must not be rewritten by the task before it. A more deeply
+// indented `- key:` is a nested list entry belonging to the current step, so it
+// does not end the block.
+func stepBlockEnd(tail string, indent int) int {
+	for _, loc := range azureStepDecl.FindAllStringSubmatchIndex(tail, -1) {
+		if len(tail[loc[2]:loc[3]]) <= indent {
+			return loc[0]
+		}
+	}
+	return len(tail)
+}
+
+// applyUpgradeToContent rewrites the first occurrence of the match that still
+// carries the old version.
+//
+// The rewrite is driven from the match position rather than by re-locating the
+// rewritten text, because two tasks in the same file are frequently textually
+// identical (the same task pinned to the same version in two jobs). Searching
+// for the replacement would keep finding the first one and leave every later
+// task's label untouched. Working positionally is unambiguous: each iteration
+// finds the next occurrence, since the ones already processed no longer match.
+func applyUpgradeToContent(content string, up upgradeTask) string {
+	matchIdx := strings.Index(content, up.match.FullMatch)
+	if matchIdx < 0 {
+		return content
+	}
+
+	newMatch := replaceLastOccurrence(up.match.FullMatch, up.match.CurrentVer, up.newVersion)
+	// A label written above the version field falls inside the match.
+	newMatch = updateDisplayNameVersion(newMatch, up.match.CurrentVer, up.newVersion)
+
+	// A label written below it does not: the Azure DevOps scan patterns stop
+	// at the version key. The remainder of the enclosing step is rewritten
+	// too, stopping before the next step so a sibling mentioning the same
+	// version keeps its own label.
+	tail := content[matchIdx+len(up.match.FullMatch):]
+	blockEnd := stepBlockEnd(tail, lineIndentAt(content, matchIdx))
+	tail = updateDisplayNameVersion(tail[:blockEnd], up.match.CurrentVer, up.newVersion) + tail[blockEnd:]
+
+	return content[:matchIdx] + newMatch + tail
 }
 
 // --- upgrade application ---
@@ -843,10 +909,7 @@ func applyUpgrades(upgrades []upgradeTask, fileContents map[string]string) []ent
 			continue
 		}
 
-		newMatch := replaceLastOccurrence(up.match.FullMatch, up.match.CurrentVer, up.newVersion)
-		newMatch = stripDisplayNameVersion(newMatch, up.match.CurrentVer)
-		content = strings.Replace(content, up.match.FullMatch, newMatch, 1)
-		modified[up.match.FilePath] = content
+		modified[up.match.FilePath] = applyUpgradeToContent(content, up)
 	}
 
 	var changes []entities.FileChange
