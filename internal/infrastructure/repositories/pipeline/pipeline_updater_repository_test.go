@@ -5,6 +5,7 @@ package pipeline_test
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -838,7 +839,7 @@ func TestReplaceLastOccurrence(t *testing.T) {
 func TestApplyUpgrades(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should replace versionSpec and strip version from displayName", func(t *testing.T) {
+	t.Run("should replace versionSpec and upgrade a displayName above it", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -858,9 +859,116 @@ func TestApplyUpgrades(t *testing.T) {
 
 		// then
 		require.Len(t, changes, 1)
-		assert.Contains(t, changes[0].Content, "displayName: 'Install Python'")
+		assert.Contains(t, changes[0].Content, "displayName: 'Install Python 3.13'")
 		assert.NotContains(t, changes[0].Content, "displayName: 'Install Python 3.12'")
 		assert.Contains(t, changes[0].Content, "versionSpec: '3.13'")
+	})
+
+	t.Run("should upgrade a displayName written below the versionSpec", func(t *testing.T) {
+		t.Parallel()
+
+		// given — the scan pattern stops at versionSpec, so this label sits
+		// outside the match and used to keep advertising the old version.
+		content := `- task: 'UsePythonVersion@0'
+  inputs:
+    versionSpec: '3.11'
+  displayName: 'Use Python 3.11'
+`
+		fullMatch := "UsePythonVersion@0'\n  inputs:\n    versionSpec: '3.11'"
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.11", "3.14", "azure-pipelines.yml", fullMatch),
+		}
+		fileContents := map[string]string{"azure-pipelines.yml": content}
+
+		// when
+		changes := pipeline.ApplyUpgrades(upgrades, fileContents)
+
+		// then
+		require.Len(t, changes, 1)
+		assert.Contains(t, changes[0].Content, "versionSpec: '3.14'")
+		assert.Contains(t, changes[0].Content, "displayName: 'Use Python 3.14'")
+		assert.NotContains(t, changes[0].Content, "3.11")
+	})
+
+	t.Run("should not touch a displayName belonging to a neighbouring task", func(t *testing.T) {
+		t.Parallel()
+
+		// given — the second task keeps its own version, which happens to be
+		// the version being upgraded in the first task.
+		content := `- task: 'UsePythonVersion@0'
+  inputs:
+    versionSpec: '3.11'
+- task: 'Other@1'
+  displayName: 'Keep Python 3.11'
+`
+		fullMatch := "UsePythonVersion@0'\n  inputs:\n    versionSpec: '3.11'"
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.11", "3.14", "azure-pipelines.yml", fullMatch),
+		}
+		fileContents := map[string]string{"azure-pipelines.yml": content}
+
+		// when
+		changes := pipeline.ApplyUpgrades(upgrades, fileContents)
+
+		// then
+		require.Len(t, changes, 1)
+		assert.Contains(t, changes[0].Content, "versionSpec: '3.14'")
+		assert.Contains(t, changes[0].Content, "displayName: 'Keep Python 3.11'")
+	})
+
+	t.Run("should upgrade every label when two tasks are textually identical", func(t *testing.T) {
+		t.Parallel()
+
+		// given — two jobs pinning the same version through the same task, so
+		// both upgrades carry the same FullMatch.
+		content := `- task: 'UsePythonVersion@0'
+  inputs:
+    versionSpec: '3.11'
+  displayName: 'Use Python 3.11'
+- task: 'UsePythonVersion@0'
+  inputs:
+    versionSpec: '3.11'
+  displayName: 'Use Python 3.11'
+`
+		fullMatch := "UsePythonVersion@0'\n  inputs:\n    versionSpec: '3.11'"
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.11", "3.14", "azure-pipelines.yml", fullMatch),
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.11", "3.14", "azure-pipelines.yml", fullMatch),
+		}
+		fileContents := map[string]string{"azure-pipelines.yml": content}
+
+		// when
+		changes := pipeline.ApplyUpgrades(upgrades, fileContents)
+
+		// then
+		require.Len(t, changes, 1)
+		assert.Equal(t, 2, strings.Count(changes[0].Content, "versionSpec: '3.14'"))
+		assert.Equal(t, 2, strings.Count(changes[0].Content, "displayName: 'Use Python 3.14'"))
+		assert.NotContains(t, changes[0].Content, "3.11")
+	})
+
+	t.Run("should not rewrite a displayName version that merely shares a prefix", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		content := `- task: 'UsePythonVersion@0'
+  inputs:
+    versionSpec: '3.11'
+  displayName: 'Use Python 3.110'
+`
+		fullMatch := "UsePythonVersion@0'\n  inputs:\n    versionSpec: '3.11'"
+		upgrades := []pipeline.UpgradeTask{
+			pipeline.NewUpgradeTaskWithFullMatch("python", "3.11", "3.14", "azure-pipelines.yml", fullMatch),
+		}
+		fileContents := map[string]string{"azure-pipelines.yml": content}
+
+		// when
+		changes := pipeline.ApplyUpgrades(upgrades, fileContents)
+
+		// then
+		require.Len(t, changes, 1)
+		assert.Contains(t, changes[0].Content, "versionSpec: '3.14'")
+		assert.Contains(t, changes[0].Content, "displayName: 'Use Python 3.110'")
 	})
 }
 

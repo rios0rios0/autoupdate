@@ -820,14 +820,51 @@ func replaceLastOccurrence(s, old, replacement string) string {
 	return s[:idx] + replacement + s[idx+len(old):]
 }
 
-// stripDisplayNameVersion removes the version number from displayName lines
-// within a matched task block. For example, "displayName: '🐍 Use Python 3.12'"
-// becomes "displayName: '🐍 Use Python'".
-func stripDisplayNameVersion(s, version string) string {
+// updateDisplayNameVersion rewrites the version carried by displayName labels
+// so the label keeps describing the version the task actually uses. For
+// example, upgrading 3.11 to 3.14 turns "displayName: '🐍 Use Python 3.11'"
+// into "displayName: '🐍 Use Python 3.14'".
+//
+// The trailing group refuses to start with a digit or a dot, so a label reading
+// "3.110" is not rewritten when the upgraded version is "3.11".
+func updateDisplayNameVersion(s, oldVersion, newVersion string) string {
 	pattern := regexp.MustCompile(
-		`(displayName:\s*['"][^'"]*?)\s+` + regexp.QuoteMeta(version) + `([^'"]*['"])`,
+		`(displayName:\s*['"][^'"]*?)` + regexp.QuoteMeta(oldVersion) + `((?:[^0-9.][^'"]*)?['"])`,
 	)
-	return pattern.ReplaceAllString(s, "${1}${2}")
+	return pattern.ReplaceAllString(s, "${1}"+newVersion+"${2}")
+}
+
+// applyUpgradeToContent rewrites the first occurrence of the match that still
+// carries the old version.
+//
+// The rewrite is driven from the match position rather than by re-locating the
+// rewritten text, because two tasks in the same file are frequently textually
+// identical (the same task pinned to the same version in two jobs). Searching
+// for the replacement would keep finding the first one and leave every later
+// task's label untouched. Working positionally is unambiguous: each iteration
+// finds the next occurrence, since the ones already processed no longer match.
+func applyUpgradeToContent(content string, up upgradeTask) string {
+	matchIdx := strings.Index(content, up.match.FullMatch)
+	if matchIdx < 0 {
+		return content
+	}
+
+	newMatch := replaceLastOccurrence(up.match.FullMatch, up.match.CurrentVer, up.newVersion)
+	// A label written above the version field falls inside the match.
+	newMatch = updateDisplayNameVersion(newMatch, up.match.CurrentVer, up.newVersion)
+
+	// A label written below it does not: the Azure DevOps scan patterns stop
+	// at the version key. The remainder of the enclosing task block is
+	// rewritten too, stopping before any neighbouring task so a sibling
+	// mentioning the same version keeps its own label.
+	tail := content[matchIdx+len(up.match.FullMatch):]
+	blockEnd := len(tail)
+	if loc := azureTaskDecl.FindStringIndex(tail); loc != nil {
+		blockEnd = loc[0]
+	}
+	tail = updateDisplayNameVersion(tail[:blockEnd], up.match.CurrentVer, up.newVersion) + tail[blockEnd:]
+
+	return content[:matchIdx] + newMatch + tail
 }
 
 // --- upgrade application ---
@@ -843,10 +880,7 @@ func applyUpgrades(upgrades []upgradeTask, fileContents map[string]string) []ent
 			continue
 		}
 
-		newMatch := replaceLastOccurrence(up.match.FullMatch, up.match.CurrentVer, up.newVersion)
-		newMatch = stripDisplayNameVersion(newMatch, up.match.CurrentVer)
-		content = strings.Replace(content, up.match.FullMatch, newMatch, 1)
-		modified[up.match.FilePath] = content
+		modified[up.match.FilePath] = applyUpgradeToContent(content, up)
 	}
 
 	var changes []entities.FileChange

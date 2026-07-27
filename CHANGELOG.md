@@ -40,6 +40,15 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
   with no dependency movement at all still produced a pull request. The pattern is now added to
   `.gitignore`, and only when such a directory actually exists, so repositories that never build the
   project keep their `.gitignore` untouched
+- fixed the pipeline updater leaving a stale version behind in `displayName` labels. Upgrading a
+  task from `3.11` to `3.14` rewrote `versionSpec` but left `displayName: 'Use Python 3.11'`
+  untouched, so the file described a version it no longer used. The label is now upgraded alongside
+  the version field rather than having its version stripped out, and it is upgraded whether it is
+  written above or below that field — a label written below sat outside the scan match and was never
+  reached at all. The rewrite stops at the enclosing task boundary, so a neighbouring task mentioning
+  the same version keeps its own label, and a label reading `3.110` is left alone when the upgrade is
+  from `3.11`
+
 ## [0.18.0] - 2026-07-27
 
 ### Added
