@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-07-28
+
 ### Added
 
 - added automatic PDM detection to the Python updater: a repository carrying a `pdm.lock`, a
