@@ -15,6 +15,7 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	pyUpdater "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
+	"github.com/rios0rios0/autoupdate/internal/support"
 	"github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
 )
 
@@ -359,7 +360,7 @@ func TestBuildUpgradeScript(t *testing.T) {
 			PythonVersion:   "3.13.1",
 			AuthToken:       "tok123",
 			ProviderName:    "github",
-			ChangelogFile:   "/tmp/changelog.md",
+			Changelog:       support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
 			HasRequirements: true,
 			HasPyproject:    true,
 			PythonBinary:    "/usr/bin/python3",
@@ -645,7 +646,7 @@ func TestBuildEnv(t *testing.T) {
 			AuthToken:     "tok123",
 			PythonBinary:  "/usr/bin/python3",
 			PythonVersion: "3.13.1",
-			ChangelogFile: "/tmp/changelog.md",
+			Changelog:     support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
 		}
 		repoDir := "/tmp/repo"
 
@@ -676,7 +677,7 @@ func TestBuildEnv(t *testing.T) {
 			AuthToken:     "tok",
 			PythonBinary:  "/usr/bin/python3",
 			PythonVersion: "",
-			ChangelogFile: "",
+			Changelog:     support.StagedChangelog{},
 		}
 
 		// when
@@ -691,100 +692,35 @@ func TestBuildEnv(t *testing.T) {
 	})
 }
 
-func TestPrepareChangelog(t *testing.T) {
+func TestChangelogEntries(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should return empty string when no CHANGELOG.md exists", func(t *testing.T) {
+	t.Run("should describe the version upgrade when one is needed", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo"}
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-python-deps",
-		}
+		vCtx := &pyUpdater.VersionContext{LatestVersion: "3.13.1", NeedsVersionUpgrade: true}
 
 		// when
-		result := pyUpdater.PrepareChangelog(t.Context(), provider, repo, vCtx)
+		entries := pyUpdater.ChangelogEntries(vCtx)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Equal(t, []string{
+			"- changed the Python version to `3.13.1` and updated all pip dependencies",
+		}, entries)
 	})
 
-	t.Run("should return empty string when GetFileContent fails", func(t *testing.T) {
+	t.Run("should describe only the dependencies when no version upgrade is needed", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
-			WithFileContentErr(errors.New("read error")).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo"}
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-python-deps",
-		}
+		vCtx := &pyUpdater.VersionContext{LatestVersion: "3.13.1", NeedsVersionUpgrade: false}
 
 		// when
-		result := pyUpdater.PrepareChangelog(t.Context(), provider, repo, vCtx)
+		entries := pyUpdater.ChangelogEntries(vCtx)
 
 		// then
-		assert.Equal(t, "", result)
-	})
-
-	t.Run("should create temp file with version upgrade entry when version upgrade needed", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		changelogContent := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2025-01-01\n"
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
-			WithFileContents(map[string]string{
-				"CHANGELOG.md": changelogContent,
-			}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo"}
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: true,
-			BranchName:          "chore/upgrade-python-3.13.1",
-		}
-
-		// when
-		result := pyUpdater.PrepareChangelog(t.Context(), provider, repo, vCtx)
-
-		// then
-		assert.NotEmpty(t, result)
-	})
-
-	t.Run("should create temp file with deps entry when no version upgrade needed", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		changelogContent := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2025-01-01\n"
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
-			WithFileContents(map[string]string{
-				"CHANGELOG.md": changelogContent,
-			}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo"}
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-python-deps",
-		}
-
-		// when
-		result := pyUpdater.PrepareChangelog(t.Context(), provider, repo, vCtx)
-
-		// then
-		assert.NotEmpty(t, result)
+		assert.Equal(t, []string{"- changed the Python dependencies to their latest versions"}, entries)
 	})
 }
 
@@ -1189,7 +1125,7 @@ func TestBuildLocalEnv(t *testing.T) {
 			PythonVersion: "3.13.1",
 			AuthToken:     "tok",
 			PythonBinary:  "/usr/bin/python3",
-			ChangelogFile: "/tmp/cl.md",
+			Changelog:     support.StagedChangelog{TempPath: "/tmp/cl.md", RepoPath: "CHANGELOG.md"},
 		}
 
 		// when
@@ -1269,70 +1205,6 @@ func TestHandleDryRun(t *testing.T) {
 		assert.Equal(t, "chore/upgrade-python-deps", result.BranchName)
 		assert.False(t, result.PythonVersionUpdated)
 		assert.False(t, result.HasChanges)
-	})
-}
-
-func TestPrepareLocalChangelog(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should return empty when no CHANGELOG.md exists in directory", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		tmpDir := t.TempDir()
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-python-deps",
-		}
-
-		// when
-		result := pyUpdater.PrepareLocalChangelog(tmpDir, vCtx)
-
-		// then
-		assert.Equal(t, "", result)
-	})
-
-	t.Run("should create temp file with deps entry when CHANGELOG exists", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		tmpDir := t.TempDir()
-		changelogPath := tmpDir + "/CHANGELOG.md"
-		changelogContent := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2025-01-01\n"
-		require.NoError(t, writeTestFile(changelogPath, changelogContent))
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-python-deps",
-		}
-
-		// when
-		result := pyUpdater.PrepareLocalChangelog(tmpDir, vCtx)
-
-		// then
-		assert.NotEmpty(t, result)
-	})
-
-	t.Run("should create temp file with version entry when upgrade is needed", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		tmpDir := t.TempDir()
-		changelogPath := tmpDir + "/CHANGELOG.md"
-		changelogContent := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2025-01-01\n"
-		require.NoError(t, writeTestFile(changelogPath, changelogContent))
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: true,
-			BranchName:          "chore/upgrade-python-3.13.1",
-		}
-
-		// when
-		result := pyUpdater.PrepareLocalChangelog(tmpDir, vCtx)
-
-		// then
-		assert.NotEmpty(t, result)
 	})
 }
 

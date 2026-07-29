@@ -85,14 +85,9 @@ func BuildEnv(params UpgradeParamsExported, repoDir string) []string {
 	return buildEnv(params, repoDir)
 }
 
-// PrepareChangelog is exported for testing.
-func PrepareChangelog(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	vCtx *VersionContext,
-) string {
-	return prepareChangelog(ctx, provider, repo, vCtx)
+// ChangelogEntries is exported for testing.
+func ChangelogEntries(vCtx *VersionContext) []string {
+	return changelogEntries(vCtx)
 }
 
 // LogDryRun is exported for testing.
@@ -117,11 +112,6 @@ func WriteDockerfileUpdate(sb *strings.Builder) {
 	writeDockerfileUpdate(sb)
 }
 
-// WriteChangelogUpdate is exported for testing.
-func WriteChangelogUpdate(sb *strings.Builder) {
-	writeChangelogUpdate(sb)
-}
-
 // WriteCommitAndPush is exported for testing.
 func WriteCommitAndPush(sb *strings.Builder) {
 	writeCommitAndPush(sb)
@@ -140,11 +130,6 @@ func WriteLocalAuth(sb *strings.Builder, params LocalUpgradeParamsExported) {
 // HandleDryRun is exported for testing.
 func HandleDryRun(vCtx *VersionContext, repoDir string) *LocalResult {
 	return handleDryRun(vCtx, repoDir)
-}
-
-// PrepareLocalChangelog is exported for testing.
-func PrepareLocalChangelog(repoDir string, vCtx *VersionContext) string {
-	return prepareLocalChangelog(repoDir, vCtx)
 }
 
 // SetLocalCmdRunner overrides the package-level local command runner for testing.

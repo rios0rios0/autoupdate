@@ -111,31 +111,3 @@ func HasUncommittedChanges(ctx context.Context, repoDir string) bool {
 	}
 	return len(strings.TrimSpace(string(output))) > 0
 }
-
-// LocalChangelogUpdate reads CHANGELOG.md from repoDir, inserts entries,
-// and writes it back if modified. Returns true if the file was updated.
-func LocalChangelogUpdate(repoDir string, entries []string) bool {
-	changelogPath := filepath.Clean(filepath.Join(repoDir, "CHANGELOG.md"))
-	data, err := os.ReadFile(changelogPath)
-	if err != nil {
-		logger.Warnf("Failed to read CHANGELOG.md: %v", err)
-		return false
-	}
-
-	content := string(data)
-	modified := entities.InsertChangelogEntry(content, entries)
-	if modified == content {
-		return false
-	}
-
-	writeErr := os.WriteFile( //nolint:gosec // repoDir is a controlled internal path
-		changelogPath,
-		[]byte(modified),
-		0o600,
-	)
-	if writeErr != nil {
-		logger.Warnf("Failed to write CHANGELOG.md: %v", writeErr)
-		return false
-	}
-	return true
-}

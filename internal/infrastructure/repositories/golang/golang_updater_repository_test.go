@@ -13,6 +13,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	goUpdater "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
+	"github.com/rios0rios0/autoupdate/internal/support"
 	"github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
 )
 
@@ -441,8 +442,8 @@ func TestBuildUpgradeScript(t *testing.T) {
 
 		// given
 		params := goUpdater.UpgradeParams{
-			ProviderName:  "github",
-			ChangelogFile: "/tmp/changelog.md",
+			ProviderName: "github",
+			Changelog:    support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
 		}
 
 		// when
@@ -591,46 +592,35 @@ func TestOpenPullRequest(t *testing.T) {
 	})
 }
 
-func TestPrepareChangelog(t *testing.T) {
+func TestChangelogEntries(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should return temp file path when CHANGELOG.md exists", func(t *testing.T) {
+	t.Run("should describe the version upgrade when one is needed", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		changelog := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n"
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
-			WithFileContents(map[string]string{"CHANGELOG.md": changelog}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo"}
 		vCtx := &goUpdater.VersionContext{LatestVersion: "1.25.7", NeedsVersionUpgrade: true}
 
 		// when
-		result := goUpdater.PrepareChangelog(t.Context(), provider, repo, vCtx)
+		entries := goUpdater.ChangelogEntries(vCtx)
 
 		// then
-		assert.NotEmpty(t, result)
-		if result != "" {
-			defer os.Remove(result)
-		}
+		assert.Equal(t, []string{
+			"- changed the Go version to `1.25.7` and updated all module dependencies",
+		}, entries)
 	})
 
-	t.Run("should return empty string when no CHANGELOG.md", func(t *testing.T) {
+	t.Run("should describe only the dependencies when no version upgrade is needed", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo"}
-		vCtx := &goUpdater.VersionContext{LatestVersion: "1.25.7", NeedsVersionUpgrade: true}
+		vCtx := &goUpdater.VersionContext{LatestVersion: "1.25.7", NeedsVersionUpgrade: false}
 
 		// when
-		result := goUpdater.PrepareChangelog(t.Context(), provider, repo, vCtx)
+		entries := goUpdater.ChangelogEntries(vCtx)
 
 		// then
-		assert.Empty(t, result)
+		assert.Equal(t, []string{"- changed the Go module dependencies to their latest versions"}, entries)
 	})
 }
 
@@ -793,42 +783,5 @@ func TestBuildLocalEnvFull(t *testing.T) {
 			}
 		}
 		assert.True(t, found)
-	})
-}
-
-func TestPrepareLocalChangelogGo(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should return temp file when CHANGELOG.md exists", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		root := t.TempDir()
-		changelog := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n"
-		require.NoError(t, os.WriteFile(filepath.Join(root, "CHANGELOG.md"), []byte(changelog), 0o600))
-		vCtx := &goUpdater.VersionContext{LatestVersion: "1.25.7", NeedsVersionUpgrade: true}
-
-		// when
-		result := goUpdater.PrepareLocalChangelog(root, vCtx)
-
-		// then
-		assert.NotEmpty(t, result)
-		if result != "" {
-			defer os.Remove(result)
-		}
-	})
-
-	t.Run("should return empty when no CHANGELOG.md", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		root := t.TempDir()
-		vCtx := &goUpdater.VersionContext{LatestVersion: "1.25.7", NeedsVersionUpgrade: true}
-
-		// when
-		result := goUpdater.PrepareLocalChangelog(root, vCtx)
-
-		// then
-		assert.Empty(t, result)
 	})
 }

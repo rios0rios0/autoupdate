@@ -144,18 +144,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, err
 	}
 
-	entries := make([]string, 0, len(upgrades))
-	for _, up := range upgrades {
-		label := "Terraform module"
-		if up.kind == depKindImage {
-			label = "container image"
-		}
-		entries = append(entries, fmt.Sprintf(
-			"- changed the %s `%s` from `%s` to `%s`",
-			label, extractRepoName(up.dep.Source), up.dep.CurrentVer, up.newVersion,
-		))
-	}
-	support.LocalChangelogUpdate(repoDir, entries)
+	support.LocalChangelogUpdate(repoDir, changelogEntries(upgrades))
 
 	return &repositories.LocalUpdateResult{
 		BranchName:    generateBranchName(upgrades),
@@ -843,9 +832,10 @@ func generatePRTitle(tasks []upgradeTask) string {
 	)
 }
 
-// appendChangelogEntry reads the target repo's CHANGELOG.md (if it exists),
-// inserts entries describing the Terraform module upgrades, and appends the
-// modified file to the change set.
+// appendChangelogEntry records the Terraform module upgrades in the target
+// repo's changelog and appends the resulting file to the change set. The
+// format -- Keep a Changelog or chlog fragments -- is decided by the shared
+// helper from what the repository itself commits.
 func appendChangelogEntry(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
@@ -853,16 +843,12 @@ func appendChangelogEntry(
 	upgrades []upgradeTask,
 	fileChanges []entities.FileChange,
 ) []entities.FileChange {
-	if !provider.HasFile(ctx, repo, "CHANGELOG.md") {
-		return fileChanges
-	}
+	return support.RemoteChangelogChanges(
+		ctx, provider, repo, changelogEntries(upgrades), fileChanges)
+}
 
-	content, err := provider.GetFileContent(ctx, repo, "CHANGELOG.md")
-	if err != nil {
-		logger.Warnf("[terraform] Failed to read CHANGELOG.md: %v", err)
-		return fileChanges
-	}
-
+// changelogEntries renders one Keep a Changelog bullet per upgrade.
+func changelogEntries(upgrades []upgradeTask) []string {
 	entries := make([]string, 0, len(upgrades))
 	for _, up := range upgrades {
 		label := "Terraform module"
@@ -874,17 +860,7 @@ func appendChangelogEntry(
 			label, extractRepoName(up.dep.Source), up.dep.CurrentVer, up.newVersion,
 		))
 	}
-
-	modified := entities.InsertChangelogEntry(content, entries)
-	if modified == content {
-		return fileChanges
-	}
-
-	return append(fileChanges, entities.FileChange{
-		Path:       "CHANGELOG.md",
-		Content:    modified,
-		ChangeType: "edit",
-	})
+	return entries
 }
 
 func generatePRDescription(tasks []upgradeTask) string {

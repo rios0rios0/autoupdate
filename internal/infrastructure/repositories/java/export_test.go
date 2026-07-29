@@ -87,14 +87,9 @@ func BuildEnv(params UpgradeParamsExported, repoDir string) []string {
 	return buildEnv(params, repoDir)
 }
 
-// PrepareChangelog is exported for testing.
-func PrepareChangelog(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	vCtx *VersionContext,
-) string {
-	return prepareChangelog(ctx, provider, repo, vCtx)
+// ChangelogEntries is exported for testing.
+func ChangelogEntries(vCtx *VersionContext) []string {
+	return changelogEntries(vCtx)
 }
 
 // LogDryRun is exported for testing.
@@ -118,11 +113,6 @@ func OpenPullRequest(
 // WriteDockerfileUpdate is exported for testing.
 func WriteDockerfileUpdate(sb *strings.Builder) {
 	writeDockerfileUpdate(sb)
-}
-
-// WriteChangelogUpdate is exported for testing.
-func WriteChangelogUpdate(sb *strings.Builder) {
-	writeChangelogUpdate(sb)
 }
 
 // WriteCommitAndPush is exported for testing.

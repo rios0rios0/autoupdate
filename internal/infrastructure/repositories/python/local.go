@@ -10,9 +10,9 @@ import (
 
 	logger "github.com/sirupsen/logrus"
 
-	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
+	"github.com/rios0rios0/autoupdate/internal/support"
 )
 
 // localCmdRunner is the package-level command runner for local-mode upgrade scripts.
@@ -197,10 +197,8 @@ func runLanguageUpgradeScript(
 	vCtx *versionContext,
 	opts LocalUpgradeOptions,
 ) (string, error) {
-	changelogFile := prepareLocalChangelog(repoDir, vCtx)
-	if changelogFile != "" {
-		defer os.Remove(changelogFile)
-	}
+	changelog := support.StageLocalChangelog(repoDir, changelogEntries(vCtx))
+	defer changelog.Remove()
 
 	pythonBinary, err := findPythonBinary()
 	if err != nil {
@@ -220,7 +218,7 @@ func runLanguageUpgradeScript(
 	params := localUpgradeParams{
 		BranchName:      vCtx.BranchName,
 		PythonVersion:   vCtx.LatestVersion,
-		ChangelogFile:   changelogFile,
+		Changelog:       changelog,
 		AuthToken:       opts.AuthToken,
 		ProviderName:    opts.ProviderName,
 		HasRequirements: hasRequirements,
@@ -268,9 +266,11 @@ func runLanguageUpgradeScript(
 // --- local-mode internal types & helpers ---
 
 type localUpgradeParams struct {
-	BranchName      string
-	PythonVersion   string
-	ChangelogFile   string
+	BranchName    string
+	PythonVersion string
+	// Changelog is the staged changelog payload the script copies into
+	// the clone; an empty value leaves the repository's changelog untouched.
+	Changelog       support.StagedChangelog
 	AuthToken       string
 	ProviderName    string
 	HasRequirements bool
@@ -307,7 +307,7 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	writeDockerfileUpdate(&sb)
 
 	// Changelog update
-	writeChangelogUpdate(&sb)
+	sb.WriteString(support.ChangelogUpdateScript())
 
 	return sb.String()
 }
@@ -356,48 +356,6 @@ func buildLocalEnv(params localUpgradeParams) []string {
 			"GIT_HTTPS_TOKEN="+params.AuthToken,
 		)
 	}
-	if params.ChangelogFile != "" {
-		env = append(env, "CHANGELOG_FILE="+params.ChangelogFile)
-	}
+	env = append(env, params.Changelog.Env()...)
 	return env
-}
-
-// prepareLocalChangelog reads CHANGELOG.md from disk (if it exists),
-// inserts an upgrade entry, and writes the result to a temp file.
-func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
-	content, err := os.ReadFile(filepath.Join(repoDir, "CHANGELOG.md"))
-	if err != nil {
-		return "" // no changelog present
-	}
-
-	var entry string
-	if vCtx.NeedsVersionUpgrade {
-		entry = fmt.Sprintf(
-			"- changed the Python version to `%s` and updated all pip dependencies",
-			vCtx.LatestVersion,
-		)
-	} else {
-		entry = "- changed the Python dependencies to their latest versions"
-	}
-
-	modified := entities.InsertChangelogEntry(string(content), []string{entry})
-	if modified == string(content) {
-		return ""
-	}
-
-	tmpFile, writeErr := os.CreateTemp("", "autoupdate-changelog-*.md")
-	if writeErr != nil {
-		logger.Warnf("[python] Failed to create temp changelog file: %v", writeErr)
-		return ""
-	}
-
-	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
-		logger.Warnf("[python] Failed to write temp changelog: %v", writeErr)
-		return ""
-	}
-	_ = tmpFile.Close()
-
-	return tmpFile.Name()
 }

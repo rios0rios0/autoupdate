@@ -1034,9 +1034,10 @@ func generatePRDescription(tasks []upgradeTask) string {
 	return sb.String()
 }
 
-// appendChangelogEntry reads CHANGELOG.md (if present), inserts entries
-// describing the pipeline version upgrades, and appends the modified file
-// to the change set.
+// appendChangelogEntry records the pipeline version upgrades in the target
+// repo's changelog and appends the resulting file to the change set. The
+// format -- Keep a Changelog or chlog fragments -- is decided by the shared
+// helper from what the repository itself commits.
 func appendChangelogEntry(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
@@ -1044,16 +1045,6 @@ func appendChangelogEntry(
 	upgrades []upgradeTask,
 	fileChanges []entities.FileChange,
 ) []entities.FileChange {
-	if !provider.HasFile(ctx, repo, "CHANGELOG.md") {
-		return fileChanges
-	}
-
-	content, err := provider.GetFileContent(ctx, repo, "CHANGELOG.md")
-	if err != nil {
-		logger.Warnf("[pipeline] Failed to read CHANGELOG.md: %v", err)
-		return fileChanges
-	}
-
 	entries := make([]string, 0, len(upgrades))
 	for _, up := range upgrades {
 		entries = append(entries, fmt.Sprintf(
@@ -1062,14 +1053,5 @@ func appendChangelogEntry(
 		))
 	}
 
-	modified := entities.InsertChangelogEntry(content, entries)
-	if modified == content {
-		return fileChanges
-	}
-
-	return append(fileChanges, entities.FileChange{
-		Path:       "CHANGELOG.md",
-		Content:    modified,
-		ChangeType: "edit",
-	})
+	return support.RemoteChangelogChanges(ctx, provider, repo, entries, fileChanges)
 }
