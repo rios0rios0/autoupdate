@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-07-29
+
 ### Added
 
 - added support for [chlog](https://github.com/luizjhonata/chlog), the fragment-based changelog
