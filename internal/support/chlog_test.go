@@ -143,6 +143,22 @@ func TestDetectLocalChlog(t *testing.T) {
 		// then
 		require.Error(t, err)
 		assert.False(t, usesChlog)
+		assert.Contains(t, err.Error(), ".chlog.yaml")
+	})
+
+	t.Run("should name the .chlog.yml file it actually read in a parse error", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := writeChlogRepo(t, map[string]string{".chlog.yml": "kinds: [oops\n"})
+
+		// when
+		_, _, err := support.DetectLocalChlog(root)
+
+		// then
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), ".chlog.yml")
+		assert.NotContains(t, err.Error(), ".chlog.yaml")
 	})
 }
 

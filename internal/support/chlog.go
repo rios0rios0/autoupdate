@@ -72,7 +72,7 @@ func loadLocalChlogConfig(repoDir string) (*entities.ChlogConfig, bool, error) {
 
 		config, err := entities.ParseChlogConfig(data)
 		if err != nil {
-			return nil, false, err
+			return nil, false, fmt.Errorf("%s: %w", configPath, err)
 		}
 		return config, true, nil
 	}
@@ -105,7 +105,7 @@ func DetectRemoteChlog(
 
 		config, err := entities.ParseChlogConfig([]byte(content))
 		if err != nil {
-			return nil, false, err
+			return nil, false, fmt.Errorf("%s in %s: %w", name, entities.RepoKey(repo), err)
 		}
 		return config, true, nil
 	}

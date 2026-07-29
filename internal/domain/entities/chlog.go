@@ -110,11 +110,15 @@ func DefaultChlogConfig() ChlogConfig {
 // for a repository that uses the tool without committing a configuration file.
 //
 // Unknown keys are tolerated: autoupdate only reads a subset of the schema.
+//
+// The error deliberately does not name a file: the caller knows whether these
+// bytes came from .chlog.yaml, .chlog.yml, or a provider API, and wraps the
+// error with the path it actually read.
 func ParseChlogConfig(data []byte) (*ChlogConfig, error) {
 	config := DefaultChlogConfig()
 	if len(data) > 0 {
 		if err := yaml.Unmarshal(data, &config); err != nil {
-			return nil, fmt.Errorf("failed to parse %s: %w", ChlogConfigFile, err)
+			return nil, fmt.Errorf("failed to parse the chlog configuration: %w", err)
 		}
 	}
 
@@ -125,22 +129,34 @@ func ParseChlogConfig(data []byte) (*ChlogConfig, error) {
 	return &config, nil
 }
 
-// applyChlogDefaults restores chlog's defaults for keys the file left out. An
-// explicitly empty value is treated as absent rather than as "the repository
-// root", which is what chlog does when it merges a file over its defaults.
+// applyChlogDefaults restores chlog's defaults for keys the file left out and
+// normalizes the configured paths to forward slashes. An explicitly empty value
+// is treated as absent rather than as "the repository root", which is what chlog
+// does when it merges a file over its defaults.
 func applyChlogDefaults(config *ChlogConfig) {
-	if strings.TrimSpace(config.ChangesDir) == "" {
-		config.ChangesDir = DefaultChlogChangesDir
-	}
-	if strings.TrimSpace(config.UnreleasedDir) == "" {
-		config.UnreleasedDir = DefaultChlogUnreleasedDir
-	}
-	if strings.TrimSpace(config.ChangelogPath) == "" {
-		config.ChangelogPath = DefaultChlogChangelogPath
-	}
+	config.ChangesDir = normalizeChlogPath(config.ChangesDir, DefaultChlogChangesDir)
+	config.UnreleasedDir = normalizeChlogPath(config.UnreleasedDir, DefaultChlogUnreleasedDir)
+	config.ChangelogPath = normalizeChlogPath(config.ChangelogPath, DefaultChlogChangelogPath)
 	if len(config.Kinds) == 0 {
 		config.Kinds = DefaultChlogConfig().Kinds
 	}
+}
+
+// normalizeChlogPath returns the configured value in forward-slash form, or the
+// fallback when the file left the key out.
+//
+// The conversion is unconditional rather than [filepath.ToSlash], which only
+// rewrites the separator of the *running* platform and is therefore a no-op on
+// Linux. A configuration is committed once and read wherever autoupdate happens
+// to run, so a Windows-authored `docs\changes` has to mean the same directory on
+// both — and, more importantly, `..\..\etc` has to be recognised as an escape by
+// the validation below no matter which platform validates it.
+func normalizeChlogPath(value, fallback string) string {
+	normalized := strings.ReplaceAll(strings.TrimSpace(value), `\`, "/")
+	if normalized == "" {
+		return fallback
+	}
+	return normalized
 }
 
 // validateChlogConfig rejects configured paths that leave the repository root.
@@ -174,30 +190,38 @@ func validateChlogConfig(config *ChlogConfig) error {
 	return nil
 }
 
-// isPathInsideRepo reports whether a configured path stays within the
-// repository root. An absolute path (in either separator style, since a
-// configuration written on Windows can be read on Linux and vice versa), "..",
-// or anything reaching through ".." would address a file autoupdate was never
-// pointed at.
+// isPathInsideRepo reports whether a configured path stays within the repository
+// root. An absolute path, "..", or anything reaching through ".." would address
+// a file autoupdate was never pointed at.
+//
+// The value has already been normalized to forward slashes by
+// [normalizeChlogPath], which is what makes this decision independent of the
+// platform doing the validating: `..\..\etc` reaches the ".." check as
+// `../../etc` on Linux too, and `\tmp\evil` arrives as the absolute `/tmp/evil`
+// rather than as a single oddly-named element. Both are rejected either way.
 func isPathInsideRepo(value string) bool {
-	if value == "" || path.IsAbs(value) || filepath.IsAbs(value) {
+	if value == "" {
 		return false
 	}
-	// A Windows drive-relative path such as "C:changes" is absolute on Windows
-	// but not recognised as such by the Linux path packages.
+	// A Windows drive-relative path such as "C:changes", and the "C:/changes"
+	// form, are absolute on Windows but not recognised as such by [path].
 	if strings.Contains(value, ":") {
 		return false
 	}
 
-	clean := path.Clean(filepath.ToSlash(value))
+	clean := path.Clean(value)
+	if path.IsAbs(clean) || filepath.IsAbs(clean) {
+		return false
+	}
 	return clean != ".." && !strings.HasPrefix(clean, "../")
 }
 
 // UnreleasedPath returns the repository-relative directory holding the pending
-// fragments, always with forward slashes so it can be used both as a provider
-// API path and, after conversion, as an on-disk path.
+// fragments. Parsing normalized both components to forward slashes, so the
+// result can be used as a provider API path directly and, after conversion by
+// [ChlogFragmentDiskPath], as an on-disk path.
 func (c *ChlogConfig) UnreleasedPath() string {
-	return path.Join(filepath.ToSlash(c.ChangesDir), filepath.ToSlash(c.UnreleasedDir))
+	return path.Join(c.ChangesDir, c.UnreleasedDir)
 }
 
 // KindLabel resolves the label a repository uses for the given kind. chlog

@@ -99,6 +99,46 @@ func TestParseChlogConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("should reject a backslash path that escapes the repository root", func(t *testing.T) {
+		t.Parallel()
+
+		// A configuration is committed once and read wherever autoupdate runs, so
+		// these have to be rejected on Linux too even though only Windows resolves
+		// the separator. `filepath.ToSlash` is a no-op on Linux, so nothing but an
+		// unconditional normalization catches them.
+		// given
+		escaping := []string{
+			`changesDir: ..\..\etc` + "\n",
+			`unreleasedDir: ..\..\..\tmp` + "\n",
+			`changelogPath: \tmp\evil` + "\n",
+			`changesDir: \\server\share` + "\n",
+			`changesDir: .changes` + "\n" + `unreleasedDir: ..\..` + "\n",
+		}
+
+		for _, data := range escaping {
+			// when
+			config, err := entities.ParseChlogConfig([]byte(data))
+
+			// then
+			require.ErrorIs(t, err, entities.ErrChlogPathEscapesRepo, data)
+			assert.Nil(t, config)
+		}
+	})
+
+	t.Run("should read a backslash directory as the same path a slash one names", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		data := []byte(`changesDir: docs\changes` + "\n" + `unreleasedDir: pending` + "\n")
+
+		// when
+		config, err := entities.ParseChlogConfig(data)
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, "docs/changes/pending", config.UnreleasedPath())
+	})
+
 	t.Run("should return an error when the file is not valid YAML", func(t *testing.T) {
 		t.Parallel()
 
