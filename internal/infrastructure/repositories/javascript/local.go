@@ -10,9 +10,9 @@ import (
 
 	logger "github.com/sirupsen/logrus"
 
-	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
+	"github.com/rios0rios0/autoupdate/internal/support"
 )
 
 // localCmdRunner is the package-level command runner for local-mode upgrade scripts.
@@ -187,7 +187,12 @@ func executeLocalUpgrade(
 	}
 
 	// --- Language Operations (bash) ---
-	outputStr, runErr := runLanguageUpgradeScript(ctx, repoDir, vCtx, pkgMgr, opts)
+	// The changelog is staged here rather than inside the script runner so this
+	// function, which decides whether to keep the run, can also undo it.
+	changelog := support.StageLocalChangelog(repoDir, changelogEntries(vCtx))
+	defer changelog.Remove()
+
+	outputStr, runErr := runLanguageUpgradeScript(ctx, repoDir, vCtx, pkgMgr, opts, changelog)
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -199,7 +204,7 @@ func executeLocalUpgrade(
 		logger.Infof(
 			"[javascript] Only cosmetic lockfile version changes detected (project version sync), skipping",
 		)
-		revertWorkingTreeChanges(ctx, repoDir)
+		revertWorkingTreeChanges(ctx, repoDir, changelog)
 		return &LocalResult{
 			HasChanges:     false,
 			LatestVersion:  vCtx.LatestVersion,
@@ -243,16 +248,12 @@ func runLanguageUpgradeScript(
 	vCtx *versionContext,
 	pkgMgr string,
 	opts LocalUpgradeOptions,
+	changelog support.StagedChangelog,
 ) (string, error) {
-	changelogFile := prepareLocalChangelog(repoDir, vCtx)
-	if changelogFile != "" {
-		defer os.Remove(changelogFile)
-	}
-
 	params := localUpgradeParams{
 		BranchName:     vCtx.BranchName,
 		NodeVersion:    vCtx.LatestVersion,
-		ChangelogFile:  changelogFile,
+		Changelog:      changelog,
 		AuthToken:      opts.AuthToken,
 		ProviderName:   opts.ProviderName,
 		PackageManager: pkgMgr,
@@ -297,9 +298,11 @@ func runLanguageUpgradeScript(
 // --- local-mode internal types & helpers ---
 
 type localUpgradeParams struct {
-	BranchName     string
-	NodeVersion    string
-	ChangelogFile  string
+	BranchName  string
+	NodeVersion string
+	// Changelog is the staged changelog payload the script copies into
+	// the clone; an empty value leaves the repository's changelog untouched.
+	Changelog      support.StagedChangelog
 	AuthToken      string
 	ProviderName   string
 	PackageManager string
@@ -327,7 +330,7 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	writeDockerfileUpdate(&sb)
 
 	// Changelog update
-	writeChangelogUpdate(&sb)
+	sb.WriteString(support.ChangelogUpdateScript())
 
 	return sb.String()
 }
@@ -376,48 +379,6 @@ func buildLocalEnv(params localUpgradeParams) []string {
 			"GIT_HTTPS_TOKEN="+params.AuthToken,
 		)
 	}
-	if params.ChangelogFile != "" {
-		env = append(env, "CHANGELOG_FILE="+params.ChangelogFile)
-	}
+	env = append(env, params.Changelog.Env()...)
 	return env
-}
-
-// prepareLocalChangelog reads CHANGELOG.md from disk (if it exists),
-// inserts an upgrade entry, and writes the result to a temp file.
-func prepareLocalChangelog(repoDir string, vCtx *versionContext) string {
-	content, err := os.ReadFile(filepath.Join(repoDir, "CHANGELOG.md"))
-	if err != nil {
-		return "" // no changelog present
-	}
-
-	var entry string
-	if vCtx.NeedsVersionUpgrade {
-		entry = fmt.Sprintf(
-			"- changed the Node.js version to `%s` and updated all JavaScript dependencies",
-			vCtx.LatestVersion,
-		)
-	} else {
-		entry = jsChangelogEntryDeps
-	}
-
-	modified := entities.InsertChangelogEntry(string(content), []string{entry})
-	if modified == string(content) {
-		return ""
-	}
-
-	tmpFile, writeErr := os.CreateTemp("", "autoupdate-changelog-*.md")
-	if writeErr != nil {
-		logger.Warnf("[javascript] Failed to create temp changelog file: %v", writeErr)
-		return ""
-	}
-
-	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
-		logger.Warnf("[javascript] Failed to write temp changelog: %v", writeErr)
-		return ""
-	}
-	_ = tmpFile.Close()
-
-	return tmpFile.Name()
 }

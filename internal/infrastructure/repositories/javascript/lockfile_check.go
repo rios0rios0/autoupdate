@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	logger "github.com/sirupsen/logrus"
+
+	"github.com/rios0rios0/autoupdate/internal/support"
 )
 
 // hasOnlyLockfileVersionChanges returns true when the only uncommitted
@@ -29,10 +31,12 @@ func hasOnlyLockfileVersionChanges(ctx context.Context, repoDir string) bool {
 			if !isPackageLockOnlyVersionSync(ctx, repoDir) {
 				return false
 			}
-		case "CHANGELOG.md":
+		case support.ChangelogFileName:
 			// Tolerate auto-generated changelog updates alongside cosmetic
-			// lockfile syncs — writeChangelogUpdate copies the changelog
-			// whenever git status is non-empty, even for cosmetic-only changes.
+			// lockfile syncs — the upgrade script copies the changelog whenever
+			// git status is non-empty, even for cosmetic-only changes. A chlog
+			// fragment needs no case here: it is a new untracked file, so
+			// "git diff" never reports it.
 		default:
 			// Any non-lockfile change (or yarn.lock / pnpm-lock.yaml which
 			// do not carry a project version field) is a real change.
@@ -144,9 +148,19 @@ func gitShowHEAD(ctx context.Context, repoDir, filePath string) ([]byte, error) 
 	return cmd.Output()
 }
 
-// revertWorkingTreeChanges discards all unstaged changes in the
-// working tree, restoring it to the HEAD state.
-func revertWorkingTreeChanges(ctx context.Context, repoDir string) {
+// revertWorkingTreeChanges discards all unstaged changes in the working tree,
+// restoring it to the HEAD state.
+//
+// The staged changelog is discarded first: a chlog fragment the upgrade script
+// already copied in is a new untracked file, so the checkout below would leave
+// it behind in the repository this run decided not to touch.
+func revertWorkingTreeChanges(
+	ctx context.Context,
+	repoDir string,
+	changelog support.StagedChangelog,
+) {
+	changelog.Discard(repoDir)
+
 	cmd := exec.CommandContext(ctx, "git", "checkout", "--", ".")
 	cmd.Dir = repoDir
 	if err := cmd.Run(); err != nil {

@@ -22,7 +22,7 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 - **Multi-Provider**: Supports GitHub, GitLab, and Azure DevOps as Git hosting providers
 - **API-Based Discovery**: Automatically discovers all repositories in an organization, group, or user account
 - **Extensible Updaters**: Plugin-based architecture for dependency ecosystems (Terraform modules, Go projects, and more coming)
-- **Changelog Integration**: Automatically updates `CHANGELOG.md` (Keep a Changelog format) when the target repository has one
+- **Changelog Integration**: Automatically updates `CHANGELOG.md` (Keep a Changelog format) when the target repository has one, or writes a [chlog](https://github.com/luizjhonata/chlog) fragment when the repository uses that format instead -- see [Changelog Formats](#changelog-formats)
 - **Cronjob-Ready**: Designed to run unattended on a schedule for daily dependency updates
 - **Dry Run Mode**: Preview all changes before creating any PRs
 - **Flexible Filtering**: Run against a specific provider, organization, or updater
@@ -137,6 +137,39 @@ honored in both `autoupdate run` (read via the provider API on the
 default branch) and `autoupdate .` (read directly from disk). Use it for
 forks you maintain by hand, frozen branches, or any project where
 automated PRs would create more work than they save.
+
+### Changelog Formats
+
+AutoUpdate records what it changed in the target repository's changelog, and
+picks the format from what that repository itself commits. Nothing has to be
+configured on the AutoUpdate side.
+
+**Keep a Changelog (default).** The entries are inserted into the
+`## [Unreleased]` / `### Changed` section of `CHANGELOG.md`. A repository
+without a `CHANGELOG.md` simply gets no changelog change.
+
+**chlog.** [chlog](https://github.com/luizjhonata/chlog) replaces the shared
+`CHANGELOG.md` with one small YAML file per change under `.changes/unreleased/`,
+which is what removes changelog merge conflicts between concurrent pull
+requests. Editing `[Unreleased]` in such a repository would put automated pull
+requests straight back into conflict, so AutoUpdate writes a fragment instead
+and leaves `CHANGELOG.md` alone:
+
+```yaml
+# .changes/unreleased/1748359200-a1b2.yaml
+kind: Changed
+body: changed the Go module dependencies to their latest versions
+time: 2026-07-29T14:30:00Z
+```
+
+A repository is treated as a chlog user when it commits a `.chlog.yaml` (or
+`.chlog.yml`), or when it merely carries a `.changes/unreleased/` directory --
+chlog works without a configuration file. When the file is present, its
+`changesDir`, `unreleasedDir` and `kinds` are honored, so a project that
+renamed its directories or its `Changed` label still gets valid fragments. The
+`chlog merge` step later compiles them into the changelog as usual.
+
+Both formats work in every ecosystem and in both local and batch mode.
 
 ### Token Resolution
 

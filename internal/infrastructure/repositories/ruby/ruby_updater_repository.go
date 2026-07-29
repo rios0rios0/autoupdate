@@ -146,10 +146,8 @@ func cloneAndUpgrade(
 	repo entities.Repository,
 	vCtx *versionContext,
 ) (*upgradeResult, error) {
-	changelogFile := prepareChangelog(ctx, provider, repo, vCtx)
-	if changelogFile != "" {
-		defer os.Remove(changelogFile)
-	}
+	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
+	defer changelog.Remove()
 
 	cloneURL := provider.CloneURL(repo)
 	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
@@ -161,7 +159,7 @@ func cloneAndUpgrade(
 		RubyVersion:   vCtx.LatestVersion,
 		AuthToken:     provider.AuthToken(),
 		ProviderName:  provider.Name(),
-		ChangelogFile: changelogFile,
+		Changelog:     changelog,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade: %w", err)
@@ -261,7 +259,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	// Update CHANGELOG locally
+	// Record the upgrade in the repository's changelog.
 	var entry string
 	if rbVersionUpdated {
 		entry = fmt.Sprintf(
@@ -320,7 +318,9 @@ type upgradeParams struct {
 	RubyVersion   string
 	AuthToken     string
 	ProviderName  string
-	ChangelogFile string
+	// Changelog is the staged changelog payload the script copies into
+	// the clone; an empty value leaves the repository's changelog untouched.
+	Changelog support.StagedChangelog
 }
 
 type upgradeResult struct {
@@ -377,55 +377,17 @@ func resolveVersionContext(
 	}
 }
 
-// prepareChangelog reads the target repo's CHANGELOG.md (if it exists),
-// inserts an entry describing the Ruby upgrade, and writes the modified
-// content to a temp file.
-func prepareChangelog(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	vCtx *versionContext,
-) string {
-	if !provider.HasFile(ctx, repo, "CHANGELOG.md") {
-		return ""
-	}
-
-	content, err := provider.GetFileContent(ctx, repo, "CHANGELOG.md")
-	if err != nil {
-		logger.Warnf("[ruby] Failed to read CHANGELOG.md: %v", err)
-		return ""
-	}
-
-	var entry string
+// changelogEntries renders the Keep a Changelog bullet describing the
+// upgrade. The staging helpers turn it into a chlog fragment when the
+// target repository uses that format instead.
+func changelogEntries(vCtx *versionContext) []string {
 	if vCtx.NeedsVersionUpgrade {
-		entry = fmt.Sprintf(
+		return []string{fmt.Sprintf(
 			"- changed the Ruby version to `%s` and updated all gem dependencies",
 			vCtx.LatestVersion,
-		)
-	} else {
-		entry = rbChangelogEntryDeps
+		)}
 	}
-
-	modified := entities.InsertChangelogEntry(content, []string{entry})
-	if modified == content {
-		return ""
-	}
-
-	tmpFile, writeErr := os.CreateTemp("", "autoupdate-changelog-*.md")
-	if writeErr != nil {
-		logger.Warnf("[ruby] Failed to create temp changelog file: %v", writeErr)
-		return ""
-	}
-
-	if _, writeErr = tmpFile.WriteString(modified); writeErr != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
-		logger.Warnf("[ruby] Failed to write temp changelog: %v", writeErr)
-		return ""
-	}
-	_ = tmpFile.Close()
-
-	return tmpFile.Name()
+	return []string{rbChangelogEntryDeps}
 }
 
 // --- clone + upgrade ---
@@ -507,8 +469,9 @@ func buildUpgradeScript(
 	// Update Dockerfile ruby image tags
 	writeDockerfileUpdate(&sb)
 
-	// Overwrite CHANGELOG.md with the pre-generated content (if provided)
-	writeChangelogUpdate(&sb)
+	// Copy in the staged changelog: an edited CHANGELOG.md, or a chlog
+	// fragment when the target repository uses that format.
+	sb.WriteString(support.ChangelogUpdateScript())
 
 	// Check for changes and commit/push
 	writeCommitAndPush(&sb)
@@ -591,18 +554,6 @@ func writeDockerfileUpdate(sb *strings.Builder) {
 	sb.WriteString("fi\n\n")
 }
 
-func writeChangelogUpdate(sb *strings.Builder) {
-	sb.WriteString("# Update CHANGELOG.md only if the upgrade produced actual changes.\n")
-	sb.WriteString("if [ -n \"${CHANGELOG_FILE:-}\" ] && [ -f \"$CHANGELOG_FILE\" ]; then\n")
-	sb.WriteString("    if [ -n \"$(git status --porcelain)\" ]; then\n")
-	sb.WriteString("        echo \"Updating CHANGELOG.md...\"\n")
-	sb.WriteString("        cp \"$CHANGELOG_FILE\" CHANGELOG.md\n")
-	sb.WriteString("    else\n")
-	sb.WriteString("        echo \"No dependency changes detected, skipping CHANGELOG update.\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("fi\n\n")
-}
-
 func writeCommitAndPush(sb *strings.Builder) {
 	sb.WriteString("if [ -n \"$(git status --porcelain)\" ]; then\n")
 	sb.WriteString("    echo \"Changes detected, committing and pushing...\"\n")
@@ -634,9 +585,7 @@ func buildEnv(params upgradeParams, repoDir string) []string {
 	if params.RubyVersion != "" {
 		env = append(env, "TARGET_RUBY_VERSION="+params.RubyVersion)
 	}
-	if params.ChangelogFile != "" {
-		env = append(env, "CHANGELOG_FILE="+params.ChangelogFile)
-	}
+	env = append(env, params.Changelog.Env()...)
 	return env
 }
 

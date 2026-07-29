@@ -210,4 +210,3 @@ func splitNamespace(imageName string) [2]string {
 	}
 	return [2]string{"", imageName}
 }
-

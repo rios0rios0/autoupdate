@@ -43,7 +43,7 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - **Domain commands**: `internal/domain/commands/` — `LocalCommand` (single repo), `RunCommand` (batch mode), `SelfUpdateCommand`, and `VersionCommand`
 - **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `ProviderRepository`, and `SelfUpdateRepository` interfaces
 - **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations for local and batch modes), and `selfupdate`
-- **Support utilities**: `internal/support/` — filesystem helpers, remote file checker bridging `langforge` with `gitforge`, and repo config loader for per-repo opt-out
+- **Support utilities**: `internal/support/` — filesystem helpers, remote file checker bridging `langforge` with `gitforge`, repo config loader for per-repo opt-out, and the shared changelog writer (see below)
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
 
 ### Key External Libraries
@@ -78,6 +78,32 @@ Auto-discovery searches `.`, `.config`, `configs`, `$HOME`, `$HOME/.config` for 
 **Repository exclusions:**
 - **Global**: `exclude_repos` in user config — right-anchored glob list matched against `<org>/<repo>` (or `<org>/<project>/<repo>` for ADO). Honored in batch mode and in local mode when a config file is loadable.
 - **Per-repo**: `.autoupdate.yaml` in the target repository's root with `skip: true` (and optional `reason`). Checked in both `autoupdate run` (fetched via provider API) and `autoupdate .` (read from disk).
+
+### Changelog Writing (Keep a Changelog and chlog)
+
+Every updater records its entries through `internal/support/changelog.go` — never call
+`entities.InsertChangelogEntry` or write `CHANGELOG.md` directly from an updater. The helper detects
+the target repository's format and picks the destination, so the two formats cannot drift apart:
+
+- `LocalChangelogUpdate(repoDir, entries)` — writes on disk (local mode).
+- `RemoteChangelogChanges(ctx, provider, repo, entries, fileChanges)` — appends `FileChange` values
+  for the provider API (batch mode), used by `terraform`, `dockerfile`, and `pipeline`.
+- `StageLocalChangelog` / `StageRemoteChangelog` — return a `StagedChangelog` (temp file plus
+  repository-relative destination) for the six ecosystems whose upgrade runs through a generated bash
+  script. The script gets `CHANGELOG_FILE` and `CHANGELOG_DEST` from `StagedChangelog.Env()` and
+  performs the copy with the shared snippet `support.ChangelogUpdateScript()`. Call
+  `StagedChangelog.Discard(repoDir)` when abandoning a run: a chlog fragment is a *new untracked*
+  file, so `git checkout -- .` would leave it behind (this is why the JavaScript cosmetic-lockfile
+  revert threads the staged value).
+
+chlog (`internal/support/chlog.go` + `internal/domain/entities/chlog.go`) is detected from a
+`.chlog.yaml`/`.chlog.yml` or a `.changes/unreleased/` directory. When detected, entries become one
+fragment file per entry (`<unixnano>-<hex>.yaml` with `kind`/`body`/`time`) and `CHANGELOG.md` is
+left untouched — editing it would recreate exactly the merge conflicts chlog exists to remove. The
+configured `changesDir`/`unreleasedDir`/`kinds` are honored, and paths are validated against escaping
+the repository root because `.chlog.yaml` is untrusted input from a repo autoupdate does not own. A
+broken or unreadable `.chlog.yaml` fails loudly rather than falling back to `CHANGELOG.md`. The
+per-ecosystem `changelogEntries(vCtx)` helper is all that remains ecosystem-specific.
 
 ### Stale Branch Cleanup
 

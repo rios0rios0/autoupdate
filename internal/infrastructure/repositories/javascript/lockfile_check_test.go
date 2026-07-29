@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
+	"github.com/rios0rios0/autoupdate/internal/support"
 )
 
 // initGitRepo creates a bare-minimum git repo in dir with an initial commit
@@ -288,10 +289,67 @@ func TestRevertWorkingTreeChanges(t *testing.T) {
 		))
 
 		// when
-		javascript.RevertWorkingTreeChanges(t.Context(), dir)
+		javascript.RevertWorkingTreeChanges(t.Context(), dir, support.StagedChangelog{})
 
 		// then
 		content, err := os.ReadFile(filepath.Join(dir, "package-lock.json"))
+		require.NoError(t, err)
+		assert.Equal(t, original, string(content))
+	})
+
+	t.Run("should delete the chlog fragment the upgrade script copied in", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		dir := t.TempDir()
+		initGitRepo(t, dir, map[string]string{"package-lock.json": packageLockWithVersion("1.0.0", "4.17.21")})
+
+		fragment := ".changes/unreleased/1748359200-a1b2.yaml"
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".changes", "unreleased"), 0o700))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, filepath.FromSlash(fragment)),
+			[]byte("kind: Changed\nbody: changed a dependency\n"),
+			0o600,
+		))
+
+		// when
+		javascript.RevertWorkingTreeChanges(t.Context(), dir, support.StagedChangelog{
+			TempPath: filepath.Join(t.TempDir(), "staged.yaml"),
+			RepoPath: fragment,
+			Fragment: true,
+		})
+
+		// then
+		_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(fragment)))
+		assert.True(t, os.IsNotExist(err),
+			"an untracked fragment survives the checkout, so it has to be deleted")
+	})
+
+	t.Run("should leave an edited CHANGELOG.md to the checkout", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		dir := t.TempDir()
+		original := "# Changelog\n\n## [Unreleased]\n"
+		initGitRepo(t, dir, map[string]string{
+			"package-lock.json": packageLockWithVersion("1.0.0", "4.17.21"),
+			"CHANGELOG.md":      original,
+		})
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "CHANGELOG.md"),
+			[]byte(original+"\n### Changed\n\n- changed a dependency\n"),
+			0o600,
+		))
+
+		// when
+		javascript.RevertWorkingTreeChanges(t.Context(), dir, support.StagedChangelog{
+			TempPath: filepath.Join(t.TempDir(), "staged.md"),
+			RepoPath: "CHANGELOG.md",
+		})
+
+		// then
+		content, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
 		require.NoError(t, err)
 		assert.Equal(t, original, string(content))
 	})

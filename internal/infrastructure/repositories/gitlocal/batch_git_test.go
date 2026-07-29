@@ -265,7 +265,6 @@ func TestBatchHasChanges(t *testing.T) {
 	})
 }
 
-
 func TestSwitchToDefault(t *testing.T) {
 	t.Parallel()
 

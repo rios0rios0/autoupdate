@@ -139,14 +139,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, err
 	}
 
-	entries := make([]string, 0, len(upgrades))
-	for _, up := range upgrades {
-		entries = append(entries, fmt.Sprintf(
-			"- changed the Docker base image `%s` from `%s` to `%s`",
-			up.parsed.FullName(), up.dep.CurrentVer, up.newTag,
-		))
-	}
-	support.LocalChangelogUpdate(repoDir, entries)
+	support.LocalChangelogUpdate(repoDir, changelogEntries(upgrades))
 
 	return &repositories.LocalUpdateResult{
 		BranchName:    generateBranchName(upgrades),
@@ -499,6 +492,10 @@ func generatePRDescription(tasks []upgradeTask) string {
 	return sb.String()
 }
 
+// appendChangelogEntry records the base image upgrades in the target repo's
+// changelog and appends the resulting file to the change set. The format --
+// Keep a Changelog or chlog fragments -- is decided by the shared helper from
+// what the repository itself commits.
 func appendChangelogEntry(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
@@ -506,16 +503,12 @@ func appendChangelogEntry(
 	upgrades []upgradeTask,
 	fileChanges []entities.FileChange,
 ) []entities.FileChange {
-	if !provider.HasFile(ctx, repo, "CHANGELOG.md") {
-		return fileChanges
-	}
+	return support.RemoteChangelogChanges(
+		ctx, provider, repo, changelogEntries(upgrades), fileChanges)
+}
 
-	content, err := provider.GetFileContent(ctx, repo, "CHANGELOG.md")
-	if err != nil {
-		logger.Warnf("[dockerfile] Failed to read CHANGELOG.md: %v", err)
-		return fileChanges
-	}
-
+// changelogEntries renders one Keep a Changelog bullet per upgrade.
+func changelogEntries(upgrades []upgradeTask) []string {
 	entries := make([]string, 0, len(upgrades))
 	for _, up := range upgrades {
 		entries = append(entries, fmt.Sprintf(
@@ -523,15 +516,5 @@ func appendChangelogEntry(
 			up.parsed.FullName(), up.dep.CurrentVer, up.newTag,
 		))
 	}
-
-	modified := entities.InsertChangelogEntry(content, entries)
-	if modified == content {
-		return fileChanges
-	}
-
-	return append(fileChanges, entities.FileChange{
-		Path:       "CHANGELOG.md",
-		Content:    modified,
-		ChangeType: "edit",
-	})
+	return entries
 }

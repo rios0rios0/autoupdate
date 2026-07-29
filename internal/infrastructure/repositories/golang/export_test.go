@@ -98,16 +98,6 @@ type UpgradeParams = upgradeParams
 // UpgradeResult is exported for testing.
 type UpgradeResult = upgradeResult
 
-// PrepareChangelog is exported for testing.
-func PrepareChangelog(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	vCtx *versionContext,
-) string {
-	return prepareChangelog(ctx, provider, repo, vCtx)
-}
-
 // NewUpdaterRepositoryForTest creates an updater with injected dependencies.
 func NewUpdaterRepositoryForTest(vf VersionFetcher, runner ...cmdrunner.Runner) *UpdaterRepository {
 	r := cmdrunner.Runner(cmdrunner.NewDefaultRunner())
@@ -175,11 +165,6 @@ func BuildLocalEnvFull(params localUpgradeParams, goBinary string) []string {
 	return buildLocalEnv(params, goBinary)
 }
 
-// PrepareLocalChangelog is exported for testing.
-func PrepareLocalChangelog(repoDir string, vCtx *versionContext) string {
-	return prepareLocalChangelog(repoDir, vCtx)
-}
-
 // SetLocalCmdRunner overrides the package-level local command runner for testing.
 func SetLocalCmdRunner(r cmdrunner.Runner) func() {
 	old := localCmdRunner
@@ -225,4 +210,9 @@ func UpdateDockerfileGolangTags(
 	listTags func(ctx context.Context) ([]string, error),
 ) (bool, error) {
 	return updateDockerfileGolangTags(ctx, repoDir, goVersion, listTags)
+}
+
+// ChangelogEntries is exported for testing.
+func ChangelogEntries(vCtx *versionContext) []string {
+	return changelogEntries(vCtx)
 }

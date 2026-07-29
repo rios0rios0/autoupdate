@@ -4,7 +4,6 @@ package javascript_test
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,6 +12,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	jsUpdater "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
+	"github.com/rios0rios0/autoupdate/internal/support"
 	"github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
 )
 
@@ -376,107 +376,35 @@ func TestReadCurrentNodeVersion(t *testing.T) {
 	})
 }
 
-func TestPrepareChangelog(t *testing.T) {
+func TestChangelogEntries(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should return empty string when CHANGELOG.md does not exist", func(t *testing.T) {
+	t.Run("should describe the version upgrade when one is needed", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo"}
-		vCtx := &jsUpdater.VersionContext{
-			LatestVersion:       "20.18.0",
-			NeedsVersionUpgrade: true,
-			BranchName:          "chore/upgrade-node-20.18.0",
-		}
+		vCtx := &jsUpdater.VersionContext{LatestVersion: "20.18.0", NeedsVersionUpgrade: true}
 
 		// when
-		result := jsUpdater.PrepareChangelog(t.Context(), provider, repo, vCtx)
+		entries := jsUpdater.ChangelogEntries(vCtx)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Equal(t, []string{
+			"- changed the Node.js version to `20.18.0` and updated all JavaScript dependencies",
+		}, entries)
 	})
 
-	t.Run("should create temp file with modified changelog when version upgrade is needed", func(t *testing.T) {
+	t.Run("should describe only the dependencies when no version upgrade is needed", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		changelogContent := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2024-01-01\n"
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
-			WithFileContents(map[string]string{"CHANGELOG.md": changelogContent}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo"}
-		vCtx := &jsUpdater.VersionContext{
-			LatestVersion:       "20.18.0",
-			NeedsVersionUpgrade: true,
-			BranchName:          "chore/upgrade-node-20.18.0",
-		}
+		vCtx := &jsUpdater.VersionContext{LatestVersion: "20.18.0", NeedsVersionUpgrade: false}
 
 		// when
-		result := jsUpdater.PrepareChangelog(t.Context(), provider, repo, vCtx)
+		entries := jsUpdater.ChangelogEntries(vCtx)
 
 		// then
-		if result != "" {
-			defer os.Remove(result)
-			content, err := os.ReadFile(result)
-			require.NoError(t, err)
-			assert.Contains(t, string(content), "20.18.0")
-			assert.Contains(t, string(content), "JavaScript dependencies")
-		}
-	})
-
-	t.Run("should create temp file with deps-only changelog entry when no version upgrade", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		changelogContent := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2024-01-01\n"
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
-			WithFileContents(map[string]string{"CHANGELOG.md": changelogContent}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo"}
-		vCtx := &jsUpdater.VersionContext{
-			LatestVersion:       "20.18.0",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-js-deps",
-		}
-
-		// when
-		result := jsUpdater.PrepareChangelog(t.Context(), provider, repo, vCtx)
-
-		// then
-		if result != "" {
-			defer os.Remove(result)
-			content, err := os.ReadFile(result)
-			require.NoError(t, err)
-			assert.Contains(t, string(content), "JavaScript dependencies")
-		}
-	})
-
-	t.Run("should return empty string when GetFileContent fails", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
-			WithFileContentErr(assert.AnError).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo"}
-		vCtx := &jsUpdater.VersionContext{
-			LatestVersion:       "20.18.0",
-			NeedsVersionUpgrade: true,
-			BranchName:          "chore/upgrade-node-20.18.0",
-		}
-
-		// when
-		result := jsUpdater.PrepareChangelog(t.Context(), provider, repo, vCtx)
-
-		// then
-		assert.Equal(t, "", result)
+		assert.Equal(t, []string{"- changed the JavaScript dependencies to their latest versions"}, entries)
 	})
 }
 
@@ -743,33 +671,6 @@ func TestWriteDockerfileUpdate(t *testing.T) {
 	})
 }
 
-func TestWriteChangelogUpdate(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should contain CHANGELOG.md copy logic", func(t *testing.T) {
-		t.Parallel()
-
-		// given / when
-		result := jsUpdater.WriteChangelogUpdate()
-
-		// then
-		assert.NotEmpty(t, result)
-		assert.Contains(t, result, "CHANGELOG_FILE")
-		assert.Contains(t, result, "CHANGELOG.md")
-		assert.Contains(t, result, "cp")
-	})
-
-	t.Run("should check for git changes before updating changelog", func(t *testing.T) {
-		t.Parallel()
-
-		// given / when
-		result := jsUpdater.WriteChangelogUpdate()
-
-		// then
-		assert.Contains(t, result, "git status --porcelain")
-	})
-}
-
 func TestWriteCommitAndPush(t *testing.T) {
 	t.Parallel()
 
@@ -877,7 +778,7 @@ func TestBuildEnv(t *testing.T) {
 			AuthToken:      "test-token",
 			ProviderName:   "github",
 			PackageManager: "npm",
-			ChangelogFile:  "",
+			Changelog:      support.StagedChangelog{},
 		}
 
 		// when
@@ -900,7 +801,7 @@ func TestBuildEnv(t *testing.T) {
 			AuthToken:      "test-token",
 			ProviderName:   "github",
 			PackageManager: "npm",
-			ChangelogFile:  "/tmp/changelog.md",
+			Changelog:      support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
 		}
 
 		// when
@@ -1435,7 +1336,7 @@ func TestBuildLocalEnv(t *testing.T) {
 		params := jsUpdater.LocalUpgradeParamsExported{
 			BranchName:     "chore/upgrade-js-deps",
 			PackageManager: "npm",
-			ChangelogFile:  "/tmp/changelog.md",
+			Changelog:      support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
 		}
 
 		// when
@@ -1622,41 +1523,3 @@ func TestHandleDryRunLocal(t *testing.T) {
 		assert.False(t, result.NodeVersionUpdated)
 	})
 }
-
-func TestPrepareLocalChangelogJS(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should return temp file when CHANGELOG.md exists", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		root := t.TempDir()
-		changelog := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n"
-		require.NoError(t, os.WriteFile(filepath.Join(root, "CHANGELOG.md"), []byte(changelog), 0o600))
-		vCtx := &jsUpdater.VersionContext{LatestVersion: "20.18.0", NeedsVersionUpgrade: true}
-
-		// when
-		result := jsUpdater.PrepareLocalChangelog(root, vCtx)
-
-		// then
-		assert.NotEmpty(t, result)
-		if result != "" {
-			defer os.Remove(result)
-		}
-	})
-
-	t.Run("should return empty when no CHANGELOG.md", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		root := t.TempDir()
-		vCtx := &jsUpdater.VersionContext{LatestVersion: "20.18.0", NeedsVersionUpgrade: true}
-
-		// when
-		result := jsUpdater.PrepareLocalChangelog(root, vCtx)
-
-		// then
-		assert.Empty(t, result)
-	})
-}
-

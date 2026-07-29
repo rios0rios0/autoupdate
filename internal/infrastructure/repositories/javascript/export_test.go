@@ -9,6 +9,7 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
+	"github.com/rios0rios0/autoupdate/internal/support"
 )
 
 // HasOnlyLockfileVersionChanges is exported for testing.
@@ -22,8 +23,12 @@ func IsPackageLockOnlyVersionSync(ctx context.Context, repoDir string) bool {
 }
 
 // RevertWorkingTreeChanges is exported for testing.
-func RevertWorkingTreeChanges(ctx context.Context, repoDir string) {
-	revertWorkingTreeChanges(ctx, repoDir)
+func RevertWorkingTreeChanges(
+	ctx context.Context,
+	repoDir string,
+	changelog support.StagedChangelog,
+) {
+	revertWorkingTreeChanges(ctx, repoDir, changelog)
 }
 
 // ParseNodeVersionFile is exported for testing.
@@ -78,16 +83,6 @@ func ReadCurrentNodeVersion(
 	return readCurrentNodeVersion(ctx, provider, repo)
 }
 
-// PrepareChangelog is exported for testing.
-func PrepareChangelog(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	vCtx *versionContext,
-) string {
-	return prepareChangelog(ctx, provider, repo, vCtx)
-}
-
 // BuildUpgradeScript is exported for testing.
 func BuildUpgradeScript(params upgradeParams, repoDir string) string {
 	return buildUpgradeScript(params, repoDir)
@@ -111,13 +106,6 @@ func WriteJSUpgradeCommands(params upgradeParams) string {
 func WriteDockerfileUpdate() string {
 	var sb strings.Builder
 	writeDockerfileUpdate(&sb)
-	return sb.String()
-}
-
-// WriteChangelogUpdate is exported for testing.
-func WriteChangelogUpdate() string {
-	var sb strings.Builder
-	writeChangelogUpdate(&sb)
 	return sb.String()
 }
 
@@ -182,11 +170,6 @@ func HandleDryRunLocal(vCtx *versionContext, repoDir, pkgMgr string) *LocalResul
 	return handleDryRunLocal(vCtx, repoDir, pkgMgr)
 }
 
-// PrepareLocalChangelog is exported for testing.
-func PrepareLocalChangelog(repoDir string, vCtx *versionContext) string {
-	return prepareLocalChangelog(repoDir, vCtx)
-}
-
 // SetLocalCmdRunner overrides the package-level local command runner for testing.
 func SetLocalCmdRunner(r cmdrunner.Runner) func() {
 	old := localCmdRunner
@@ -201,6 +184,12 @@ func RunLanguageUpgradeScript(
 	vCtx *versionContext,
 	pkgMgr string,
 	opts LocalUpgradeOptions,
+	changelog support.StagedChangelog,
 ) (string, error) {
-	return runLanguageUpgradeScript(ctx, repoDir, vCtx, pkgMgr, opts)
+	return runLanguageUpgradeScript(ctx, repoDir, vCtx, pkgMgr, opts, changelog)
+}
+
+// ChangelogEntries is exported for testing.
+func ChangelogEntries(vCtx *versionContext) []string {
+	return changelogEntries(vCtx)
 }

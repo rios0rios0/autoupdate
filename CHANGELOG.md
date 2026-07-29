@@ -16,6 +16,24 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added support for [chlog](https://github.com/luizjhonata/chlog), the fragment-based changelog
+  tool. A repository that commits a `.chlog.yaml` (or simply carries a `.changes/unreleased/`
+  directory) now gets one fragment file per update instead of an edit to the `[Unreleased]` section
+  of its `CHANGELOG.md`. chlog exists precisely to keep that file out of the merge path, so the
+  previous behaviour put automated pull requests back into conflict with every hand-written entry.
+  Detection is automatic, honours the `changesDir`, `unreleasedDir` and `kinds` declared by
+  `.chlog.yaml`, and covers every ecosystem in both local and batch mode. A repository that does not
+  use chlog is unaffected
+
+### Changed
+
+- changed the changelog handling of all nine ecosystems to run through one shared implementation
+  instead of a near-identical copy per ecosystem, so the two formats cannot drift apart. The bash
+  fragment the language updaters generate now takes its destination from the environment, which is
+  what lets the same script write either a `CHANGELOG.md` or a chlog fragment
+
 ## [0.19.0] - 2026-07-28
 
 ### Added
