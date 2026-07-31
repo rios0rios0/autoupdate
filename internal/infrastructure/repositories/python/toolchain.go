@@ -71,7 +71,7 @@ func detectRemoteProject(
 	return newPythonProject(
 		provider.HasFile(ctx, repo, "requirements.txt"),
 		hasPyproject,
-		hasPDMRemote(ctx, provider, repo),
+		hasPDMRemote(ctx, provider, repo, hasPyproject),
 	)
 }
 

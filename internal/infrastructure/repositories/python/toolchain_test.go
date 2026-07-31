@@ -173,6 +173,23 @@ func TestDetectRemoteProject(t *testing.T) {
 		assert.Equal(t, "pip", project.Toolchain())
 	})
 
+	t.Run("should not fetch a pyproject.toml the remote does not have", func(t *testing.T) {
+		t.Parallel()
+
+		// given — a provider's HasFile is itself a fetch, so re-reading an
+		// absent pyproject.toml would spend a second request to learn nothing
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"requirements.txt": true}).
+			BuildSpy()
+
+		// when
+		project := pyUpdater.DetectRemoteProject(t.Context(), provider, repo)
+
+		// then
+		assert.Equal(t, "pip", project.Toolchain())
+		assert.Empty(t, provider.FetchedFilePaths)
+	})
+
 	t.Run("should report a PDM project when the remote pyproject declares PDM", func(t *testing.T) {
 		t.Parallel()
 

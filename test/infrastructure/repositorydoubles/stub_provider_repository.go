@@ -32,6 +32,10 @@ type SpyProviderRepository struct {
 	// --- GetFileContent ---
 	FileContents   map[string]string
 	FileContentErr error
+	// FetchedFilePaths records every path passed to GetFileContent, so a test
+	// can assert that a fetch was skipped and not merely that its result was
+	// ignored.
+	FetchedFilePaths []string
 
 	// --- ListFiles ---
 	Files       []entities.File
@@ -82,6 +86,10 @@ func (p *SpyProviderRepository) DiscoverRepositories(
 func (p *SpyProviderRepository) GetFileContent(
 	_ context.Context, _ entities.Repository, path string,
 ) (string, error) {
+	p.mu.Lock()
+	p.FetchedFilePaths = append(p.FetchedFilePaths, path)
+	p.mu.Unlock()
+
 	if p.FileContents != nil {
 		if content, ok := p.FileContents[path]; ok {
 			return content, nil

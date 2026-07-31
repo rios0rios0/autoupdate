@@ -109,8 +109,9 @@ func HasPDMRemote(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
+	hasPyproject bool,
 ) bool {
-	return hasPDMRemote(ctx, provider, repo)
+	return hasPDMRemote(ctx, provider, repo, hasPyproject)
 }
 
 // WriteManifestSnapshot is exported for testing.

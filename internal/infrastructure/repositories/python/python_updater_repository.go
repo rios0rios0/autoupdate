@@ -417,13 +417,25 @@ func stripTOMLComment(line string) string {
 // hasPDMRemote reports whether the remote repository is PDM-managed. A
 // pdm.lock is conclusive on its own; otherwise the pyproject.toml is inspected
 // for PDM's markers.
+//
+// hasPyproject is the caller's already-established answer for that file. A
+// provider's HasFile is itself a file fetch, so re-reading a pyproject.toml the
+// caller has just found to be absent would spend a second request per
+// repository to learn nothing — wasted against the provider's rate limit on
+// every requirements.txt-only project, which is the common pip layout. The
+// pdm.lock probe still runs, so a stray lock is reported and warned about.
 func hasPDMRemote(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
+	hasPyproject bool,
 ) bool {
 	if provider.HasFile(ctx, repo, "pdm.lock") {
 		return true
+	}
+
+	if !hasPyproject {
+		return false
 	}
 
 	content, err := provider.GetFileContent(ctx, repo, "pyproject.toml")

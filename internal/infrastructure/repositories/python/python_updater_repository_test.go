@@ -1502,7 +1502,7 @@ func TestHasPDMRemote(t *testing.T) {
 			BuildSpy()
 
 		// when
-		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo)
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo, false)
 
 		// then
 		assert.True(t, detected)
@@ -1518,7 +1518,7 @@ func TestHasPDMRemote(t *testing.T) {
 			BuildSpy()
 
 		// when
-		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo)
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo, true)
 
 		// then
 		assert.True(t, detected)
@@ -1534,10 +1534,26 @@ func TestHasPDMRemote(t *testing.T) {
 			BuildSpy()
 
 		// when
-		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo)
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo, true)
 
 		// then
 		assert.False(t, detected)
+	})
+
+	t.Run("should not read the pyproject when the caller already found it absent", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"requirements.txt": true}).
+			BuildSpy()
+
+		// when
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo, false)
+
+		// then
+		assert.False(t, detected)
+		assert.Empty(t, provider.FetchedFilePaths, "the absent pyproject.toml should not be fetched again")
 	})
 }
 
