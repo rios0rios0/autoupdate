@@ -52,11 +52,16 @@ func RunLocalUpgrade(
 
 	vCtx := resolveLocalVersionContext(ctx, repoDir)
 
+	// The dependency manager is resolved once, from the manifests the
+	// repository carries before anything is upgraded, and that single value
+	// drives both the commands that run and what the run reports.
+	project := detectLocalProject(repoDir)
+
 	if opts.DryRun {
-		return handleDryRun(vCtx, repoDir), nil
+		return handleDryRun(vCtx, repoDir, project), nil
 	}
 
-	return executeLocalUpgrade(ctx, repoDir, vCtx, opts)
+	return executeLocalUpgrade(ctx, repoDir, vCtx, project, opts)
 }
 
 // resolveLocalVersionContext fetches the latest Python version and compares
@@ -98,23 +103,23 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionCon
 
 // handleDryRun logs the planned action and returns a result without
 // executing the upgrade.
-func handleDryRun(vCtx *versionContext, repoDir string) *LocalResult {
+func handleDryRun(vCtx *versionContext, repoDir string, project pythonProject) *LocalResult {
 	if vCtx.NeedsVersionUpgrade {
 		logger.Infof(
-			"[python] [DRY RUN] Would upgrade Python to %s and update deps in %s",
-			vCtx.LatestVersion, repoDir,
+			"[python] [DRY RUN] Would upgrade Python to %s and update deps in %s (using %s)",
+			vCtx.LatestVersion, repoDir, project.Toolchain(),
 		)
 	} else {
 		logger.Infof(
-			"[python] [DRY RUN] Would update Python dependencies in %s",
-			repoDir,
+			"[python] [DRY RUN] Would update Python dependencies in %s (using %s)",
+			repoDir, project.Toolchain(),
 		)
 	}
 	return &LocalResult{
 		LatestVersion:        vCtx.LatestVersion,
 		BranchName:           vCtx.BranchName,
 		PythonVersionUpdated: vCtx.NeedsVersionUpgrade,
-		Toolchain:            toolchainFor(hasPDMLocal(repoDir)),
+		Toolchain:            project.Toolchain(),
 	}
 }
 
@@ -125,6 +130,7 @@ func executeLocalUpgrade(
 	ctx context.Context,
 	repoDir string,
 	vCtx *versionContext,
+	project pythonProject,
 	opts LocalUpgradeOptions,
 ) (*LocalResult, error) {
 	// --- Git Setup (go-git) ---
@@ -155,7 +161,7 @@ func executeLocalUpgrade(
 	}
 
 	// --- Language Operations (bash) ---
-	outputStr, runErr := runLanguageUpgradeScript(ctx, repoDir, vCtx, opts)
+	outputStr, runErr := runLanguageUpgradeScript(ctx, repoDir, vCtx, project, opts)
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -183,7 +189,7 @@ func executeLocalUpgrade(
 		PythonVersionUpdated: pythonVersionUpdated,
 		LatestVersion:        vCtx.LatestVersion,
 		BranchName:           vCtx.BranchName,
-		Toolchain:            toolchainFor(hasPDMLocal(repoDir)),
+		Toolchain:            project.Toolchain(),
 		Output:               outputStr,
 	}, nil
 }
@@ -195,6 +201,7 @@ func runLanguageUpgradeScript(
 	ctx context.Context,
 	repoDir string,
 	vCtx *versionContext,
+	project pythonProject,
 	opts LocalUpgradeOptions,
 ) (string, error) {
 	changelog := support.StageLocalChangelog(repoDir, changelogEntries(vCtx))
@@ -205,26 +212,14 @@ func runLanguageUpgradeScript(
 		return "", fmt.Errorf("python binary not found: %w", err)
 	}
 
-	hasRequirements := false
-	if _, statErr := os.Stat(filepath.Join(repoDir, "requirements.txt")); statErr == nil {
-		hasRequirements = true
-	}
-
-	hasPyproject := false
-	if _, statErr := os.Stat(filepath.Join(repoDir, "pyproject.toml")); statErr == nil {
-		hasPyproject = true
-	}
-
 	params := localUpgradeParams{
-		BranchName:      vCtx.BranchName,
-		PythonVersion:   vCtx.LatestVersion,
-		Changelog:       changelog,
-		AuthToken:       opts.AuthToken,
-		ProviderName:    opts.ProviderName,
-		HasRequirements: hasRequirements,
-		HasPyproject:    hasPyproject,
-		HasPDM:          hasPyproject && hasPDMLocal(repoDir),
-		PythonBinary:    pythonBinary,
+		BranchName:    vCtx.BranchName,
+		PythonVersion: vCtx.LatestVersion,
+		Changelog:     changelog,
+		AuthToken:     opts.AuthToken,
+		ProviderName:  opts.ProviderName,
+		Project:       project,
+		PythonBinary:  pythonBinary,
 	}
 
 	script := buildLocalUpgradeScript(params)
@@ -270,13 +265,13 @@ type localUpgradeParams struct {
 	PythonVersion string
 	// Changelog is the staged changelog payload the script copies into
 	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog       support.StagedChangelog
-	AuthToken       string
-	ProviderName    string
-	HasRequirements bool
-	HasPyproject    bool
-	HasPDM          bool
-	PythonBinary    string
+	Changelog    support.StagedChangelog
+	AuthToken    string
+	ProviderName string
+	// Project carries the manifests the repository has and the dependency
+	// manager selected from them.
+	Project      pythonProject
+	PythonBinary string
 }
 
 // buildLocalUpgradeScript builds a bash script that performs only the
@@ -294,11 +289,7 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	writeLocalAuth(&sb, params)
 
 	// Python upgrade commands (reuse remote-mode helpers)
-	writePythonUpgradeCommands(&sb, upgradeParams{
-		HasRequirements: params.HasRequirements,
-		HasPyproject:    params.HasPyproject,
-		HasPDM:          params.HasPDM,
-	})
+	writePythonUpgradeCommands(&sb, upgradeParams{Project: params.Project})
 
 	// Keep generated build metadata out of the commit
 	writeEggInfoGitignore(&sb)

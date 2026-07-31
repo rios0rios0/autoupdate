@@ -155,9 +155,7 @@ func cloneAndUpgrade(
 ) (*upgradeResult, error) {
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
 	defer changelog.Remove()
-	hasRequirements := provider.HasFile(ctx, repo, "requirements.txt")
-	hasPyproject := provider.HasFile(ctx, repo, "pyproject.toml")
-	hasPDM := hasPyproject && hasPDMRemote(ctx, provider, repo)
+	project := detectRemoteProject(ctx, provider, repo)
 
 	cloneURL := provider.CloneURL(repo)
 	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
@@ -168,23 +166,21 @@ func cloneAndUpgrade(
 	}
 
 	result, err := upgradeRepo(ctx, upgradeParams{
-		CloneURL:        cloneURL,
-		DefaultBranch:   defaultBranch,
-		BranchName:      vCtx.BranchName,
-		PythonVersion:   vCtx.LatestVersion,
-		AuthToken:       provider.AuthToken(),
-		ProviderName:    provider.Name(),
-		Changelog:       changelog,
-		HasRequirements: hasRequirements,
-		HasPyproject:    hasPyproject,
-		HasPDM:          hasPDM,
-		PythonBinary:    pythonBinary,
+		CloneURL:      cloneURL,
+		DefaultBranch: defaultBranch,
+		BranchName:    vCtx.BranchName,
+		PythonVersion: vCtx.LatestVersion,
+		AuthToken:     provider.AuthToken(),
+		ProviderName:  provider.Name(),
+		Changelog:     changelog,
+		Project:       project,
+		PythonBinary:  pythonBinary,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	result.Toolchain = toolchainFor(hasPDM)
+	result.Toolchain = project.Toolchain()
 
 	return result, nil
 }
@@ -246,24 +242,14 @@ func (u *UpdaterRepository) ApplyUpdates(
 	// resolveLocalVersionContext (from local.go) handles fetching + comparison
 	vCtx := resolveLocalVersionContext(ctx, repoDir)
 
-	hasRequirements := false
-	if _, statErr := os.Stat(filepath.Join(repoDir, "requirements.txt")); statErr == nil {
-		hasRequirements = true
-	}
-
-	hasPyproject := false
-	if _, statErr := os.Stat(filepath.Join(repoDir, "pyproject.toml")); statErr == nil {
-		hasPyproject = true
-	}
-
-	hasPDM := hasPyproject && hasPDMLocal(repoDir)
+	project := detectLocalProject(repoDir)
 
 	pythonBinary, binErr := findPythonBinary()
 	if binErr != nil {
 		return nil, fmt.Errorf("python binary not found: %w", binErr)
 	}
 
-	script := buildBatchPythonScript(hasRequirements, hasPyproject, hasPDM)
+	script := buildBatchPythonScript(project)
 	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
 	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
 		return nil, fmt.Errorf("failed to write script: %w", writeErr)
@@ -302,7 +288,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	if pyVersionUpdated {
 		entry = fmt.Sprintf(
 			"- changed the Python version to `%s` and updated all %s dependencies",
-			vCtx.LatestVersion, toolchainFor(hasPDM),
+			vCtx.LatestVersion, project.Toolchain(),
 		)
 	} else {
 		entry = pyChangelogEntryDeps
@@ -323,23 +309,19 @@ func (u *UpdaterRepository) ApplyUpdates(
 		BranchName:    vCtx.BranchName,
 		CommitMessage: commitMsg,
 		PRTitle:       prTitle,
-		PRDescription: GeneratePRDescription(vCtx.LatestVersion, toolchainFor(hasPDM), pyVersionUpdated),
+		PRDescription: GeneratePRDescription(vCtx.LatestVersion, project.Toolchain(), pyVersionUpdated),
 	}, nil
 }
 
 // buildBatchPythonScript generates a bash script with only language-specific
 // operations (no git clone, branch, commit, or push) for the batch pipeline.
-func buildBatchPythonScript(hasRequirements, hasPyproject, hasPDM bool) string {
+func buildBatchPythonScript(project pythonProject) string {
 	var sb strings.Builder
 
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 
-	writePythonUpgradeCommands(&sb, upgradeParams{
-		HasRequirements: hasRequirements,
-		HasPyproject:    hasPyproject,
-		HasPDM:          hasPDM,
-	})
+	writePythonUpgradeCommands(&sb, upgradeParams{Project: project})
 	writeEggInfoGitignore(&sb)
 	writeDockerfileUpdate(&sb)
 
@@ -363,11 +345,11 @@ type upgradeParams struct {
 	ProviderName  string
 	// Changelog is the staged changelog payload the script copies into
 	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog       support.StagedChangelog
-	HasRequirements bool
-	HasPyproject    bool
-	HasPDM          bool
-	PythonBinary    string
+	Changelog support.StagedChangelog
+	// Project carries the manifests the repository has and the dependency
+	// manager selected from them.
+	Project      pythonProject
+	PythonBinary string
 }
 
 type upgradeResult struct {
@@ -463,14 +445,6 @@ func hasPDMLocal(repoDir string) bool {
 		return false
 	}
 	return pyprojectUsesPDM(string(content))
-}
-
-// toolchainFor names the dependency manager used to upgrade a repository.
-func toolchainFor(hasPDM bool) string {
-	if hasPDM {
-		return toolchainPDM
-	}
-	return toolchainPip
 }
 
 // parsePythonVersionFile extracts the Python version from a .python-version
@@ -682,14 +656,16 @@ func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 	// A PDM-managed project is upgraded exclusively through PDM: pip has no
 	// view of the PDM lock file, so running both would leave the lock stale
 	// while still producing the local-install artefacts pip leaves behind.
-	if params.HasPDM {
+	if params.Project.UsesPDM() {
 		writePDMUpgradeCommands(sb)
 		sb.WriteString("deactivate 2>/dev/null || true\n")
 		sb.WriteString("rm -rf \"$VENV_DIR\"\n\n")
 		return
 	}
 
-	if params.HasRequirements {
+	writeManifestSnapshot(sb)
+
+	if params.Project.HasRequirements {
 		sb.WriteString("# Upgrade dependencies from requirements.txt\n")
 		sb.WriteString("if [ -f \"requirements.txt\" ]; then\n")
 		sb.WriteString("    echo \"Installing current requirements...\"\n")
@@ -703,7 +679,7 @@ func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 		sb.WriteString("fi\n\n")
 	}
 
-	if params.HasPyproject {
+	if params.Project.HasPyproject {
 		sb.WriteString("# Upgrade dependencies from pyproject.toml\n")
 		sb.WriteString("if [ -f \"pyproject.toml\" ]; then\n")
 		sb.WriteString("    echo \"Upgrading pyproject.toml dependencies...\"\n")
@@ -718,6 +694,51 @@ func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 
 	sb.WriteString("deactivate 2>/dev/null || true\n")
 	sb.WriteString("rm -rf \"$VENV_DIR\"\n\n")
+
+	writeManifestRestore(sb)
+}
+
+// writeManifestSnapshot records which dependency manifests the repository
+// carried before the upgrade ran. It is emitted only on the pip path, and is
+// read back by [writeManifestRestore].
+//
+// The `if` form is deliberate: `[ -f x ] && VAR=true` exits non-zero when the
+// file is absent, which under `set -e` would abort the whole script.
+func writeManifestSnapshot(sb *strings.Builder) {
+	sb.WriteString("# Record the dependency manifests present before the upgrade.\n")
+	sb.WriteString("PYPROJECT_EXISTED=false\n")
+	sb.WriteString("if [ -f \"pyproject.toml\" ]; then\n")
+	sb.WriteString("    PYPROJECT_EXISTED=true\n")
+	sb.WriteString("fi\n")
+	sb.WriteString("PDM_LOCK_EXISTED=false\n")
+	sb.WriteString("if [ -f \"pdm.lock\" ]; then\n")
+	sb.WriteString("    PDM_LOCK_EXISTED=true\n")
+	sb.WriteString("fi\n\n")
+}
+
+// writeManifestRestore discards a dependency manifest the upgrade itself
+// created. The dependency manager is chosen from the manifests a repository
+// already carries, so an upgrade must never introduce a different one: a
+// pyproject.toml or a pdm.lock appearing in a pip/requirements.txt repository
+// would migrate it to another package manager inside what was only ever meant
+// to be a dependency bump, and the pull request would carry that migration
+// without anyone having asked for it.
+//
+// Only files that were absent before the upgrade are removed, so a manifest the
+// repository owns is never touched.
+func writeManifestRestore(sb *strings.Builder) {
+	sb.WriteString("# Discard any dependency manifest the upgrade itself introduced, so a\n")
+	sb.WriteString("# pip-managed repository is never migrated to another package manager.\n")
+	sb.WriteString("if [ \"$PYPROJECT_EXISTED\" = \"false\" ] && [ -f \"pyproject.toml\" ]; then\n")
+	sb.WriteString(
+		"    echo \"WARNING: the upgrade created pyproject.toml in a pip-managed repository, removing it\"\n",
+	)
+	sb.WriteString("    rm -f \"pyproject.toml\"\n")
+	sb.WriteString("fi\n")
+	sb.WriteString("if [ \"$PDM_LOCK_EXISTED\" = \"false\" ] && [ -f \"pdm.lock\" ]; then\n")
+	sb.WriteString("    echo \"WARNING: the upgrade created pdm.lock in a pip-managed repository, removing it\"\n")
+	sb.WriteString("    rm -f \"pdm.lock\"\n")
+	sb.WriteString("fi\n\n")
 }
 
 // writePDMUpgradeCommands emits the upgrade step for a PDM-managed project.

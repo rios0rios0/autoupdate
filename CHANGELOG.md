@@ -16,6 +16,21 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Fixed
+
+- fixed the Python updater being able to migrate a repository to a different package manager while
+  bumping its dependencies. A repository whose only manifest is a `requirements.txt` is managed by
+  pip, and PDM is now selected only when a `pyproject.toml` is actually present — that file is PDM's
+  project definition, so running `pdm update` without one makes PDM write a fresh `pyproject.toml`,
+  turning a pip project into a PDM project inside what was meant to be a dependency bump. A
+  `pdm.lock` with no `pyproject.toml` beside it no longer counts as a PDM project. The pip upgrade
+  additionally discards a `pyproject.toml` or `pdm.lock` that appeared while it ran, so no manifest
+  the repository did not already own can reach the pull request
+- fixed local mode reporting PDM in the pull request description and dry-run log for a repository it
+  had upgraded with pip. The dependency manager was resolved once for the commands to run and a
+  second time, under a weaker rule, for the report; both now read the same value, resolved once from
+  the manifests the repository carried before the upgrade started
+
 ## [0.20.1] - 2026-07-30
 
 ### Changed
