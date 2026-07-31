@@ -66,8 +66,32 @@ func BuildUpgradeScript(params UpgradeParamsExported, repoDir string) string {
 }
 
 // BuildBatchPythonScript is exported for testing.
-func BuildBatchPythonScript(hasRequirements, hasPyproject, hasPDM bool) string {
-	return buildBatchPythonScript(hasRequirements, hasPyproject, hasPDM)
+func BuildBatchPythonScript(hasRequirements, hasPyproject, hasPDMMarkers bool) string {
+	return buildBatchPythonScript(NewPythonProject(hasRequirements, hasPyproject, hasPDMMarkers))
+}
+
+// PythonProject is exported for testing.
+type PythonProject = pythonProject
+
+// NewPythonProject is exported for testing. Tests reach the dependency manager
+// decision through the same constructor production code uses, so a test cannot
+// express a combination the updater itself could never produce.
+func NewPythonProject(hasRequirements, hasPyproject, hasPDMMarkers bool) PythonProject {
+	return newPythonProject(hasRequirements, hasPyproject, hasPDMMarkers)
+}
+
+// DetectLocalProject is exported for testing.
+func DetectLocalProject(repoDir string) PythonProject {
+	return detectLocalProject(repoDir)
+}
+
+// DetectRemoteProject is exported for testing.
+func DetectRemoteProject(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+) PythonProject {
+	return detectRemoteProject(ctx, provider, repo)
 }
 
 // PyprojectUsesPDM is exported for testing.
@@ -85,13 +109,19 @@ func HasPDMRemote(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
+	hasPyproject bool,
 ) bool {
-	return hasPDMRemote(ctx, provider, repo)
+	return hasPDMRemote(ctx, provider, repo, hasPyproject)
 }
 
-// ToolchainFor is exported for testing.
-func ToolchainFor(hasPDM bool) string {
-	return toolchainFor(hasPDM)
+// WriteManifestSnapshot is exported for testing.
+func WriteManifestSnapshot(sb *strings.Builder) {
+	writeManifestSnapshot(sb)
+}
+
+// WriteManifestRestore is exported for testing.
+func WriteManifestRestore(sb *strings.Builder) {
+	writeManifestRestore(sb)
 }
 
 // WriteEggInfoGitignore is exported for testing.
@@ -158,7 +188,7 @@ func WriteLocalAuth(sb *strings.Builder, params LocalUpgradeParamsExported) {
 
 // HandleDryRun is exported for testing.
 func HandleDryRun(vCtx *VersionContext, repoDir string) *LocalResult {
-	return handleDryRun(vCtx, repoDir)
+	return handleDryRun(vCtx, repoDir, detectLocalProject(repoDir))
 }
 
 // FindPythonBinary is exported for testing.
@@ -180,5 +210,5 @@ func RunLanguageUpgradeScript(
 	vCtx *versionContext,
 	opts LocalUpgradeOptions,
 ) (string, error) {
-	return runLanguageUpgradeScript(ctx, repoDir, vCtx, opts)
+	return runLanguageUpgradeScript(ctx, repoDir, vCtx, detectLocalProject(repoDir), opts)
 }

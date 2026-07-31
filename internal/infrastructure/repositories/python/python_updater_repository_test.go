@@ -360,10 +360,9 @@ func TestBuildUpgradeScript(t *testing.T) {
 			PythonVersion:   "3.13.1",
 			AuthToken:       "tok123",
 			ProviderName:    "github",
-			Changelog:       support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
-			HasRequirements: true,
-			HasPyproject:    true,
-			PythonBinary:    "/usr/bin/python3",
+			Changelog:     support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
+			Project:       pyUpdater.NewPythonProject(true, true, false),
+			PythonBinary:  "/usr/bin/python3",
 		}
 
 		// when
@@ -384,9 +383,8 @@ func TestBuildUpgradeScript(t *testing.T) {
 
 		// given
 		params := pyUpdater.UpgradeParamsExported{
-			ProviderName:    "github",
-			HasRequirements: false,
-			HasPyproject:    false,
+			ProviderName: "github",
+			Project:      pyUpdater.NewPythonProject(false, false, false),
 		}
 
 		// when
@@ -402,9 +400,8 @@ func TestBuildUpgradeScript(t *testing.T) {
 
 		// given
 		params := pyUpdater.UpgradeParamsExported{
-			ProviderName:    "github",
-			HasRequirements: false,
-			HasPyproject:    true,
+			ProviderName: "github",
+			Project:      pyUpdater.NewPythonProject(false, true, false),
 		}
 
 		// when
@@ -554,14 +551,13 @@ func TestWriteGitAuth(t *testing.T) {
 func TestWritePythonUpgradeCommands(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should include requirements upgrade when HasRequirements is true", func(t *testing.T) {
+	t.Run("should include requirements upgrade when the repository has a requirements.txt", func(t *testing.T) {
 		t.Parallel()
 
 		// given
 		var sb strings.Builder
 		params := pyUpdater.UpgradeParamsExported{
-			HasRequirements: true,
-			HasPyproject:    false,
+			Project: pyUpdater.NewPythonProject(true, false, false),
 		}
 
 		// when
@@ -574,14 +570,13 @@ func TestWritePythonUpgradeCommands(t *testing.T) {
 		assert.Contains(t, result, "pip freeze")
 	})
 
-	t.Run("should include pyproject upgrade when HasPyproject is true", func(t *testing.T) {
+	t.Run("should include pyproject upgrade when the repository has a pyproject.toml", func(t *testing.T) {
 		t.Parallel()
 
 		// given
 		var sb strings.Builder
 		params := pyUpdater.UpgradeParamsExported{
-			HasRequirements: false,
-			HasPyproject:    true,
+			Project: pyUpdater.NewPythonProject(false, true, false),
 		}
 
 		// when
@@ -598,8 +593,7 @@ func TestWritePythonUpgradeCommands(t *testing.T) {
 		// given
 		var sb strings.Builder
 		params := pyUpdater.UpgradeParamsExported{
-			HasRequirements: false,
-			HasPyproject:    false,
+			Project: pyUpdater.NewPythonProject(false, false, false),
 		}
 
 		// when
@@ -618,8 +612,7 @@ func TestWritePythonUpgradeCommands(t *testing.T) {
 		// given
 		var sb strings.Builder
 		params := pyUpdater.UpgradeParamsExported{
-			HasRequirements: true,
-			HasPyproject:    true,
+			Project: pyUpdater.NewPythonProject(true, true, false),
 		}
 
 		// when
@@ -996,13 +989,12 @@ func TestBuildLocalUpgradeScript(t *testing.T) {
 
 		// given
 		params := pyUpdater.LocalUpgradeParamsExported{
-			BranchName:      "chore/upgrade-python-deps",
-			PythonVersion:   "3.13.1",
-			AuthToken:       "tok123",
-			ProviderName:    "github",
-			HasRequirements: true,
-			HasPyproject:    false,
-			PythonBinary:    "/usr/bin/python3",
+			BranchName:    "chore/upgrade-python-deps",
+			PythonVersion: "3.13.1",
+			AuthToken:     "tok123",
+			ProviderName:  "github",
+			Project:       pyUpdater.NewPythonProject(true, false, false),
+			PythonBinary:  "/usr/bin/python3",
 		}
 
 		// when
@@ -1020,10 +1012,9 @@ func TestBuildLocalUpgradeScript(t *testing.T) {
 
 		// given
 		params := pyUpdater.LocalUpgradeParamsExported{
-			BranchName:      "chore/upgrade-python-deps",
-			HasRequirements: true,
-			HasPyproject:    false,
-			PythonBinary:    "/usr/bin/python3",
+			BranchName:   "chore/upgrade-python-deps",
+			Project:      pyUpdater.NewPythonProject(true, false, false),
+			PythonBinary: "/usr/bin/python3",
 		}
 
 		// when
@@ -1511,7 +1502,7 @@ func TestHasPDMRemote(t *testing.T) {
 			BuildSpy()
 
 		// when
-		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo)
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo, false)
 
 		// then
 		assert.True(t, detected)
@@ -1527,7 +1518,7 @@ func TestHasPDMRemote(t *testing.T) {
 			BuildSpy()
 
 		// when
-		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo)
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo, true)
 
 		// then
 		assert.True(t, detected)
@@ -1543,10 +1534,26 @@ func TestHasPDMRemote(t *testing.T) {
 			BuildSpy()
 
 		// when
-		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo)
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo, true)
 
 		// then
 		assert.False(t, detected)
+	})
+
+	t.Run("should not read the pyproject when the caller already found it absent", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"requirements.txt": true}).
+			BuildSpy()
+
+		// when
+		detected := pyUpdater.HasPDMRemote(t.Context(), provider, repo, false)
+
+		// then
+		assert.False(t, detected)
+		assert.Empty(t, provider.FetchedFilePaths, "the absent pyproject.toml should not be fetched again")
 	})
 }
 
