@@ -16,6 +16,15 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-07-31
+
+### Changed
+
+- changed the Python PDM detection to stop re-fetching a `pyproject.toml` the repository does not
+  have. A provider's `HasFile` is itself a file fetch, so every `requirements.txt`-only repository —
+  the common pip layout — spent a second request per run to rediscover the same absence, for nothing
+  but the provider's rate limit
+
 ### Fixed
 
 - fixed the Python updater being able to migrate a repository to a different package manager while
@@ -30,13 +39,6 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
   had upgraded with pip. The dependency manager was resolved once for the commands to run and a
   second time, under a weaker rule, for the report; both now read the same value, resolved once from
   the manifests the repository carried before the upgrade started
-
-### Changed
-
-- changed the Python PDM detection to stop re-fetching a `pyproject.toml` the repository does not
-  have. A provider's `HasFile` is itself a file fetch, so every `requirements.txt`-only repository —
-  the common pip layout — spent a second request per run to rediscover the same absence, for nothing
-  but the provider's rate limit
 
 ## [0.20.1] - 2026-07-30
 
