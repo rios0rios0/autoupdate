@@ -135,6 +135,15 @@ Push transport is auto-detected from the origin remote URL:
 - **HTTPS** (`https://...`): Uses gitforge's adapter pattern with auth method retry
 - The `PushAuthResolver` interface in `gitlocal/` abstracts the `ProviderRegistry` to avoid import cycles
 
+### Changelog Writing
+- Every updater records entries through `internal/support/changelog.go` — never call `entities.InsertChangelogEntry` or write `CHANGELOG.md` from an updater. The helper detects the target repo's format and picks the destination so the formats cannot drift.
+- Six script-driven ecosystems stage the changelog (`StageLocalChangelog`/`StageRemoteChangelog` → `StagedChangelog`) and copy it inside the generated bash via `support.ChangelogUpdateScript()` (`CHANGELOG_FILE`/`CHANGELOG_DEST` from `StagedChangelog.Env()`); `terraform`, `dockerfile`, `pipeline` append `FileChange` values directly. On abandon, call `StagedChangelog.Discard(repoDir)` — a chlog fragment is a *new untracked* file that `git checkout -- .` would leave behind.
+- chlog (`internal/support/chlog.go`, `internal/domain/entities/chlog.go`) is auto-detected from `.chlog.yaml`/`.chlog.yml` or a `.changes/unreleased/` directory. When present, each entry becomes one fragment file (`<unixnano>-<hex>.yaml` with `kind`/`body`/`time`) and `CHANGELOG.md` is left untouched. The `.chlog.yaml` is untrusted repo input: honor its `changesDir`/`unreleasedDir`/`kinds`, validate paths against escaping the repo root, and fail loudly on a broken file rather than falling back to `CHANGELOG.md`.
+
+### Python Package Manager Selection
+- A repo is upgraded with the dependency manager it already uses; a run must never migrate it. `newPythonProject` (`internal/infrastructure/repositories/python/toolchain.go`) is the single decision point, reachable only via `detectRemoteProject`/`detectLocalProject` — never re-derive the toolchain at a call site.
+- PDM is selected **only** when a `pyproject.toml` is present (running `pdm update` without one would write a fresh `pyproject.toml`, converting a pip repo to PDM). A `pdm.lock` with no `pyproject.toml` beside it stays on pip. The resolved `pythonProject` flows through `upgradeParams`/`localUpgradeParams` into the script, changelog entry, PR description, and dry-run report so they cannot disagree. On the pip path the script brackets the upgrade with `writeManifestSnapshot`/`writeManifestRestore`, deleting any `pyproject.toml`/`pdm.lock` that *appeared* during the run — never one the repo already owned.
+
 ### Testing Infrastructure
 - All unit tests are tagged with `//go:build unit` and must be run with `-tags unit`
 - Uses testify for assertions (`assert`/`require`) — prefer stubs over mocks
