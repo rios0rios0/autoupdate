@@ -16,6 +16,11 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Changed
+
+- refreshed `.github/copilot-instructions.md` to document the shared chlog/changelog writer and the
+  Python package-manager selection invariant, bringing it in line with `CLAUDE.md`
+
 ## [0.20.2] - 2026-07-31
 
 ### Changed
