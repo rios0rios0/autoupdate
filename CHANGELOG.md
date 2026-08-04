@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.20.3] - 2026-08-04
+
 ### Changed
 
 - refreshed `.github/copilot-instructions.md` to document the shared chlog/changelog writer and the
