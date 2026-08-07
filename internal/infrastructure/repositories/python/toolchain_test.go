@@ -31,7 +31,7 @@ func TestNewPythonProject(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		project := pyUpdater.NewPythonProject(true, false, false)
+		project := pyUpdater.NewPythonProject(true, false, false, false)
 
 		// then
 		assert.Equal(t, "pip", project.Toolchain())
@@ -42,18 +42,18 @@ func TestNewPythonProject(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		project := pyUpdater.NewPythonProject(true, false, true)
+		project := pyUpdater.NewPythonProject(true, false, true, false)
 
 		// then
 		assert.Equal(t, "pip", project.Toolchain())
 		assert.False(t, project.UsesPDM())
 	})
 
-	t.Run("should select PDM only when a pyproject.toml backs the markers", func(t *testing.T) {
+	t.Run("should select PDM when a pyproject.toml declares it and no requirements.txt exists", func(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		project := pyUpdater.NewPythonProject(false, true, true)
+		project := pyUpdater.NewPythonProject(false, true, false, true)
 
 		// then
 		assert.Equal(t, "pdm", project.Toolchain())
@@ -64,11 +64,34 @@ func TestNewPythonProject(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		project := pyUpdater.NewPythonProject(true, true, false)
+		project := pyUpdater.NewPythonProject(true, true, false, false)
 
 		// then
 		assert.Equal(t, "pip", project.Toolchain())
 		assert.False(t, project.UsesPDM())
+	})
+
+	t.Run("should keep pip when a declared PDM has never been locked beside a requirements.txt", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when — [tool.pdm] is also how a pip project states its
+		// package layout, and no lock file was ever committed from it
+		project := pyUpdater.NewPythonProject(true, true, false, true)
+
+		// then
+		assert.Equal(t, "pip", project.Toolchain())
+		assert.False(t, project.UsesPDM())
+	})
+
+	t.Run("should select PDM when a committed lock backs the pyproject beside a requirements.txt", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when — the lock is proof the PDM workflow is really run
+		project := pyUpdater.NewPythonProject(true, true, true, false)
+
+		// then
+		assert.Equal(t, "pdm", project.Toolchain())
+		assert.True(t, project.UsesPDM())
 	})
 }
 
@@ -133,6 +156,38 @@ func TestDetectLocalProject(t *testing.T) {
 
 		// then
 		assert.Equal(t, "pip", project.Toolchain())
+	})
+
+	t.Run("should report a pip project when a declared PDM was never locked", func(t *testing.T) {
+		t.Parallel()
+
+		// given — the layout of a pip project that names PDM only to declare
+		// where its packages live, and installs from the requirements.txt
+		repoDir := t.TempDir()
+		writeFile(t, repoDir, "requirements.txt", "requests==2.31.0\n")
+		writeFile(t, repoDir, "pyproject.toml", "[project]\nname = \"demo\"\n[tool.pdm]\ndistribution = false\n")
+
+		// when
+		project := pyUpdater.DetectLocalProject(repoDir)
+
+		// then
+		assert.Equal(t, "pip", project.Toolchain())
+	})
+
+	t.Run("should report a PDM project when a lock sits beside the requirements.txt", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := t.TempDir()
+		writeFile(t, repoDir, "requirements.txt", "requests==2.31.0\n")
+		writeFile(t, repoDir, "pyproject.toml", "[project]\nname = \"demo\"\n[tool.pdm]\n")
+		writeFile(t, repoDir, "pdm.lock", "[metadata]\n")
+
+		// when
+		project := pyUpdater.DetectLocalProject(repoDir)
+
+		// then
+		assert.Equal(t, "pdm", project.Toolchain())
 	})
 }
 
@@ -205,18 +260,53 @@ func TestDetectRemoteProject(t *testing.T) {
 		// then
 		assert.Equal(t, "pdm", project.Toolchain())
 	})
+
+	t.Run("should report a pip project when the remote declared PDM was never locked", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"requirements.txt": true, "pyproject.toml": true}).
+			WithFileContents(map[string]string{
+				"pyproject.toml": "[project]\nname = \"demo\"\n[tool.pdm]\ndistribution = false\n",
+			}).
+			BuildSpy()
+
+		// when
+		project := pyUpdater.DetectRemoteProject(t.Context(), provider, repo)
+
+		// then
+		assert.Equal(t, "pip", project.Toolchain())
+	})
+
+	t.Run("should report a PDM project when the remote lock sits beside the requirements.txt", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{
+				"requirements.txt": true, "pyproject.toml": true, "pdm.lock": true,
+			}).
+			BuildSpy()
+
+		// when
+		project := pyUpdater.DetectRemoteProject(t.Context(), provider, repo)
+
+		// then
+		assert.Equal(t, "pdm", project.Toolchain())
+	})
 }
 
 func TestPipProjectKeepsItsPackageManager(t *testing.T) {
 	t.Parallel()
 
-	pipProject := pyUpdater.NewPythonProject(true, false, false)
+	pipProject := pyUpdater.NewPythonProject(true, false, false, false)
 
 	t.Run("should never invoke PDM in the batch script of a requirements-only project", func(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(true, false, false)
+		script := pyUpdater.BuildBatchPythonScript(true, false, false, false)
 
 		// then
 		assert.Contains(t, script, "pip install --upgrade -r requirements.txt")
@@ -227,9 +317,23 @@ func TestPipProjectKeepsItsPackageManager(t *testing.T) {
 		t.Parallel()
 
 		// given / when — PDM markers are present, the pyproject.toml is not
-		script := pyUpdater.BuildBatchPythonScript(true, false, true)
+		script := pyUpdater.BuildBatchPythonScript(true, false, true, false)
 
 		// then
+		assertNoPDMCommands(t, script)
+	})
+
+	t.Run("should upgrade the requirements.txt when the pyproject only declares PDM", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when — a pyproject.toml naming PDM with no lock ever
+		// committed from it; a PDM run here would resolve a lock file from
+		// scratch and leave the requirements.txt the build installs untouched
+		script := pyUpdater.BuildBatchPythonScript(true, true, false, true)
+
+		// then
+		assert.Contains(t, script, "pip install --upgrade -r requirements.txt")
+		assert.Contains(t, script, "rm -f \"pdm.lock\"")
 		assertNoPDMCommands(t, script)
 	})
 
@@ -268,7 +372,7 @@ func TestPipProjectKeepsItsPackageManager(t *testing.T) {
 
 		// given / when
 		scripts := map[string]string{
-			"batch": pyUpdater.BuildBatchPythonScript(true, false, false),
+			"batch": pyUpdater.BuildBatchPythonScript(true, false, false, false),
 			"clone": pyUpdater.BuildUpgradeScript(
 				pyUpdater.UpgradeParamsExported{ProviderName: "github", Project: pipProject},
 				"/tmp/repo",
@@ -291,7 +395,7 @@ func TestPipProjectKeepsItsPackageManager(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true, true)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false, true)
 
 		// then
 		assert.Contains(t, script, "pdm update --update-all --no-sync")

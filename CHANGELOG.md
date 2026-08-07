@@ -20,6 +20,15 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 - changed the Go module dependencies to their latest versions
 
+### Fixed
+
+- fixed the Python package-manager selection so a repository that installs from a `requirements.txt`
+  and has never committed a `pdm.lock` keeps pip, even when its `pyproject.toml` declares
+  `[tool.pdm]` — that table is also how a pip project states its package layout. Those repositories
+  were upgraded through PDM, which resolved a lock file from scratch (the whole of the resulting
+  pull request, since `pdm update` leaves the pyproject's own constraints alone) and never touched
+  the `requirements.txt` the build installs from. A committed `pdm.lock` still selects PDM
+
 ## [0.20.3] - 2026-08-04
 
 ### Changed

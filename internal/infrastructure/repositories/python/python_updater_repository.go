@@ -414,9 +414,9 @@ func stripTOMLComment(line string) string {
 	return line
 }
 
-// hasPDMRemote reports whether the remote repository is PDM-managed. A
-// pdm.lock is conclusive on its own; otherwise the pyproject.toml is inspected
-// for PDM's markers.
+// detectPDMRemote reports which of PDM's markers the remote repository carries.
+// A committed pdm.lock settles the toolchain on its own, so the pyproject.toml
+// is only read when there is none.
 //
 // hasPyproject is the caller's already-established answer for that file. A
 // provider's HasFile is itself a file fetch, so re-reading a pyproject.toml the
@@ -424,39 +424,43 @@ func stripTOMLComment(line string) string {
 // repository to learn nothing — wasted against the provider's rate limit on
 // every requirements.txt-only project, which is the common pip layout. The
 // pdm.lock probe still runs, so a stray lock is reported and warned about.
-func hasPDMRemote(
+func detectPDMRemote(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	hasPyproject bool,
-) bool {
-	if provider.HasFile(ctx, repo, "pdm.lock") {
-		return true
-	}
+) pdmMarkers {
+	markers := pdmMarkers{lock: provider.HasFile(ctx, repo, "pdm.lock")}
 
-	if !hasPyproject {
-		return false
+	if markers.lock || !hasPyproject {
+		return markers
 	}
 
 	content, err := provider.GetFileContent(ctx, repo, "pyproject.toml")
 	if err != nil {
-		return false
+		return markers
 	}
-	return pyprojectUsesPDM(content)
+	markers.declared = pyprojectUsesPDM(content)
+
+	return markers
 }
 
-// hasPDMLocal reports whether a checked-out repository is PDM-managed, using
-// the same markers as [hasPDMRemote].
-func hasPDMLocal(repoDir string) bool {
-	if _, err := os.Stat(filepath.Join(repoDir, "pdm.lock")); err == nil {
-		return true
+// detectPDMLocal reports which of PDM's markers a checked-out repository
+// carries, using the same rules as [detectPDMRemote].
+func detectPDMLocal(repoDir string) pdmMarkers {
+	markers := pdmMarkers{lock: fileExists(filepath.Join(repoDir, "pdm.lock"))}
+
+	if markers.lock {
+		return markers
 	}
 
 	content, err := os.ReadFile(filepath.Clean(filepath.Join(repoDir, "pyproject.toml")))
 	if err != nil {
-		return false
+		return markers
 	}
-	return pyprojectUsesPDM(string(content))
+	markers.declared = pyprojectUsesPDM(string(content))
+
+	return markers
 }
 
 // parsePythonVersionFile extracts the Python version from a .python-version
