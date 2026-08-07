@@ -25,6 +25,20 @@ type pythonProject struct {
 // UsesPDM reports whether the repository is upgraded through PDM.
 func (p pythonProject) UsesPDM() bool { return p.usesPDM }
 
+// pdmMarkers records the two signals that a repository is PDM-managed. They are
+// kept apart because they carry different weight: a committed pdm.lock is proof
+// that PDM's lock workflow is actually run, while a pyproject.toml naming PDM
+// only states an intent the repository may never have acted on.
+type pdmMarkers struct {
+	// lock reports whether a pdm.lock is committed.
+	lock bool
+	// declared reports whether the pyproject.toml carries PDM's own markers.
+	declared bool
+}
+
+// any reports whether either marker is present.
+func (m pdmMarkers) any() bool { return m.lock || m.declared }
+
 // Toolchain names the dependency manager the repository is upgraded with,
 // either [toolchainPDM] or [toolchainPip].
 func (p pythonProject) Toolchain() string {
@@ -45,18 +59,39 @@ func (p pythonProject) Toolchain() string {
 // to be a dependency bump. A repository whose only manifest is a
 // requirements.txt therefore keeps pip, no matter what other PDM markers are
 // lying around.
-func newPythonProject(hasRequirements, hasPyproject, hasPDMMarkers bool) pythonProject {
-	if hasPDMMarkers && !hasPyproject {
+//
+// A pyproject.toml naming PDM is not enough on its own either. [tool.pdm] is
+// also how a pip project declares its package layout, so a repository that
+// installs from a requirements.txt and has never committed a pdm.lock has never
+// run PDM's lock workflow. Upgrading it through PDM resolves a lock file from
+// scratch — which then makes up the whole of the resulting pull request, since
+// `pdm update` leaves the pyproject's own version constraints alone — while the
+// requirements.txt the build actually installs from is never touched, and the
+// repository gains the manifest of a package manager it does not use. Such a
+// repository therefore keeps pip; a committed pdm.lock is what settles the
+// question the other way.
+func newPythonProject(hasRequirements, hasPyproject bool, markers pdmMarkers) pythonProject {
+	if markers.any() && !hasPyproject {
 		logger.Warnf(
 			"[python] PDM markers found but no pyproject.toml; " +
 				"upgrading with pip so the repository keeps its current package manager",
 		)
 	}
 
+	usesPDM := hasPyproject && markers.any()
+	if usesPDM && hasRequirements && !markers.lock {
+		logger.Warnf(
+			"[python] pyproject.toml declares PDM but no pdm.lock is committed beside " +
+				"the requirements.txt; upgrading with pip so the repository keeps its " +
+				"current package manager",
+		)
+		usesPDM = false
+	}
+
 	return pythonProject{
 		HasRequirements: hasRequirements,
 		HasPyproject:    hasPyproject,
-		usesPDM:         hasPyproject && hasPDMMarkers,
+		usesPDM:         usesPDM,
 	}
 }
 
@@ -71,7 +106,7 @@ func detectRemoteProject(
 	return newPythonProject(
 		provider.HasFile(ctx, repo, "requirements.txt"),
 		hasPyproject,
-		hasPDMRemote(ctx, provider, repo, hasPyproject),
+		detectPDMRemote(ctx, provider, repo, hasPyproject),
 	)
 }
 
@@ -80,7 +115,7 @@ func detectLocalProject(repoDir string) pythonProject {
 	return newPythonProject(
 		fileExists(filepath.Join(repoDir, "requirements.txt")),
 		fileExists(filepath.Join(repoDir, "pyproject.toml")),
-		hasPDMLocal(repoDir),
+		detectPDMLocal(repoDir),
 	)
 }
 

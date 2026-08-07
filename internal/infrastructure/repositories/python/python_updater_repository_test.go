@@ -361,7 +361,7 @@ func TestBuildUpgradeScript(t *testing.T) {
 			AuthToken:       "tok123",
 			ProviderName:    "github",
 			Changelog:     support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
-			Project:       pyUpdater.NewPythonProject(true, true, false),
+			Project:       pyUpdater.NewPythonProject(true, true, false, false),
 			PythonBinary:  "/usr/bin/python3",
 		}
 
@@ -384,7 +384,7 @@ func TestBuildUpgradeScript(t *testing.T) {
 		// given
 		params := pyUpdater.UpgradeParamsExported{
 			ProviderName: "github",
-			Project:      pyUpdater.NewPythonProject(false, false, false),
+			Project:      pyUpdater.NewPythonProject(false, false, false, false),
 		}
 
 		// when
@@ -401,7 +401,7 @@ func TestBuildUpgradeScript(t *testing.T) {
 		// given
 		params := pyUpdater.UpgradeParamsExported{
 			ProviderName: "github",
-			Project:      pyUpdater.NewPythonProject(false, true, false),
+			Project:      pyUpdater.NewPythonProject(false, true, false, false),
 		}
 
 		// when
@@ -419,7 +419,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(true, true, false)
+		script := pyUpdater.BuildBatchPythonScript(true, true, false, false)
 
 		// then
 		assert.True(t, strings.HasPrefix(script, "#!/bin/bash\n"))
@@ -432,7 +432,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true, false)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false, false)
 
 		// then
 		assert.NotContains(t, script, "pip install -r requirements.txt")
@@ -443,7 +443,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(true, false, false)
+		script := pyUpdater.BuildBatchPythonScript(true, false, false, false)
 
 		// then
 		assert.Contains(t, script, "pip install -r requirements.txt")
@@ -454,7 +454,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, false, false)
+		script := pyUpdater.BuildBatchPythonScript(false, false, false, false)
 
 		// then
 		assert.Contains(t, script, "set -euo pipefail")
@@ -557,7 +557,7 @@ func TestWritePythonUpgradeCommands(t *testing.T) {
 		// given
 		var sb strings.Builder
 		params := pyUpdater.UpgradeParamsExported{
-			Project: pyUpdater.NewPythonProject(true, false, false),
+			Project: pyUpdater.NewPythonProject(true, false, false, false),
 		}
 
 		// when
@@ -576,7 +576,7 @@ func TestWritePythonUpgradeCommands(t *testing.T) {
 		// given
 		var sb strings.Builder
 		params := pyUpdater.UpgradeParamsExported{
-			Project: pyUpdater.NewPythonProject(false, true, false),
+			Project: pyUpdater.NewPythonProject(false, true, false, false),
 		}
 
 		// when
@@ -593,7 +593,7 @@ func TestWritePythonUpgradeCommands(t *testing.T) {
 		// given
 		var sb strings.Builder
 		params := pyUpdater.UpgradeParamsExported{
-			Project: pyUpdater.NewPythonProject(false, false, false),
+			Project: pyUpdater.NewPythonProject(false, false, false, false),
 		}
 
 		// when
@@ -612,7 +612,7 @@ func TestWritePythonUpgradeCommands(t *testing.T) {
 		// given
 		var sb strings.Builder
 		params := pyUpdater.UpgradeParamsExported{
-			Project: pyUpdater.NewPythonProject(true, true, false),
+			Project: pyUpdater.NewPythonProject(true, true, false, false),
 		}
 
 		// when
@@ -993,7 +993,7 @@ func TestBuildLocalUpgradeScript(t *testing.T) {
 			PythonVersion: "3.13.1",
 			AuthToken:     "tok123",
 			ProviderName:  "github",
-			Project:       pyUpdater.NewPythonProject(true, false, false),
+			Project:       pyUpdater.NewPythonProject(true, false, false, false),
 			PythonBinary:  "/usr/bin/python3",
 		}
 
@@ -1013,7 +1013,7 @@ func TestBuildLocalUpgradeScript(t *testing.T) {
 		// given
 		params := pyUpdater.LocalUpgradeParamsExported{
 			BranchName:   "chore/upgrade-python-deps",
-			Project:      pyUpdater.NewPythonProject(true, false, false),
+			Project:      pyUpdater.NewPythonProject(true, false, false, false),
 			PythonBinary: "/usr/bin/python3",
 		}
 
@@ -1564,7 +1564,7 @@ func TestBuildBatchPythonScriptWithPDM(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true, true)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false, true)
 
 		// then
 		assert.Contains(t, script, "pdm update --update-all --no-sync")
@@ -1575,7 +1575,7 @@ func TestBuildBatchPythonScriptWithPDM(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(true, true, true)
+		script := pyUpdater.BuildBatchPythonScript(true, true, true, false)
 
 		// then
 		assert.NotContains(t, script, "pip install --upgrade .")
@@ -1586,7 +1586,7 @@ func TestBuildBatchPythonScriptWithPDM(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true, false)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false, false)
 
 		// then
 		assert.Contains(t, script, "pip install --upgrade .")
@@ -1617,7 +1617,7 @@ func TestWriteEggInfoGitignore(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true, false)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false, false)
 
 		// then
 		assert.Contains(t, script, "*.egg-info/")

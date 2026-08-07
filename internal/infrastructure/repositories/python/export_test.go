@@ -66,8 +66,10 @@ func BuildUpgradeScript(params UpgradeParamsExported, repoDir string) string {
 }
 
 // BuildBatchPythonScript is exported for testing.
-func BuildBatchPythonScript(hasRequirements, hasPyproject, hasPDMMarkers bool) string {
-	return buildBatchPythonScript(NewPythonProject(hasRequirements, hasPyproject, hasPDMMarkers))
+func BuildBatchPythonScript(hasRequirements, hasPyproject, hasPDMLock, pyprojectDeclaresPDM bool) string {
+	return buildBatchPythonScript(
+		NewPythonProject(hasRequirements, hasPyproject, hasPDMLock, pyprojectDeclaresPDM),
+	)
 }
 
 // PythonProject is exported for testing.
@@ -75,9 +77,15 @@ type PythonProject = pythonProject
 
 // NewPythonProject is exported for testing. Tests reach the dependency manager
 // decision through the same constructor production code uses, so a test cannot
-// express a combination the updater itself could never produce.
-func NewPythonProject(hasRequirements, hasPyproject, hasPDMMarkers bool) PythonProject {
-	return newPythonProject(hasRequirements, hasPyproject, hasPDMMarkers)
+// express a combination the updater itself could never produce. The two PDM
+// markers are passed separately because they do not carry the same weight: a
+// committed lock file selects PDM, a pyproject.toml declaring it does not.
+func NewPythonProject(hasRequirements, hasPyproject, hasPDMLock, pyprojectDeclaresPDM bool) PythonProject {
+	return newPythonProject(
+		hasRequirements,
+		hasPyproject,
+		pdmMarkers{lock: hasPDMLock, declared: pyprojectDeclaresPDM},
+	)
 }
 
 // DetectLocalProject is exported for testing.
@@ -99,19 +107,21 @@ func PyprojectUsesPDM(content string) bool {
 	return pyprojectUsesPDM(content)
 }
 
-// HasPDMLocal is exported for testing.
+// HasPDMLocal is exported for testing. It reports whether any PDM marker was
+// found, which is what the detection probes answer; which marker it was, and
+// what that means for the toolchain, is [NewPythonProject]'s decision.
 func HasPDMLocal(repoDir string) bool {
-	return hasPDMLocal(repoDir)
+	return detectPDMLocal(repoDir).any()
 }
 
-// HasPDMRemote is exported for testing.
+// HasPDMRemote is exported for testing, with the same meaning as [HasPDMLocal].
 func HasPDMRemote(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	hasPyproject bool,
 ) bool {
-	return hasPDMRemote(ctx, provider, repo, hasPyproject)
+	return detectPDMRemote(ctx, provider, repo, hasPyproject).any()
 }
 
 // WriteManifestSnapshot is exported for testing.
