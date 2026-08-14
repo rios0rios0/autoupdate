@@ -16,23 +16,25 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-14
+
 ### Added
 
-- added a `dart` updater covering Flutter as well, detected by `pubspec.yaml`. It runs `pub upgrade --major-versions` rather than a plain `pub upgrade`: the plain form only re-resolves `pubspec.lock` inside the constraints already declared, so it would never actually raise a dependency, while `--major-versions` rewrites the constraints in `pubspec.yaml` to what pub reports as resolvable. Pub applies that rewrite through `yaml_edit`, so the rationale comments a `pubspec.yaml` carries between its dependency entries survive it
-- added toolchain selection through langforge's `dart.IsFlutter`, the single place that distinguishes the two: a Flutter project is driven with `flutter pub` and a plain package with `dart pub`, because `dart pub get` cannot resolve the SDK-sourced packages (`flutter`, `flutter_test`, `flutter_localizations`) that every Flutter project depends on. When a repository pins its SDK with FVM, pub is routed through `fvm` — otherwise the upgrade would run against whatever toolchain happened to be on `PATH` rather than the one the project is built with
 - added `.fvmrc` SDK bumping, the Flutter counterpart of `.ruby-version` and `.nvmrc`. Wherever Go can see the worktree — local mode and the batch path — the file is rewritten by parsing and re-emitting the JSON, so keys the tool does not know about survive. The remote path clones inside the generated script and never exposes the worktree to Go, so there it is a `sed` that substitutes only the value of the `"flutter"` key rather than reconstructing the document; a `flavors` block is left intact either way. Only a project the manifest identifies as Flutter has its pin touched: `.fvmrc` names a Flutter SDK, so a plain Dart package carrying one would otherwise be pinned to a version from the Dart release channel. `environment: sdk:` in `pubspec.yaml` is deliberately left alone: raising a package's SDK floor is a compatibility decision for its consumers, and `pub upgrade --major-versions` already raises it when a dependency actually requires it
+- added a `dart` updater covering Flutter as well, detected by `pubspec.yaml`. It runs `pub upgrade --major-versions` rather than a plain `pub upgrade`: the plain form only re-resolves `pubspec.lock` inside the constraints already declared, so it would never actually raise a dependency, while `--major-versions` rewrites the constraints in `pubspec.yaml` to what pub reports as resolvable. Pub applies that rewrite through `yaml_edit`, so the rationale comments a `pubspec.yaml` carries between its dependency entries survive it
 - added SDK version fetchers reading Google's own release channels. **Neither Dart nor Flutter has an endoflife.date product** — `api/dart.json` and `api/flutter.json` are both 404 — so the versions come from the Dart archive's stable `VERSION` document and the Flutter releases index. The Flutter index lists every release ever published and is *not* ordered by recency, so the current stable is resolved through the hash `current_release` points at rather than by taking the first match
+- added toolchain selection through langforge's `dart.IsFlutter`, the single place that distinguishes the two: a Flutter project is driven with `flutter pub` and a plain package with `dart pub`, because `dart pub get` cannot resolve the SDK-sourced packages (`flutter`, `flutter_test`, `flutter_localizations`) that every Flutter project depends on. When a repository pins its SDK with FVM, pub is routed through `fvm` — otherwise the upgrade would run against whatever toolchain happened to be on `PATH` rather than the one the project is built with
 
 ### Changed
 
-- changed the Go version to `1.26.6` and updated all module dependencies
 - changed every updater's generated script to build its git credential setup from one shared helper, `support.GitAuthScript`. The same `insteadOf` rewrites had been copied into ten places and had already drifted: only some of them rewrote Azure DevOps SSH remotes, so a dependency declared over SSH failed to authenticate depending on which ecosystem the repository happened to be. They now all do
+- changed the Go version to `1.26.6` and updated all module dependencies
 - changed the local-mode updaters to open the repository, stash, and branch through one `gitlocal.PrepareBranch` call, and to run their generated script through `cmdrunner.RunScript`. The script is now written outside the repository in every mode, so it can no longer appear as an untracked file in the worktree the caller inspects next
 
 ### Fixed
 
-- fixed the `README.md` ecosystem table, which documented two updaters while nine shipped, and the accompanying "All 6 updaters" comment in the sample configuration
 - fixed `CONTRIBUTING.md`, which told contributors to register updaters in a `cmd/run.go` that no longer exists
+- fixed the `README.md` ecosystem table, which documented two updaters while nine shipped, and the accompanying "All 6 updaters" comment in the sample configuration
 
 ## [0.20.7] - 2026-08-13
 
