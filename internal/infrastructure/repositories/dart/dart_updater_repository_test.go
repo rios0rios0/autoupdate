@@ -101,46 +101,44 @@ func TestResolveVersionContext(t *testing.T) {
 
 	repo := entities.Repository{Organization: "org", Name: "repo"}
 
-	t.Run("should pick the Flutter toolchain when the manifest is a Flutter one", func(t *testing.T) {
+	// The manifest is the only input that decides the toolchain, and the
+	// toolchain in turn decides which release channel supplies the version —
+	// so both assertions belong to the same scenario.
+	t.Run("should pick the toolchain the manifest calls for", func(t *testing.T) {
 		t.Parallel()
 
-		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithFileContents(map[string]string{"pubspec.yaml": flutterPubspec}).
-			WithExistingFiles(map[string]bool{"pubspec.yaml": true}).
-			BuildSpy()
-		updater := dartUpdater.NewUpdaterRepositoryForTest(
-			&repositorydoubles.StubVersionFetcher{Version: "3.13.0"},
-			&repositorydoubles.StubVersionFetcher{Version: "3.47.0"},
-		)
+		testCases := []struct {
+			name              string
+			pubspec           string
+			expectedToolchain string
+			expectedVersion   string
+		}{
+			{"Flutter manifest", flutterPubspec, "flutter", "3.47.0"},
+			{"plain Dart package", dartPubspec, "dart", "3.13.0"},
+		}
 
-		// when
-		vCtx := updater.ResolveVersionContextForTest(t.Context(), provider, repo)
+		for _, testCase := range testCases {
+			t.Run(testCase.name, func(t *testing.T) {
+				t.Parallel()
 
-		// then
-		assert.Equal(t, "flutter", vCtx.Toolchain)
-		assert.Equal(t, "3.47.0", vCtx.LatestVersion)
-	})
+				// given
+				provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+					WithFileContents(map[string]string{"pubspec.yaml": testCase.pubspec}).
+					WithExistingFiles(map[string]bool{"pubspec.yaml": true}).
+					BuildSpy()
+				updater := dartUpdater.NewUpdaterRepositoryForTest(
+					&repositorydoubles.StubVersionFetcher{Version: "3.13.0"},
+					&repositorydoubles.StubVersionFetcher{Version: "3.47.0"},
+				)
 
-	t.Run("should pick the Dart toolchain for a plain package", func(t *testing.T) {
-		t.Parallel()
+				// when
+				vCtx := updater.ResolveVersionContextForTest(t.Context(), provider, repo)
 
-		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithFileContents(map[string]string{"pubspec.yaml": dartPubspec}).
-			WithExistingFiles(map[string]bool{"pubspec.yaml": true}).
-			BuildSpy()
-		updater := dartUpdater.NewUpdaterRepositoryForTest(
-			&repositorydoubles.StubVersionFetcher{Version: "3.13.0"},
-			&repositorydoubles.StubVersionFetcher{Version: "3.47.0"},
-		)
-
-		// when
-		vCtx := updater.ResolveVersionContextForTest(t.Context(), provider, repo)
-
-		// then
-		assert.Equal(t, "dart", vCtx.Toolchain)
-		assert.Equal(t, "3.13.0", vCtx.LatestVersion)
+				// then
+				assert.Equal(t, testCase.expectedToolchain, vCtx.Toolchain)
+				assert.Equal(t, testCase.expectedVersion, vCtx.LatestVersion)
+			})
+		}
 	})
 
 	t.Run("should still upgrade dependencies when the release channel is unreachable", func(t *testing.T) {

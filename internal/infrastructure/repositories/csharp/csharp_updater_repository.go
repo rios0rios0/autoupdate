@@ -35,11 +35,6 @@ const (
 	// Commit/PR messages and changelog entries used across remote and local modes.
 	dotnetCommitMsgDeps      = "chore(deps): updated NuGet dependencies"
 	dotnetChangelogEntryDeps = "- changed the NuGet dependencies to their latest versions"
-
-	// Git provider names for auth setup.
-	providerAzureDevOps = "azuredevops"
-	providerGitHub      = "github"
-	providerGitLab      = "gitlab"
 )
 
 // defaultRunner is the package-level command runner for remote-mode functions.
@@ -544,28 +539,7 @@ func buildUpgradeScript(
 }
 
 func writeGitAuth(sb *strings.Builder, params upgradeParams) {
-	sb.WriteString("# Set up isolated git config for auth\n")
-	sb.WriteString("TEMP_GITCONFIG=$(mktemp)\n")
-	sb.WriteString("cp ~/.gitconfig \"$TEMP_GITCONFIG\" 2>/dev/null || true\n")
-
-	switch params.ProviderName {
-	case providerAzureDevOps:
-		sb.WriteString("echo '[url \"https://pat:'\"${AUTH_TOKEN}\"'@dev.azure.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-		sb.WriteString("echo '    insteadOf = https://dev.azure.com/' >> \"$TEMP_GITCONFIG\"\n")
-		sb.WriteString("echo '[url \"https://pat:'\"${AUTH_TOKEN}\"'@dev.azure.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-		sb.WriteString("echo '    insteadOf = git@ssh.dev.azure.com:v3/' >> \"$TEMP_GITCONFIG\"\n")
-	case providerGitHub:
-		sb.WriteString(
-			"echo '[url \"https://x-access-token:'\"${AUTH_TOKEN}\"'@github.com/\"]' >> \"$TEMP_GITCONFIG\"\n",
-		)
-		sb.WriteString("echo '    insteadOf = https://github.com/' >> \"$TEMP_GITCONFIG\"\n")
-	case providerGitLab:
-		sb.WriteString("echo '[url \"https://oauth2:'\"${AUTH_TOKEN}\"'@gitlab.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-		sb.WriteString("echo '    insteadOf = https://gitlab.com/' >> \"$TEMP_GITCONFIG\"\n")
-	}
-
-	sb.WriteString("export GIT_CONFIG_GLOBAL=\"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("trap 'rm -f \"$TEMP_GITCONFIG\"' EXIT\n\n")
+	sb.WriteString(support.GitAuthScript(params.ProviderName))
 }
 
 func writeDotnetUpgradeCommands(sb *strings.Builder) {

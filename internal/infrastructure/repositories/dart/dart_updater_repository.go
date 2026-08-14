@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,7 +21,6 @@ import (
 const (
 	updaterName       = "dart"
 	sdkVersionTimeout = 15 * time.Second
-	scriptFileMode    = 0o700
 	pubspecFile       = "pubspec.yaml"
 
 	// Toolchain executables. A Flutter project must be driven through the
@@ -118,7 +116,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx)
+	result, upgradeErr := cloneAndUpgrade(ctx, u.cmdRunner, provider, repo, vCtx)
 	if upgradeErr != nil {
 		return nil, upgradeErr
 	}
@@ -148,7 +146,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	// and parsing JSON with grep and sed is how a flavors block gets destroyed.
 	sdkUpdated := applyFvmPin(repoDir, vCtx)
 
-	outputStr, runErr := runUpgradeScript(ctx, repoDir, vCtx)
+	outputStr, runErr := runUpgradeScript(ctx, u.cmdRunner, repoDir, vCtx)
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -170,29 +168,21 @@ func (u *UpdaterRepository) ApplyUpdates(
 	}, nil
 }
 
-// runUpgradeScript writes and executes the pub upgrade script inside repoDir.
-func runUpgradeScript(ctx context.Context, repoDir string, vCtx *versionContext) (string, error) {
-	script := buildBatchDartScript()
-	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
-	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return "", fmt.Errorf("failed to write script: %w", writeErr)
-	}
-	defer func() { _ = os.Remove(scriptPath) }()
-
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = repoDir
-	cmd.Env = append(os.Environ(), "PUB_EXECUTABLE="+vCtx.Toolchain)
-
-	output, cmdErr := cmd.CombinedOutput()
-	outputStr := string(output)
-	if cmdErr != nil {
-		return "", fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, outputStr)
-	}
-
-	// Remove the script before the caller inspects the worktree, so it does not
-	// show up as an untracked file.
-	_ = os.Remove(scriptPath)
-	return outputStr, nil
+// runUpgradeScript executes the pub upgrade script with repoDir as the working
+// directory. The script itself is written outside the repository, so it can
+// never show up as an untracked file in the worktree the caller inspects next.
+func runUpgradeScript(
+	ctx context.Context,
+	runner cmdrunner.Runner,
+	repoDir string,
+	vCtx *versionContext,
+) (string, error) {
+	return cmdrunner.RunScript(ctx, runner, cmdrunner.ScriptRun{
+		Body:        buildBatchDartScript(),
+		TempPattern: "autoupdate-dart-batch-*",
+		Dir:         repoDir,
+		Env:         append(os.Environ(), "PUB_EXECUTABLE="+vCtx.Toolchain),
+	})
 }
 
 // applyFvmPin bumps the pinned Flutter SDK when one is pinned and outdated.
@@ -369,6 +359,7 @@ func logDryRun(vCtx *versionContext, repo entities.Repository) {
 // upgrade script, and returns the result.
 func cloneAndUpgrade(
 	ctx context.Context,
+	runner cmdrunner.Runner,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
@@ -376,7 +367,7 @@ func cloneAndUpgrade(
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx, vCtx.NeedsVersionUpgrade))
 	defer changelog.Remove()
 
-	result, err := upgradeRepo(ctx, upgradeParams{
+	result, err := upgradeRepo(ctx, runner, upgradeParams{
 		CloneURL:      provider.CloneURL(repo),
 		DefaultBranch: strings.TrimPrefix(repo.DefaultBranch, "refs/heads/"),
 		BranchName:    vCtx.BranchName,
@@ -431,39 +422,33 @@ func openPullRequest(
 	return []entities.PullRequest{*pr}, nil
 }
 
-func upgradeRepo(ctx context.Context, params upgradeParams) (*upgradeResult, error) {
-	result := &upgradeResult{}
-
-	tmpDir, err := os.MkdirTemp("", "autoupdate-dart-*")
+func upgradeRepo(ctx context.Context, runner cmdrunner.Runner, params upgradeParams) (*upgradeResult, error) {
+	// The clone lives in its own throwaway directory rather than beside the
+	// script, so nothing the script writes can outlive this call.
+	cloneRoot, err := os.MkdirTemp("", "autoupdate-dart-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(cloneRoot)
 
-	repoDir := filepath.Join(tmpDir, "repo")
-
-	script := buildUpgradeScript(params)
-	scriptPath := filepath.Join(tmpDir, "upgrade.sh")
-
-	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return nil, fmt.Errorf("failed to write script: %w", writeErr)
+	output, runErr := cmdrunner.RunScript(ctx, runner, cmdrunner.ScriptRun{
+		Body:        buildUpgradeScript(params),
+		TempPattern: "autoupdate-dart-script-*",
+		Dir:         cloneRoot,
+		Env:         buildEnv(params, filepath.Join(cloneRoot, "repo")),
+		RedactOutput: func(out string) string {
+			return support.RedactTokens(out, params.AuthToken)
+		},
+	})
+	if runErr != nil {
+		return nil, runErr
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = tmpDir
-	cmd.Env = buildEnv(params, repoDir)
-
-	output, err := cmd.CombinedOutput()
-	result.Output = string(output)
-
-	if err != nil {
-		redactedOutput := support.RedactTokens(result.Output, params.AuthToken)
-		return result, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", err, redactedOutput)
-	}
-
-	result.HasChanges = strings.Contains(result.Output, "CHANGES_PUSHED=true")
-	result.SDKUpdated = strings.Contains(result.Output, "SDK_VERSION_UPDATED=true")
-	return result, nil
+	return &upgradeResult{
+		Output:     output,
+		HasChanges: strings.Contains(output, "CHANGES_PUSHED=true"),
+		SDKUpdated: strings.Contains(output, "SDK_VERSION_UPDATED=true"),
+	}, nil
 }
 
 func buildUpgradeScript(params upgradeParams) string {
@@ -501,28 +486,7 @@ func buildUpgradeScript(params upgradeParams) string {
 }
 
 func writeGitAuth(sb *strings.Builder, params upgradeParams) {
-	sb.WriteString("# Set up isolated git config for auth\n")
-	sb.WriteString("TEMP_GITCONFIG=$(mktemp)\n")
-	sb.WriteString("cp ~/.gitconfig \"$TEMP_GITCONFIG\" 2>/dev/null || true\n")
-
-	switch params.ProviderName {
-	case "azuredevops":
-		sb.WriteString("echo '[url \"https://pat:'\"${AUTH_TOKEN}\"'@dev.azure.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-		sb.WriteString("echo '    insteadOf = https://dev.azure.com/' >> \"$TEMP_GITCONFIG\"\n")
-		sb.WriteString("echo '[url \"https://pat:'\"${AUTH_TOKEN}\"'@dev.azure.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-		sb.WriteString("echo '    insteadOf = git@ssh.dev.azure.com:v3/' >> \"$TEMP_GITCONFIG\"\n")
-	case "github":
-		sb.WriteString(
-			"echo '[url \"https://x-access-token:'\"${AUTH_TOKEN}\"'@github.com/\"]' >> \"$TEMP_GITCONFIG\"\n",
-		)
-		sb.WriteString("echo '    insteadOf = https://github.com/' >> \"$TEMP_GITCONFIG\"\n")
-	case "gitlab":
-		sb.WriteString("echo '[url \"https://oauth2:'\"${AUTH_TOKEN}\"'@gitlab.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-		sb.WriteString("echo '    insteadOf = https://gitlab.com/' >> \"$TEMP_GITCONFIG\"\n")
-	}
-
-	sb.WriteString("export GIT_CONFIG_GLOBAL=\"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("trap 'rm -f \"$TEMP_GITCONFIG\"' EXIT\n\n")
+	sb.WriteString(support.GitAuthScript(params.ProviderName))
 }
 
 // writeFvmPinUpdate rewrites the .fvmrc pin in the remote flow, where the clone

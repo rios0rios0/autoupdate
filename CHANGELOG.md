@@ -26,6 +26,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 ### Changed
 
 - changed the Go version to `1.26.6` and updated all module dependencies
+- changed every updater's generated script to build its git credential setup from one shared helper, `support.GitAuthScript`. The same `insteadOf` rewrites had been copied into ten places and had already drifted: only some of them rewrote Azure DevOps SSH remotes, so a dependency declared over SSH failed to authenticate depending on which ecosystem the repository happened to be. They now all do
+- changed the local-mode updaters to open the repository, stash, and branch through one `gitlocal.PrepareBranch` call, and to run their generated script through `cmdrunner.RunScript`. The script is now written outside the repository in every mode, so it can no longer appear as an untracked file in the worktree the caller inspects next
 
 ### Fixed
 

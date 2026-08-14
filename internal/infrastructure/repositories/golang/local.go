@@ -130,31 +130,11 @@ func executeLocalUpgrade(
 	opts LocalUpgradeOptions,
 ) (*LocalResult, error) {
 	// --- Git Setup (go-git) ---
-	gitCtx, err := gitlocal.NewLocalGitContext(repoDir, opts.PushAuth)
+	gitCtx, restore, err := gitlocal.PrepareBranch(repoDir, vCtx.BranchName, opts.PushAuth)
 	if err != nil {
 		return nil, err
 	}
-	originalBranch, err := gitCtx.CurrentBranch()
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine current branch: %w", err)
-	}
-	stashed, stashErr := gitCtx.StashIfDirty()
-	if stashErr != nil {
-		return nil, stashErr
-	}
-	if stashed {
-		defer func() {
-			if checkoutErr := gitCtx.CheckoutBranch(originalBranch); checkoutErr != nil {
-				logger.Warnf("Failed to switch back to %s: %v", originalBranch, checkoutErr)
-			}
-			if restoreErr := gitCtx.RestoreStash(); restoreErr != nil {
-				logger.Warnf("Failed to restore stash: %v", restoreErr)
-			}
-		}()
-	}
-	if err = gitCtx.CreateBranch(vCtx.BranchName); err != nil {
-		return nil, fmt.Errorf("failed to create branch %s: %w", vCtx.BranchName, err)
-	}
+	defer restore()
 
 	// --- Language Operations (bash) ---
 	outputStr, runErr := runLanguageUpgradeScript(ctx, repoDir, vCtx, opts)
