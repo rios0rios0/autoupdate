@@ -7,7 +7,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/rios0rios0/cliforge v0.3.14
 	github.com/rios0rios0/gitforge v1.0.1-0.20260723213209-a16be141d1d4
-	github.com/rios0rios0/langforge v0.6.12-0.20260814025633-e4914b202128
+	github.com/rios0rios0/langforge v0.6.12-0.20260814122130-74f6ef7dca0c
 	github.com/rios0rios0/testkit v0.2.6
 	github.com/sirupsen/logrus v1.10.0
 	github.com/spf13/cobra v1.10.2
