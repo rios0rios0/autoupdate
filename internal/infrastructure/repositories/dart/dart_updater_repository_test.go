@@ -3,6 +3,8 @@
 package dart_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -141,6 +143,59 @@ func TestResolveVersionContext(t *testing.T) {
 		}
 	})
 
+	// .fvmrc pins a Flutter SDK. A plain Dart package that carries one — a CLI
+	// living beside a Flutter app, say — must not have it rewritten with a
+	// version from the Dart release channel.
+	t.Run("should ignore an .fvmrc pin when the manifest is a plain Dart package", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithFileContents(map[string]string{
+				"pubspec.yaml": dartPubspec,
+				".fvmrc":       `{"flutter": "3.38.0"}`,
+			}).
+			WithExistingFiles(map[string]bool{"pubspec.yaml": true, ".fvmrc": true}).
+			BuildSpy()
+		updater := dartUpdater.NewUpdaterRepositoryForTest(
+			&repositorydoubles.StubVersionFetcher{Version: "3.13.0"},
+			&repositorydoubles.StubVersionFetcher{Version: "3.47.0"},
+		)
+
+		// when
+		vCtx := updater.ResolveVersionContextForTest(t.Context(), provider, repo)
+
+		// then
+		assert.Equal(t, "dart", vCtx.Toolchain)
+		assert.False(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "chore/upgrade-dart-deps", vCtx.BranchName)
+	})
+
+	t.Run("should upgrade the .fvmrc pin when the manifest is a Flutter one", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithFileContents(map[string]string{
+				"pubspec.yaml": flutterPubspec,
+				".fvmrc":       `{"flutter": "3.38.0"}`,
+			}).
+			WithExistingFiles(map[string]bool{"pubspec.yaml": true, ".fvmrc": true}).
+			BuildSpy()
+		updater := dartUpdater.NewUpdaterRepositoryForTest(
+			&repositorydoubles.StubVersionFetcher{Version: "3.13.0"},
+			&repositorydoubles.StubVersionFetcher{Version: "3.47.0"},
+		)
+
+		// when
+		vCtx := updater.ResolveVersionContextForTest(t.Context(), provider, repo)
+
+		// then
+		assert.True(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "3.47.0", vCtx.LatestVersion)
+		assert.Equal(t, "chore/upgrade-flutter-3.47.0", vCtx.BranchName)
+	})
+
 	t.Run("should still upgrade dependencies when the release channel is unreachable", func(t *testing.T) {
 		t.Parallel()
 
@@ -160,6 +215,64 @@ func TestResolveVersionContext(t *testing.T) {
 		assert.Empty(t, vCtx.LatestVersion)
 		assert.False(t, vCtx.NeedsVersionUpgrade)
 		assert.Equal(t, "chore/upgrade-dart-deps", vCtx.BranchName)
+	})
+}
+
+// writeDartRepo lays out a repository on disk with a manifest and, optionally,
+// an .fvmrc pin.
+func writeDartRepo(t *testing.T, pubspec, fvmrc string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pubspec.yaml"), []byte(pubspec), 0o600))
+	if fvmrc != "" {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".fvmrc"), []byte(fvmrc), 0o600))
+	}
+	return dir
+}
+
+func TestResolveLocalVersionContext(t *testing.T) {
+	t.Parallel()
+
+	// The local counterpart of the remote guard: an .fvmrc found next to a
+	// plain Dart manifest names a Flutter SDK the Dart channel knows nothing
+	// about, so it is left alone.
+	t.Run("should ignore an .fvmrc pin when the manifest is a plain Dart package", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := writeDartRepo(t, dartPubspec, `{"flutter": "3.38.0"}`)
+		updater := dartUpdater.NewUpdaterRepositoryForTest(
+			&repositorydoubles.StubVersionFetcher{Version: "3.13.0"},
+			&repositorydoubles.StubVersionFetcher{Version: "3.47.0"},
+		)
+
+		// when
+		vCtx := updater.ResolveLocalVersionContextForTest(t.Context(), repoDir)
+
+		// then
+		assert.Equal(t, "dart", vCtx.Toolchain)
+		assert.False(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "chore/upgrade-dart-deps", vCtx.BranchName)
+	})
+
+	t.Run("should upgrade the .fvmrc pin when the manifest is a Flutter one", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := writeDartRepo(t, flutterPubspec, `{"flutter": "3.38.0"}`)
+		updater := dartUpdater.NewUpdaterRepositoryForTest(
+			&repositorydoubles.StubVersionFetcher{Version: "3.13.0"},
+			&repositorydoubles.StubVersionFetcher{Version: "3.47.0"},
+		)
+
+		// when
+		vCtx := updater.ResolveLocalVersionContextForTest(t.Context(), repoDir)
+
+		// then
+		assert.Equal(t, "flutter", vCtx.Toolchain)
+		assert.True(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "chore/upgrade-flutter-3.47.0", vCtx.BranchName)
 	})
 }
 

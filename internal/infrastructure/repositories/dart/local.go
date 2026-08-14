@@ -68,8 +68,10 @@ func (u *UpdaterRepository) resolveLocalVersionContext(ctx context.Context, repo
 
 	latest := u.fetchLatestSDK(ctx, toolchain)
 
+	// Flutter only: see resolveVersionContext. A plain Dart package's .fvmrc,
+	// if it has one, would be pinned to a Dart version otherwise.
 	currentPin := ""
-	if latest != "" {
+	if toolchain == toolchainFlutter && latest != "" {
 		if content, err := os.ReadFile(filepath.Join(repoDir, FvmConfigFile)); err == nil {
 			currentPin = ParseFvmVersion(string(content))
 		}

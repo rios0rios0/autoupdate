@@ -272,8 +272,13 @@ func (u *UpdaterRepository) resolveVersionContext(
 
 	latest := u.fetchLatestSDK(ctx, toolchain)
 
+	// Only a Flutter project's pin is read. .fvmrc names a *Flutter* SDK, and
+	// `latest` came from whichever channel the toolchain selected — so a plain
+	// Dart package that happens to carry an .fvmrc (a Dart tool living beside a
+	// Flutter app, say) would otherwise have its pin rewritten with a Dart
+	// version, and the branch and commit would both claim a Flutter upgrade.
 	currentPin := ""
-	if latest != "" && provider.HasFile(ctx, repo, FvmConfigFile) {
+	if toolchain == toolchainFlutter && latest != "" && provider.HasFile(ctx, repo, FvmConfigFile) {
 		if content, err := provider.GetFileContent(ctx, repo, FvmConfigFile); err == nil {
 			currentPin = ParseFvmVersion(content)
 		}
