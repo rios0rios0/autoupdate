@@ -101,6 +101,8 @@ func PrepareBranch(
 		return nil, nil, err
 	}
 
+	// Nothing was stashed, so there is nothing to put back; the caller still
+	// gets a function it can defer unconditionally.
 	restore := func() {}
 	if stashed {
 		restore = func() {

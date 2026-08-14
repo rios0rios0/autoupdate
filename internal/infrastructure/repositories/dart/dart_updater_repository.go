@@ -23,6 +23,10 @@ const (
 	sdkVersionTimeout = 15 * time.Second
 	pubspecFile       = "pubspec.yaml"
 
+	// refsHeadsPrefix is how the provider APIs spell a branch ref; the
+	// repository's DefaultBranch arrives carrying it and the PR input expects it.
+	refsHeadsPrefix = "refs/heads/"
+
 	// Toolchain executables. A Flutter project must be driven through the
 	// flutter wrapper: `dart pub get` cannot resolve the SDK-sourced packages
 	// (flutter, flutter_test, flutter_localizations) that every Flutter project
@@ -374,7 +378,7 @@ func cloneAndUpgrade(
 
 	result, err := upgradeRepo(ctx, runner, upgradeParams{
 		CloneURL:      provider.CloneURL(repo),
-		DefaultBranch: strings.TrimPrefix(repo.DefaultBranch, "refs/heads/"),
+		DefaultBranch: strings.TrimPrefix(repo.DefaultBranch, refsHeadsPrefix),
 		BranchName:    vCtx.BranchName,
 		Toolchain:     vCtx.Toolchain,
 		SDKVersion:    sdkVersionFor(vCtx),
@@ -409,11 +413,11 @@ func openPullRequest(
 ) ([]entities.PullRequest, error) {
 	targetBranch := repo.DefaultBranch
 	if opts.TargetBranch != "" {
-		targetBranch = "refs/heads/" + opts.TargetBranch
+		targetBranch = refsHeadsPrefix + opts.TargetBranch
 	}
 
 	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
-		SourceBranch: "refs/heads/" + vCtx.BranchName,
+		SourceBranch: refsHeadsPrefix + vCtx.BranchName,
 		TargetBranch: targetBranch,
 		Title:        commitMessage(vCtx, result.SDKUpdated),
 		Description:  GeneratePRDescription(vCtx.LatestVersion, vCtx.Toolchain, result.SDKUpdated),

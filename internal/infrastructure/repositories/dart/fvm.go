@@ -49,7 +49,7 @@ func WriteFvmVersion(repoDir, version string) (bool, error) {
 		return false, fmt.Errorf("parsing %s: %w", FvmConfigFile, unmarshalErr)
 	}
 
-	if current := ParseFvmVersion(string(raw)); current == version {
+	if ParseFvmVersion(string(raw)) == version {
 		return false, nil
 	}
 
