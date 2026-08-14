@@ -32,6 +32,23 @@ internal/infrastructure/repositories/csharp/csharp_updater_repository.go:Passwor
 internal/infrastructure/repositories/csharp/csharp_updater_repository.go:Password in URL:596
 internal/infrastructure/repositories/csharp/csharp_updater_repository.go:Password in URL:600
 
+# 2026-08-14: the templates above now live in one place, internal/support/gitauth.go,
+# which every updater's script builder calls. The "secret" the rule matches is the
+# literal shell variable the template leaves for bash to expand at run time -- the real
+# token is passed through the environment and never reaches the script text.
+internal/support/gitauth.go:Password in URL:36
+internal/support/gitauth.go:Password in URL:39
+#
+# The per-updater entries above are kept even though the current tree no longer has
+# those lines: pass 2 walks the whole history, so the commits that introduced them are
+# still scanned and still need suppressing. The two Dart entries below are the same
+# case -- the lines existed in the commit that added the updater, before the
+# consolidation removed them.
+internal/infrastructure/repositories/dart/local.go:Password in URL:263
+internal/infrastructure/repositories/dart/local.go:Password in URL:267
+internal/infrastructure/repositories/dart/dart_updater_repository.go:Password in URL:516
+internal/infrastructure/repositories/dart/dart_updater_repository.go:Password in URL:520
+
 # Entries below are full fingerprints: <commit>:<file>:<rule-id>:<line>. Because the
 # fingerprint embeds the commit, a rewritten history invalidates every entry: a rebase
 # gives the offending commit a new hash, the old fingerprint stops matching anything,

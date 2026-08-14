@@ -11,6 +11,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	infraRepos "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
+	dartRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dart"
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
@@ -185,6 +186,7 @@ func localUpgradeHandlers() map[langEntities.Language]localUpgradeHandler {
 		langEntities.LanguageGo:         runGoLocalUpgrade,
 		langEntities.LanguageNode:       runJSLocalUpgrade,
 		langEntities.LanguagePython:     runPythonLocalUpgrade,
+		langEntities.LanguageDart:       runDartLocalUpgrade,
 		langEntities.LanguageJava:       nil,
 		langEntities.LanguageJavaGradle: nil,
 		langEntities.LanguageJavaMaven:  nil,
@@ -291,6 +293,34 @@ func runJSLocalUpgrade(
 	}, nil
 }
 
+func runDartLocalUpgrade(
+	ctx context.Context,
+	repoDir, providerType, token string,
+	opts LocalOptions,
+	registry *infraRepos.ProviderRegistry,
+) (*localPRInfo, error) {
+	result, err := dartRepo.RunLocalUpgrade(ctx, repoDir, dartRepo.LocalUpgradeOptions{
+		DryRun:       opts.DryRun,
+		Verbose:      opts.Verbose,
+		AuthToken:    token,
+		ProviderName: providerType,
+		PushAuth:     registry,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &localPRInfo{
+		BranchName:     result.BranchName,
+		LatestVersion:  result.LatestVersion,
+		VersionUpdated: result.SDKUpdated,
+		// The toolchain rides in PackageManager: it is the same kind of fact
+		// (which tool actually ran) and the PR description needs it.
+		PackageManager: result.Toolchain,
+		ProjectType:    langEntities.LanguageDart,
+		HasChanges:     result.HasChanges,
+	}, nil
+}
+
 // createLocalPRForProject creates a pull request using the provider API.
 func (it *LocalCommand) createLocalPRForProject(
 	ctx context.Context,
@@ -365,6 +395,19 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 				)
 			}
 			desc := jsRepo.GeneratePRDescription(
+				info.LatestVersion, info.PackageManager, info.VersionUpdated,
+			)
+			return title, desc
+		},
+		langEntities.LanguageDart: func(info *localPRInfo) (string, string) {
+			title := "chore(deps): updated Dart pub dependencies"
+			if info.VersionUpdated {
+				title = fmt.Sprintf(
+					"chore(deps): upgraded Flutter to `%s` and updated all pub dependencies",
+					info.LatestVersion,
+				)
+			}
+			desc := dartRepo.GeneratePRDescription(
 				info.LatestVersion, info.PackageManager, info.VersionUpdated,
 			)
 			return title, desc

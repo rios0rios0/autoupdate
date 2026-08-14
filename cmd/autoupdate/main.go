@@ -20,7 +20,8 @@ func buildRootCommand(localController *controllers.LocalController) *cobra.Comma
 		Use:   "autoupdate [path]",
 		Short: "Multi-provider dependency update engine",
 		Long: `A self-hosted Dependabot alternative that automatically discovers repositories,
-detects outdated dependencies across multiple ecosystems (Terraform, Go, etc.),
+detects outdated dependencies across multiple ecosystems (Terraform, Go, Python, JavaScript,
+Dart/Flutter, Ruby, Java, C#, Dockerfile, CI/CD pipelines),
 and creates Pull Requests to upgrade them.
 
 Supports GitHub, GitLab, and Azure DevOps as Git hosting providers.

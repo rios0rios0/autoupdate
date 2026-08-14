@@ -1,6 +1,6 @@
 # AutoUpdate
 
-AutoUpdate is a Go CLI tool that automatically discovers repositories across multiple Git providers (GitHub, GitLab, Azure DevOps), scans them for outdated dependencies, and creates Pull Requests with version upgrades. It supports Terraform, Go, Python, JavaScript, Ruby, Java, C#, Dockerfile, and CI/CD Pipeline ecosystems, with an extensible updater plugin interface.
+AutoUpdate is a Go CLI tool that automatically discovers repositories across multiple Git providers (GitHub, GitLab, Azure DevOps), scans them for outdated dependencies, and creates Pull Requests with version upgrades. It supports Terraform, Go, Python, JavaScript, Dart/Flutter, Ruby, Java, C#, Dockerfile, and CI/CD Pipeline ecosystems, with an extensible updater plugin interface.
 
 Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.
 
@@ -96,7 +96,7 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - **DI registration**: `internal/container.go` registers all layers bottom-up (repos -> entities -> commands -> controllers)
 - **Domain commands**: `internal/domain/commands/` — `LocalCommand`, `RunCommand`, `SelfUpdateCommand`, `VersionCommand`
 - **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `ProviderRepository`, `SelfUpdateRepository`
-- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem (terraform, golang, python, javascript, ruby, java, csharp, dockerfile, pipeline), plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations), and `selfupdate`
+- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem (terraform, golang, python, javascript, dart, ruby, java, csharp, dockerfile, pipeline), plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations), and `selfupdate`
 - **Support utilities**: `internal/support/` — filesystem helpers, remote file checker bridging `langforge` with `gitforge`, and the shared changelog writer (`changelog.go`, `chlog.go`) every updater goes through
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
 
@@ -137,7 +137,7 @@ Push transport is auto-detected from the origin remote URL:
 
 ### Changelog Writing
 - Every updater records entries through `internal/support/changelog.go` — never call `entities.InsertChangelogEntry` or write `CHANGELOG.md` from an updater. The helper detects the target repo's format and picks the destination so the formats cannot drift.
-- Six script-driven ecosystems stage the changelog (`StageLocalChangelog`/`StageRemoteChangelog` → `StagedChangelog`) and copy it inside the generated bash via `support.ChangelogUpdateScript()` (`CHANGELOG_FILE`/`CHANGELOG_DEST` from `StagedChangelog.Env()`); `terraform`, `dockerfile`, `pipeline` append `FileChange` values directly. On abandon, call `StagedChangelog.Discard(repoDir)` — a chlog fragment is a *new untracked* file that `git checkout -- .` would leave behind.
+- Seven script-driven ecosystems stage the changelog (`StageLocalChangelog`/`StageRemoteChangelog` → `StagedChangelog`) and copy it inside the generated bash via `support.ChangelogUpdateScript()` (`CHANGELOG_FILE`/`CHANGELOG_DEST` from `StagedChangelog.Env()`); `terraform`, `dockerfile`, `pipeline` append `FileChange` values directly. On abandon, call `StagedChangelog.Discard(repoDir)` — a chlog fragment is a *new untracked* file that `git checkout -- .` would leave behind.
 - chlog (`internal/support/chlog.go`, `internal/domain/entities/chlog.go`) is auto-detected from `.chlog.yaml`/`.chlog.yml` or a `.changes/unreleased/` directory. When present, each entry becomes one fragment file (`<unixnano>-<hex>.yaml` with `kind`/`body`/`time`) and `CHANGELOG.md` is left untouched. The `.chlog.yaml` is untrusted repo input: honor its `changesDir`/`unreleasedDir`/`kinds`, validate paths against escaping the repo root, and fail loudly on a broken file rather than falling back to `CHANGELOG.md`.
 
 ### Python Package Manager Selection

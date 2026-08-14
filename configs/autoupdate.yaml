@@ -70,6 +70,9 @@ updaters:
   csharp:
     enabled: true
     auto_complete: false
+  dart:
+    enabled: true
+    auto_complete: false
   pipeline:
     enabled: true
     auto_complete: false

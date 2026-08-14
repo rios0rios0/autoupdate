@@ -134,31 +134,11 @@ func executeLocalUpgrade(
 	opts LocalUpgradeOptions,
 ) (*LocalResult, error) {
 	// --- Git Setup (go-git) ---
-	gitCtx, err := gitlocal.NewLocalGitContext(repoDir, opts.PushAuth)
+	gitCtx, restore, err := gitlocal.PrepareBranch(repoDir, vCtx.BranchName, opts.PushAuth)
 	if err != nil {
 		return nil, err
 	}
-	originalBranch, err := gitCtx.CurrentBranch()
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine current branch: %w", err)
-	}
-	stashed, stashErr := gitCtx.StashIfDirty()
-	if stashErr != nil {
-		return nil, stashErr
-	}
-	if stashed {
-		defer func() {
-			if checkoutErr := gitCtx.CheckoutBranch(originalBranch); checkoutErr != nil {
-				logger.Warnf("Failed to switch back to %s: %v", originalBranch, checkoutErr)
-			}
-			if restoreErr := gitCtx.RestoreStash(); restoreErr != nil {
-				logger.Warnf("Failed to restore stash: %v", restoreErr)
-			}
-		}()
-	}
-	if err = gitCtx.CreateBranch(vCtx.BranchName); err != nil {
-		return nil, fmt.Errorf("failed to create branch %s: %w", vCtx.BranchName, err)
-	}
+	defer restore()
 
 	// --- Language Operations (bash) ---
 	outputStr, runErr := runLanguageUpgradeScript(ctx, repoDir, vCtx, project, opts)
@@ -222,40 +202,14 @@ func runLanguageUpgradeScript(
 		PythonBinary:  pythonBinary,
 	}
 
-	script := buildLocalUpgradeScript(params)
-
-	tmpDir, err := os.MkdirTemp("", "autoupdate-python-local-*")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	scriptPath := filepath.Join(tmpDir, "upgrade.sh")
-	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return "", fmt.Errorf("failed to write script: %w", writeErr)
-	}
-
-	runResult, runErr := localCmdRunner.Run(ctx, "bash", []string{scriptPath}, cmdrunner.RunOptions{
-		Dir: repoDir,
-		Env: buildLocalEnv(params),
+	return cmdrunner.RunScript(ctx, localCmdRunner, cmdrunner.ScriptRun{
+		Body:        buildLocalUpgradeScript(params),
+		TempPattern: "autoupdate-python-local-*",
+		Dir:         repoDir,
+		Env:         buildLocalEnv(params),
+		LogPrefix:   "python",
+		Verbose:     opts.Verbose,
 	})
-
-	var outputStr string
-	if runResult != nil {
-		outputStr = runResult.Output
-	}
-
-	if opts.Verbose {
-		logger.Debugf("[python] Script output:\n%s", outputStr)
-	}
-
-	if runErr != nil {
-		return "", fmt.Errorf(
-			"upgrade script failed: %w\nOutput:\n%s", runErr, outputStr,
-		)
-	}
-
-	return outputStr, nil
 }
 
 // --- local-mode internal types & helpers ---
@@ -310,26 +264,7 @@ func writeLocalAuth(sb *strings.Builder, params localUpgradeParams) {
 		return
 	}
 
-	sb.WriteString("# Set up git credentials for private package access\n")
-	sb.WriteString("TEMP_GITCONFIG=$(mktemp)\n")
-	sb.WriteString("cp ~/.gitconfig \"$TEMP_GITCONFIG\" 2>/dev/null || true\n")
-
-	switch params.ProviderName {
-	case "azuredevops":
-		sb.WriteString("echo '[url \"https://pat:'\"${AUTH_TOKEN}\"'@dev.azure.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-		sb.WriteString("echo '    insteadOf = https://dev.azure.com/' >> \"$TEMP_GITCONFIG\"\n")
-	case "github":
-		sb.WriteString(
-			"echo '[url \"https://x-access-token:'\"${AUTH_TOKEN}\"'@github.com/\"]' >> \"$TEMP_GITCONFIG\"\n",
-		)
-		sb.WriteString("echo '    insteadOf = https://github.com/' >> \"$TEMP_GITCONFIG\"\n")
-	case "gitlab":
-		sb.WriteString("echo '[url \"https://oauth2:'\"${AUTH_TOKEN}\"'@gitlab.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-		sb.WriteString("echo '    insteadOf = https://gitlab.com/' >> \"$TEMP_GITCONFIG\"\n")
-	}
-
-	sb.WriteString("export GIT_CONFIG_GLOBAL=\"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("trap 'rm -f \"$TEMP_GITCONFIG\"' EXIT\n\n")
+	sb.WriteString(support.GitAuthScript(params.ProviderName))
 }
 
 // buildLocalEnv returns the environment for the local upgrade script.

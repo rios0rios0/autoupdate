@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Does
 
-AutoUpdate is a self-hosted Dependabot alternative. It discovers repositories across Git providers (GitHub, GitLab, Azure DevOps), detects outdated dependencies, and creates Pull Requests with version upgrades. Supports Terraform, Go, Python, JavaScript, Ruby, Java, C#, Dockerfile, and CI/CD Pipeline ecosystems.
+AutoUpdate is a self-hosted Dependabot alternative. It discovers repositories across Git providers (GitHub, GitLab, Azure DevOps), detects outdated dependencies, and creates Pull Requests with version upgrades. Supports Terraform, Go, Python, JavaScript, Dart/Flutter, Ruby, Java, C#, Dockerfile, and CI/CD Pipeline ecosystems.
 
 Three modes: **local** (`autoupdate [path]`) updates a single repo, **batch** (`autoupdate run`) reads a config file and processes multiple repos/providers, **self-update** (`autoupdate self-update`) downloads the latest release. A `version` command prints the current build version.
 
@@ -89,7 +89,7 @@ the target repository's format and picks the destination, so the two formats can
 - `RemoteChangelogChanges(ctx, provider, repo, entries, fileChanges)` — appends `FileChange` values
   for the provider API (batch mode), used by `terraform`, `dockerfile`, and `pipeline`.
 - `StageLocalChangelog` / `StageRemoteChangelog` — return a `StagedChangelog` (temp file plus
-  repository-relative destination) for the six ecosystems whose upgrade runs through a generated bash
+  repository-relative destination) for the seven ecosystems whose upgrade runs through a generated bash
   script. The script gets `CHANGELOG_FILE` and `CHANGELOG_DEST` from `StagedChangelog.Env()` and
   performs the copy with the shared snippet `support.ChangelogUpdateScript()`. Call
   `StagedChangelog.Discard(repoDir)` when abandoning a run: a chlog fragment is a *new untracked*

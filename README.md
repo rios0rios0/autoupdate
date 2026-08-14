@@ -21,7 +21,7 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 - **Standalone Local Mode**: Run `autoupdate .` on any local repo -- auto-detects the Git provider from the remote URL, upgrades dependencies, and creates a PR
 - **Multi-Provider**: Supports GitHub, GitLab, and Azure DevOps as Git hosting providers
 - **API-Based Discovery**: Automatically discovers all repositories in an organization, group, or user account
-- **Extensible Updaters**: Plugin-based architecture for dependency ecosystems (Terraform modules, Go projects, and more coming)
+- **Extensible Updaters**: Plugin-based architecture for dependency ecosystems -- see [Supported Ecosystems](#supported-ecosystems)
 - **Changelog Integration**: Automatically updates `CHANGELOG.md` (Keep a Changelog format) when the target repository has one, or writes a [chlog](https://github.com/luizjhonata/chlog) fragment when the repository uses that format instead -- see [Changelog Formats](#changelog-formats)
 - **Cronjob-Ready**: Designed to run unattended on a schedule for daily dependency updates
 - **Dry Run Mode**: Preview all changes before creating any PRs
@@ -29,10 +29,18 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 
 ## Supported Ecosystems
 
-| Ecosystem | What it does                                                               |
-|-----------|----------------------------------------------------------------------------|
-| Terraform | Detects Git-based module sources with `?ref=` tags, upgrades to latest tag |
-| Go        | Upgrades the Go version in every `go.mod` (root and nested modules), running `go get -u -t ./...` and `go mod tidy` in each |
+| Ecosystem      | Detected by                            | What it does                                                                                                                                                    |
+|----------------|----------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Terraform      | `*.tf`                                 | Detects Git-based module sources with `?ref=` tags, upgrades to latest tag                                                                                       |
+| Go             | `go.mod`                               | Upgrades the Go version in every `go.mod` (root and nested modules), running `go get -u -t ./...` and `go mod tidy` in each                                       |
+| Python         | `pyproject.toml`, `requirements.txt`   | Upgrades through the manager the repository already uses -- PDM or pip -- never migrating it from one to the other                                               |
+| JavaScript     | `package.json`                         | Upgrades with the package manager the lockfile names (`pnpm`, `yarn`, or `npm`) and bumps `.nvmrc`/`.node-version`                                                |
+| Dart/Flutter   | `pubspec.yaml`                         | Runs `dart pub upgrade --major-versions` (or `flutter pub` for a Flutter project), raising the constraints in `pubspec.yaml`, and bumps the `.fvmrc` SDK pin       |
+| Ruby           | `Gemfile`, `*.gemspec`                 | Runs `bundle update` and bumps `.ruby-version`                                                                                                                   |
+| Java           | `build.gradle`, `pom.xml`              | Upgrades dependencies through Gradle or Maven, whichever the repository builds with                                                                              |
+| C#             | `*.csproj`, `*.sln`                    | Upgrades NuGet package references                                                                                                                                |
+| Dockerfile     | `Dockerfile`                           | Upgrades base image tags, verifying each against the registry                                                                                                    |
+| Pipeline/CI    | pipeline YAML                          | Upgrades pinned action and template versions                                                                                                                     |
 
 ## Installation
 
@@ -109,8 +117,8 @@ exclude_repos:
   - '*/oui'                                         # any org or org/project ending in /oui
   - 'rios0rios0/private-fork'                       # exact GitHub path
 
-# The updaters section is optional. All 6 updaters (terraform, golang,
-# python, javascript, pipeline, dockerfile) are enabled by default.
+# The updaters section is optional. All 10 updaters (terraform, golang, python,
+# javascript, dart, ruby, java, csharp, pipeline, dockerfile) are enabled by default.
 # Default config is fetched from GitHub and merged with your overrides.
 # Only specify what you want to change:
 updaters:
@@ -293,7 +301,7 @@ Batch mode -- discover and update repositories using a config file.
 |-----------------|------------------------------------------------------------------|
 | `--provider`    | Only process this provider (github/gitlab/azuredevops)           |
 | `--org`         | Only process this organization/group                             |
-| `--updater`     | Only run this updater (terraform/golang)                         |
+| `--updater`     | Only run this updater (terraform, golang, python, javascript, dart, ruby, java, csharp, pipeline, dockerfile) |
 | `--concurrency` | Repositories processed in parallel (default 4; 1 = sequential)   |
 
 ## Contributing

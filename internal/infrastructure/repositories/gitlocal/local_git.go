@@ -72,6 +72,60 @@ func NewLocalGitContext(repoDir string, resolver PushAuthResolver) (*LocalGitCon
 	}, nil
 }
 
+// PrepareBranch opens the repository at repoDir, parks any uncommitted work in
+// a stash, and creates branchName from HEAD — the opening move every local-mode
+// updater makes before it lets a package manager loose on the worktree.
+//
+// The returned restore function puts the checkout back the way it was found:
+// the branch the caller started on, with the stashed work reapplied. It is a
+// no-op when there was nothing to stash, so callers defer it unconditionally.
+// It only logs its failures, because it runs while the caller is already
+// unwinding and a cleanup error must not displace the error that stopped the
+// run.
+func PrepareBranch(
+	repoDir, branchName string,
+	resolver PushAuthResolver,
+) (*LocalGitContext, func(), error) {
+	gitCtx, err := NewLocalGitContext(repoDir, resolver)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	originalBranch, err := gitCtx.CurrentBranch()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to determine current branch: %w", err)
+	}
+
+	stashed, err := gitCtx.StashIfDirty()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	restore := func() {
+		// Nothing was stashed, so there is nothing to put back. The caller
+		// still gets a function it can defer unconditionally.
+	}
+	if stashed {
+		restore = func() {
+			if checkoutErr := gitCtx.CheckoutBranch(originalBranch); checkoutErr != nil {
+				logger.Warnf("Failed to switch back to %s: %v", originalBranch, checkoutErr)
+			}
+			if restoreErr := gitCtx.RestoreStash(); restoreErr != nil {
+				logger.Warnf("Failed to restore stash: %v", restoreErr)
+			}
+		}
+	}
+
+	// A failed branch creation leaves the stash sitting there unless it is
+	// unwound here — the caller never gets the restore function to defer.
+	if err = gitCtx.CreateBranch(branchName); err != nil {
+		restore()
+		return nil, nil, fmt.Errorf("failed to create branch %s: %w", branchName, err)
+	}
+
+	return gitCtx, restore, nil
+}
+
 // StashIfDirty checks if the worktree has uncommitted changes and
 // stashes them if so.  Returns true if a stash was created.  The
 // caller must call RestoreStash after the operation completes.
