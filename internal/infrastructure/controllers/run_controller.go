@@ -73,7 +73,7 @@ func (it *RunController) AddFlags(cmd *cobra.Command) {
 	cmd.Flags().String("provider", "", "Only process this provider (github, gitlab, azuredevops)")
 	cmd.Flags().String("org", "", "Only process this organization/group")
 	cmd.Flags().String("updater", "",
-		"Only run this updater (terraform, golang, python, javascript, pipeline, dockerfile)",
+		"Only run this updater (terraform, golang, python, javascript, dart, ruby, java, csharp, pipeline, dockerfile)",
 	)
 	cmd.Flags().Int("concurrency", 0,
 		"Number of repositories to process in parallel (default 4; 1 = sequential)",

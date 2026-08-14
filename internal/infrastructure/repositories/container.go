@@ -3,6 +3,7 @@ package repositories
 import (
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	csRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/csharp"
+	dartRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dart"
 	dfRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dockerfile"
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
 	jvRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/java"
@@ -56,6 +57,7 @@ func RegisterProviders(container *dig.Container) error {
 		reg.Register(rbRepo.NewUpdaterRepository())
 		reg.Register(jvRepo.NewUpdaterRepository())
 		reg.Register(csRepo.NewUpdaterRepository())
+		reg.Register(dartRepo.NewUpdaterRepository())
 		reg.Register(plRepo.NewUpdaterRepository())
 		reg.Register(dfRepo.NewUpdaterRepository())
 		return reg
