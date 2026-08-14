@@ -101,9 +101,10 @@ func PrepareBranch(
 		return nil, nil, err
 	}
 
-	// Nothing was stashed, so there is nothing to put back; the caller still
-	// gets a function it can defer unconditionally.
-	restore := func() {}
+	restore := func() {
+		// Nothing was stashed, so there is nothing to put back. The caller
+		// still gets a function it can defer unconditionally.
+	}
 	if stashed {
 		restore = func() {
 			if checkoutErr := gitCtx.CheckoutBranch(originalBranch); checkoutErr != nil {
