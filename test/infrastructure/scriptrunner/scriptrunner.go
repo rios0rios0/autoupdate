@@ -47,7 +47,11 @@ func Run(t *testing.T, repoDir, fragment string, opts Options) string {
 
 	require.NoError(t, os.WriteFile(scriptPath, []byte(script), scriptMode))
 
-	cmd := exec.CommandContext(t.Context(), "bash", scriptPath)
+	// #nosec G204 -- both arguments are produced here: the interpreter is
+	// resolved by this process and the script is a file this package just wrote
+	// into t.TempDir(). Naming the shell by an absolute path is what keeps the
+	// stub directory below from ever standing in for it.
+	cmd := exec.CommandContext(t.Context(), interpreter(t), scriptPath)
 	cmd.Dir = repoDir
 	cmd.Env = append(os.Environ(), environment(t, workDir, opts)...)
 
@@ -55,6 +59,27 @@ func Run(t *testing.T, repoDir, fragment string, opts Options) string {
 	require.NoError(t, err, "script fragment failed:\n%s\n--- script ---\n%s", output, script)
 
 	return string(output)
+}
+
+// interpreter resolves the shell to an absolute path in the parent process,
+// rather than leaving the bare name for the child to resolve.
+//
+// This package deliberately puts a writable directory at the front of the PATH
+// the fragment runs with, because shadowing a package manager is how the run is
+// kept hermetic. The interpreter itself must never be reachable that way, so it
+// is looked up once, here, against the PATH the test binary was started with.
+func interpreter(t *testing.T) string {
+	t.Helper()
+
+	resolved, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not available on this platform")
+	}
+
+	absolute, err := filepath.Abs(resolved)
+	require.NoError(t, err)
+
+	return absolute
 }
 
 // environment renders the requested variables and puts the stub directory ahead

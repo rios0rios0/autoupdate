@@ -32,6 +32,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
   the image was already newer than the version being rolled out
 - fixed pins that name no version at all -- `lts/*` in a `.nvmrc`, `system` in a `.ruby-version`, a JRuby
   or TruffleRuby release -- being replaced with a version number from an unrelated release channel
+- fixed build metadata being read as a pre-release when two pins are compared. Semantic Versioning
+  excludes everything after a `+` from precedence, so `1.0.0+build.1` and `1.0.0` name the same release;
+  reading it as a pre-release instead rewrote one to the other as though a pre-release were being
+  promoted, and refused the genuine upgrade from `1.0.0-rc.1` to `1.0.0+build.1`
 
 ### Changed
 

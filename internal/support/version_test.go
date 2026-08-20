@@ -26,6 +26,10 @@ type versionCase struct {
 // versionCases covers the shapes that reach a version pin in the wild. The
 // downgrade rows are the ones that matter: each is a pull request autoupdate
 // used to open against a repository that had moved ahead of the release feed.
+//
+// The build metadata rows guard the other half of semver precedence: everything
+// after a "+" is excluded from it, so a difference that exists only there is
+// neither an upgrade nor a downgrade and must leave the pin alone.
 func versionCases() []versionCase {
 	return []versionCase{
 		{"newer patch", "24.19.0", "24.19.1", true},
@@ -49,6 +53,14 @@ func versionCases() []versionCase {
 		{"final replaced by a pre-release", "9.0.100", "9.0.100-rc.2", false},
 		{"newer pre-release", "9.0.100-rc.1", "9.0.100-rc.2", true},
 		{"older pre-release", "9.0.100-rc.2", "9.0.100-rc.1", false},
+		{"build metadata added to an unchanged release", "1.0.0", "1.0.0+build.1", false},
+		{"build metadata dropped from an unchanged release", "1.0.0+build.1", "1.0.0", false},
+		{"build metadata differing on both sides", "1.0.0+build.1", "1.0.0+build.2", false},
+		{"build metadata on a newer release", "1.0.0+build.9", "1.0.1+build.1", true},
+		{"build metadata on an older release", "1.0.1+build.1", "1.0.0+build.9", false},
+		{"pre-release promoted to a final build", "9.0.100-rc.1", "9.0.100+build.5", true},
+		{"final build replaced by a pre-release", "9.0.100+build.5", "9.0.100-rc.1", false},
+		{"pre-release carrying build metadata", "9.0.100-rc.1+build.5", "9.0.100-rc.2", true},
 		{"alias pin", "lts/*", "24.19.0", false},
 		{"named pin", "system", "3.4.1", false},
 		{"alternative implementation pin", "jruby-9.4.0.0", "3.4.1", false},

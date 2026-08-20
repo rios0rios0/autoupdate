@@ -128,6 +128,12 @@ the `sed` that rewrites them compares nothing. `internal/support/version_test.go
 through both implementations, so they cannot drift. Any script fragment that calls a guard must emit
 `VersionGuardScript()` itself rather than inheriting the definition from whatever ran before it.
 
+Comparison follows Semantic Versioning precedence on both sides: a final release outranks any
+pre-release of the same version, and build metadata is excluded entirely. `parseVersion` captures what
+follows a `+` only to keep the version recognisable and then drops it, so `1.0.0+build.1` and `1.0.0`
+compare equal and neither is rewritten to the other — folding it into the pre-release slot instead got
+that wrong in both directions.
+
 Anything not shaped like a dotted numeric version — `lts/*`, `system`, `jruby-9.4.0.0`, `3.13t` — fails
 the comparison and the pin is left alone: those are deliberate choices by the repository being updated,
 and a release number from an unrelated channel is not a comparable replacement. `terraform`,

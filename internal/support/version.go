@@ -9,7 +9,8 @@ import (
 )
 
 // versionShape matches a version made of dotted numeric segments, with an
-// optional leading "v" and an optional pre-release or build identifier.
+// optional leading "v", an optional pre-release identifier and optional build
+// metadata, each captured separately.
 //
 // The number of segments is deliberately open: a `.ruby-version` holds three,
 // a `.nvmrc` may hold one ("24"), a CI pin two ("3.13"), and a JRuby release
@@ -17,7 +18,7 @@ import (
 // "jruby-9.4.0.0", "3.13t" — fails to match on purpose. Those are deliberate
 // choices by the repository being updated, and a released version number is not
 // a comparable replacement for them.
-var versionShape = regexp.MustCompile(`^[vV]?(\d+(?:\.\d+)*)(?:[-+](.+))?$`)
+var versionShape = regexp.MustCompile(`^[vV]?(\d+(?:\.\d+)*)(?:-([^+]+))?(?:\+(.+))?$`)
 
 // IsNewerVersion reports whether candidate names a strictly newer release than
 // current.
@@ -51,6 +52,14 @@ func IsNewerVersion(current, candidate string) bool {
 // parseVersion splits a version into its numeric release segments and the
 // pre-release identifier that follows them, reporting whether the string is
 // shaped like a version at all.
+//
+// Build metadata is matched so that a version carrying it is still recognised,
+// and then discarded: semver excludes everything after a "+" from precedence,
+// so "1.0.0+build.1" and "1.0.0" name the same release and neither is an
+// upgrade over the other. Reading it as a pre-release instead would get that
+// wrong in both directions — it would rewrite "1.0.0+build.1" to "1.0.0" as
+// though a pre-release were being promoted, and it would refuse the real
+// upgrade from "1.0.0-rc.1" to "1.0.0+build.1".
 func parseVersion(version string) ([]int, string, bool) {
 	match := versionShape.FindStringSubmatch(strings.TrimSpace(version))
 	if match == nil {
@@ -102,10 +111,8 @@ func compareRelease(candidate, current []int) int {
 // pre-release of the same version, and two pre-releases are ordered by the
 // identifier rules semver defines.
 //
-// Build metadata (everything after a "+") is folded into the same slot. Semver
-// ignores it for precedence, so treating it as a pre-release only ever makes
-// the answer "not newer" — which is the safe direction for a function that
-// decides whether to rewrite a file.
+// Build metadata never reaches here: parseVersion drops it, so two versions
+// differing only after a "+" compare equal and the pin is left alone.
 func comparePrerelease(candidate, current string) int {
 	if candidate == current {
 		return 0
@@ -150,7 +157,8 @@ autoupdate_version_is_newer() {
         function release(v) { sub(/^[vV]/, "", v); sub(/[-+].*$/, "", v); return v }
         function prerelease(v,   i) {
             sub(/^[vV]/, "", v)
-            i = match(v, /[-+]/)
+            sub(/\+.*$/, "", v)
+            i = index(v, "-")
             if (i == 0) return ""
             return substr(v, i + 1)
         }
@@ -170,7 +178,8 @@ autoupdate_version_is_newer() {
                 if (candidate_segment < current_segment) exit 1
             }
 
-            # Equal releases: a final release outranks any pre-release.
+            # Equal releases: a final release outranks any pre-release, and
+            # build metadata is excluded from precedence entirely.
             candidate_pre = prerelease(cand)
             current_pre = prerelease(cur)
             if (candidate_pre == "" && current_pre != "") exit 0
