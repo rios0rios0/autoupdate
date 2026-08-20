@@ -81,7 +81,7 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionCon
 		pyVersionContent, readErr := os.ReadFile(filepath.Join(repoDir, ".python-version"))
 		if readErr == nil {
 			currentVersion := parsePythonVersionFile(string(pyVersionContent))
-			needsVersionUpgrade = currentVersion != "" && currentVersion != latestPyVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestPyVersion)
 			logger.Infof(
 				"[python] Current .python-version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,

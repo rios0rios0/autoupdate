@@ -305,7 +305,7 @@ func (u *UpdaterRepository) fetchLatestSDK(ctx context.Context, toolchain string
 
 // newVersionContext assembles the context and picks the branch name.
 func newVersionContext(toolchain, latest, currentPin string) *versionContext {
-	needsVersionUpgrade := latest != "" && currentPin != "" && currentPin != latest
+	needsVersionUpgrade := support.IsNewerVersion(currentPin, latest)
 	if currentPin != "" {
 		logger.Infof("[dart] Current %s pin: %s (upgrade needed: %v)", FvmConfigFile, currentPin, needsVersionUpgrade)
 	}

@@ -357,7 +357,7 @@ func resolveVersionContext(
 		content, err := provider.GetFileContent(ctx, repo, ".ruby-version")
 		if err == nil {
 			currentVersion := parseRubyVersionFile(content)
-			needsVersionUpgrade = currentVersion != "" && currentVersion != latestRbVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestRbVersion)
 			logger.Infof(
 				"[ruby] Current .ruby-version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -484,20 +484,25 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 }
 
 func writeRubyUpgradeCommands(sb *strings.Builder) {
-	// Update .ruby-version if it exists and a new version is available
+	// Update .ruby-version only when the fetched release is genuinely ahead of
+	// the pin. The guard also declines every non-numeric pin, so a repository
+	// running JRuby or TruffleRuby is no longer handed an MRI version number.
+	sb.WriteString(support.VersionGuardScript())
 	sb.WriteString("# Check and update Ruby version\n")
 	sb.WriteString("RUBY_VERSION_CHANGED=false\n")
 	sb.WriteString("if [ -n \"${TARGET_RUBY_VERSION:-}\" ] && [ -f \".ruby-version\" ]; then\n")
 	sb.WriteString("    CURRENT_RB_VERSION=$(head -1 .ruby-version | tr -d '[:space:]')\n")
 	sb.WriteString(
-		"    if [ -n \"$CURRENT_RB_VERSION\" ] && [ \"$CURRENT_RB_VERSION\" != \"$TARGET_RUBY_VERSION\" ]; then\n",
+		"    if autoupdate_version_is_newer \"$TARGET_RUBY_VERSION\" \"$CURRENT_RB_VERSION\"; then\n",
 	)
 	sb.WriteString("        echo \"Updating .ruby-version from $CURRENT_RB_VERSION to $TARGET_RUBY_VERSION...\"\n")
 	sb.WriteString("        echo \"$TARGET_RUBY_VERSION\" > .ruby-version\n")
 	sb.WriteString("        RUBY_VERSION_CHANGED=true\n")
 	sb.WriteString("        echo \"RUBY_VERSION_UPDATED=true\"\n")
 	sb.WriteString("    else\n")
-	sb.WriteString("        echo \"Ruby version already at $CURRENT_RB_VERSION, skipping version update\"\n")
+	sb.WriteString(
+		"        echo \"Keeping .ruby-version at $CURRENT_RB_VERSION (not older than $TARGET_RUBY_VERSION)\"\n",
+	)
 	sb.WriteString("        echo \"RUBY_VERSION_UPDATED=false\"\n")
 	sb.WriteString("    fi\n")
 	sb.WriteString("else\n")
@@ -515,6 +520,9 @@ func writeRubyUpgradeCommands(sb *strings.Builder) {
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
+	// Emitted here as well as by the upgrade block, so the fragment carries the
+	// comparison it depends on instead of inheriting it from whatever ran first.
+	sb.WriteString(support.VersionGuardScript())
 	sb.WriteString("# Update Dockerfile ruby image tags when the Ruby version was bumped.\n")
 	sb.WriteString("if [ \"$RUBY_VERSION_CHANGED\" = \"true\" ]; then\n")
 	sb.WriteString("    echo \"Updating Dockerfile ruby image tags to $TARGET_RUBY_VERSION...\"\n")
@@ -523,7 +531,9 @@ func writeDockerfileUpdate(sb *strings.Builder) {
 			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
 			"-print0 | while IFS= read -r -d '' df; do\n",
 	)
-	sb.WriteString("        if grep -q 'ruby:[0-9]' \"$df\"; then\n")
+	sb.WriteString(
+		"        if autoupdate_image_tag_is_older \"$df\" \"ruby\" \"$TARGET_RUBY_VERSION\"; then\n",
+	)
 	sb.WriteString(
 		"            sed \"s|ruby:[0-9][0-9.]*|ruby:${TARGET_RUBY_VERSION}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
 	)

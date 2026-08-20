@@ -75,7 +75,7 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionCon
 		rbVersionContent, readErr := os.ReadFile(filepath.Join(repoDir, ".ruby-version"))
 		if readErr == nil {
 			currentVersion := parseRubyVersionFile(string(rbVersionContent))
-			needsVersionUpgrade = currentVersion != "" && currentVersion != latestRbVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestRbVersion)
 			logger.Infof(
 				"[ruby] Current .ruby-version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,

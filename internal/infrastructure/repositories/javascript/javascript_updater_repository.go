@@ -422,7 +422,7 @@ func resolveVersionContext(
 	if latestNodeVersion != "" {
 		currentVersion := readCurrentNodeVersion(ctx, provider, repo)
 		if currentVersion != "" {
-			needsVersionUpgrade = currentVersion != latestNodeVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestNodeVersion)
 			logger.Infof(
 				"[javascript] Current Node.js version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -569,7 +569,11 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 }
 
 func writeJSUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
-	// Update .nvmrc / .node-version if it exists and a new version is available
+	// Update .nvmrc / .node-version when the release feed is genuinely ahead of
+	// the pin. The feed reports the newest *LTS* line, so a repository tracking
+	// a newer current release is ahead of it, and rewriting the pin would move
+	// the project backwards under a pull request titled as an upgrade.
+	sb.WriteString(support.VersionGuardScript())
 	sb.WriteString("# Check and update Node.js version\n")
 	sb.WriteString("NODE_VERSION_CHANGED=false\n")
 	sb.WriteString("if [ -n \"${NODE_VERSION:-}\" ]; then\n")
@@ -577,12 +581,16 @@ func writeJSUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 	sb.WriteString("        if [ -f \"$VERSION_FILE\" ]; then\n")
 	sb.WriteString("            CURRENT_NODE_VERSION=$(head -1 \"$VERSION_FILE\" | tr -d '[:space:]' | sed 's/^v//')\n")
 	sb.WriteString(
-		"            if [ -n \"$CURRENT_NODE_VERSION\" ] && [ \"$CURRENT_NODE_VERSION\" != \"$NODE_VERSION\" ]; then\n",
+		"            if autoupdate_version_is_newer \"$NODE_VERSION\" \"$CURRENT_NODE_VERSION\"; then\n",
 	)
 	sb.WriteString("                echo \"Updating $VERSION_FILE from $CURRENT_NODE_VERSION to $NODE_VERSION...\"\n")
 	sb.WriteString("                echo \"$NODE_VERSION\" > \"$VERSION_FILE\"\n")
 	sb.WriteString("                NODE_VERSION_CHANGED=true\n")
 	sb.WriteString("                echo \"NODE_VERSION_UPDATED=true\"\n")
+	sb.WriteString("            else\n")
+	sb.WriteString(
+		"                echo \"Keeping $VERSION_FILE at $CURRENT_NODE_VERSION (not older than $NODE_VERSION)\"\n",
+	)
 	sb.WriteString("            fi\n")
 	sb.WriteString("        fi\n")
 	sb.WriteString("    done\n")
@@ -611,6 +619,9 @@ func writeJSUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
+	// Emitted here as well as by the upgrade block, so the fragment carries the
+	// comparison it depends on instead of inheriting it from whatever ran first.
+	sb.WriteString(support.VersionGuardScript())
 	sb.WriteString("# Update Dockerfile node image tags when the Node.js version was bumped.\n")
 	sb.WriteString("if [ \"$NODE_VERSION_CHANGED\" = \"true\" ]; then\n")
 	sb.WriteString("    echo \"Updating Dockerfile node image tags to $NODE_VERSION...\"\n")
@@ -619,7 +630,7 @@ func writeDockerfileUpdate(sb *strings.Builder) {
 			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
 			"-print0 | while IFS= read -r -d '' df; do\n",
 	)
-	sb.WriteString("        if grep -q 'node:[0-9]' \"$df\"; then\n")
+	sb.WriteString("        if autoupdate_image_tag_is_older \"$df\" \"node\" \"$NODE_VERSION\"; then\n")
 	sb.WriteString(
 		"            sed \"s|node:[0-9][0-9.]*|node:${NODE_VERSION}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
 	)

@@ -491,7 +491,7 @@ func resolveVersionContext(
 		content, err := provider.GetFileContent(ctx, repo, ".python-version")
 		if err == nil {
 			currentVersion := parsePythonVersionFile(content)
-			needsVersionUpgrade = currentVersion != "" && currentVersion != latestPyVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestPyVersion)
 			logger.Infof(
 				"[python] Current .python-version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -619,26 +619,34 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 	sb.WriteString(support.GitAuthScript(params.ProviderName))
 }
 
-func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
-	// Update .python-version if it exists and a new version is available
+// writePythonVersionPin emits the .python-version rewrite, guarded so the pin
+// only ever moves forwards: the feed reports the newest *stable* series, so a
+// repository tracking a newer pre-release series is ahead of it and keeps its
+// pin rather than being rolled back.
+func writePythonVersionPin(sb *strings.Builder) {
+	sb.WriteString(support.VersionGuardScript())
 	sb.WriteString("# Check and update Python version\n")
 	sb.WriteString("PYTHON_VERSION_CHANGED=false\n")
 	sb.WriteString("if [ -n \"${PYTHON_VERSION:-}\" ] && [ -f \".python-version\" ]; then\n")
 	sb.WriteString("    CURRENT_PY_VERSION=$(head -1 .python-version | tr -d '[:space:]')\n")
-	sb.WriteString(
-		"    if [ -n \"$CURRENT_PY_VERSION\" ] && [ \"$CURRENT_PY_VERSION\" != \"$PYTHON_VERSION\" ]; then\n",
-	)
+	sb.WriteString("    if autoupdate_version_is_newer \"$PYTHON_VERSION\" \"$CURRENT_PY_VERSION\"; then\n")
 	sb.WriteString("        echo \"Updating .python-version from $CURRENT_PY_VERSION to $PYTHON_VERSION...\"\n")
 	sb.WriteString("        echo \"$PYTHON_VERSION\" > .python-version\n")
 	sb.WriteString("        PYTHON_VERSION_CHANGED=true\n")
 	sb.WriteString("        echo \"PYTHON_VERSION_UPDATED=true\"\n")
 	sb.WriteString("    else\n")
-	sb.WriteString("        echo \"Python version already at $CURRENT_PY_VERSION, skipping version update\"\n")
+	sb.WriteString(
+		"        echo \"Keeping .python-version at $CURRENT_PY_VERSION (not older than $PYTHON_VERSION)\"\n",
+	)
 	sb.WriteString("        echo \"PYTHON_VERSION_UPDATED=false\"\n")
 	sb.WriteString("    fi\n")
 	sb.WriteString("else\n")
 	sb.WriteString("    echo \"PYTHON_VERSION_UPDATED=false\"\n")
 	sb.WriteString("fi\n\n")
+}
+
+func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
+	writePythonVersionPin(sb)
 
 	// Create virtual environment and upgrade dependencies
 	sb.WriteString("# Create virtual environment for dependency upgrade\n")
@@ -779,6 +787,9 @@ func writeEggInfoGitignore(sb *strings.Builder) {
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
+	// Emitted here as well as by the upgrade block, so the fragment carries the
+	// comparison it depends on instead of inheriting it from whatever ran first.
+	sb.WriteString(support.VersionGuardScript())
 	sb.WriteString("# Update Dockerfile python image tags when the Python version was bumped.\n")
 	sb.WriteString("if [ \"$PYTHON_VERSION_CHANGED\" = \"true\" ]; then\n")
 	sb.WriteString("    echo \"Updating Dockerfile python image tags to $PYTHON_VERSION...\"\n")
@@ -787,7 +798,7 @@ func writeDockerfileUpdate(sb *strings.Builder) {
 			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
 			"-print0 | while IFS= read -r -d '' df; do\n",
 	)
-	sb.WriteString("        if grep -q 'python:[0-9]' \"$df\"; then\n")
+	sb.WriteString("        if autoupdate_image_tag_is_older \"$df\" \"python\" \"$PYTHON_VERSION\"; then\n")
 	sb.WriteString(
 		"            sed \"s|python:[0-9][0-9.]*|python:${PYTHON_VERSION}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
 	)

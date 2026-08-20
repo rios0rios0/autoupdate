@@ -16,6 +16,23 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Fixed
+
+- fixed the version pin rewrites downgrading a repository that tracks a release ahead of the one the
+  release feed reports. Every pin was compared with a plain "is it different?" check, so a `.nvmrc`
+  reading `26.7.0` was rewritten to the `24.19.0` LTS the Node.js feed returns -- inside a pull request
+  titled as an upgrade. A rewrite now requires the fetched release to be strictly newer, and the rule
+  lives in one place (`support.IsNewerVersion` and the bash guard it emits for the generated upgrade
+  scripts) rather than being restated per ecosystem. It covers `.nvmrc`, `.node-version`,
+  `.python-version`, `.ruby-version`, `.java-version`, `global.json`, `.fvmrc`, the `go` directive, the
+  base image tags in a `Dockerfile` and the language versions in a CI pipeline
+- fixed the Go directive being written back to the target version after `go mod tidy` raised it, which
+  turned a dependency's Go requirement into a downgrade on the next run
+- fixed the base image tags in a `Dockerfile` being rewritten whenever the language pin moved, even when
+  the image was already newer than the version being rolled out
+- fixed pins that name no version at all -- `lts/*` in a `.nvmrc`, `system` in a `.ruby-version`, a JRuby
+  or TruffleRuby release -- being replaced with a version number from an unrelated release channel
+
 ### Changed
 
 - changed the Go module dependencies to their latest versions

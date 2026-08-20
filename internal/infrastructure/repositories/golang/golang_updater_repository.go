@@ -682,6 +682,9 @@ func writeGitLabAuth(sb *strings.Builder) {
 // module under a subdirectory — and `go get ./...` never crosses a module
 // boundary, so each module has to be upgraded in its own directory.
 func writeGoUpgradeCommands(sb *strings.Builder) {
+	// Defined once, outside the per-module loop that uses it.
+	sb.WriteString(support.VersionGuardScript())
+
 	writeGoModuleDiscovery(sb)
 
 	sb.WriteString("GO_VERSION_CHANGED=false\n\n")
@@ -755,7 +758,7 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("    if [ -z \"$CURRENT_GO_VERSION\" ]; then\n")
 	sb.WriteString("        echo \"WARNING: no go directive found in go.mod, skipping version update\"\n")
 	sb.WriteString("        echo \"GO_VERSION_UPDATED=false\"\n")
-	sb.WriteString("    elif [ \"$CURRENT_GO_VERSION\" != \"$GO_VERSION\" ]; then\n")
+	sb.WriteString("    elif autoupdate_version_is_newer \"$GO_VERSION\" \"$CURRENT_GO_VERSION\"; then\n")
 	sb.WriteString("        echo \"Updating Go version from $CURRENT_GO_VERSION to $GO_VERSION...\"\n")
 	sb.WriteString(
 		"        sed \"s/^go [0-9][0-9.]*$/go ${GO_VERSION}/\" go.mod > go.mod.tmp && mv go.mod.tmp go.mod\n",
@@ -770,7 +773,9 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("            echo \"GO_VERSION_UPDATED=false\"\n")
 	sb.WriteString("        fi\n")
 	sb.WriteString("    else\n")
-	sb.WriteString("        echo \"Go version already at $GO_VERSION, skipping directive update\"\n")
+	sb.WriteString(
+		"        echo \"Keeping the go directive at $CURRENT_GO_VERSION (not older than $GO_VERSION)\"\n",
+	)
 	sb.WriteString("        echo \"GO_VERSION_UPDATED=false\"\n")
 	sb.WriteString("    fi\n\n")
 
@@ -791,7 +796,7 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("    # Re-apply Go version if go mod tidy normalised it\n")
 	sb.WriteString("    AFTER_TIDY_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}' || true)\n")
 	sb.WriteString(
-		"    if [ -n \"$AFTER_TIDY_VERSION\" ] && [ \"$AFTER_TIDY_VERSION\" != \"$GO_VERSION\" ]; then\n",
+		"    if autoupdate_version_is_newer \"$GO_VERSION\" \"$AFTER_TIDY_VERSION\"; then\n",
 	)
 	sb.WriteString("        echo \"Re-applying Go version (go mod tidy changed it to $AFTER_TIDY_VERSION)...\"\n")
 	sb.WriteString(

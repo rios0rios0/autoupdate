@@ -80,7 +80,7 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionCon
 	if latestNodeVersion != "" {
 		currentVersion := readLocalNodeVersion(repoDir)
 		if currentVersion != "" {
-			needsVersionUpgrade = currentVersion != latestNodeVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestNodeVersion)
 			logger.Infof(
 				"[javascript] Current Node.js version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,

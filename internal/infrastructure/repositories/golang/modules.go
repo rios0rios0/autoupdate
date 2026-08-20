@@ -107,8 +107,12 @@ func goModPathFor(dir string) string {
 }
 
 // resolveVersionUpgradeNeed reports whether *any* module in the repository
-// declares a go directive other than targetVersion, the module directory the
+// declares a go directive older than targetVersion, the module directory the
 // decision was based on, and whether a module could be read at all.
+//
+// "Older than", not "different from": a module already targeting a newer Go
+// than the latest stable release is ahead of it, and rewriting its directive
+// would downgrade the module inside a pull request titled as an upgrade.
 //
 // The answer has to span every module because the upgrade runs in every
 // module: deciding from the root alone would label a run "dependencies only"
@@ -122,7 +126,7 @@ func resolveVersionUpgradeNeed(
 	targetVersion string,
 ) (bool, string, bool) {
 	rootContent, rootErr := read(rootModuleDir)
-	if rootErr == nil && parseGoDirective(rootContent) != targetVersion {
+	if rootErr == nil && support.IsNewerVersion(parseGoDirective(rootContent), targetVersion) {
 		return true, rootModuleDir, true
 	}
 
@@ -139,7 +143,7 @@ func resolveVersionUpgradeNeed(
 		if !found {
 			sourceDir, found = dir, true
 		}
-		if parseGoDirective(content) != targetVersion {
+		if support.IsNewerVersion(parseGoDirective(content), targetVersion) {
 			return true, dir, true
 		}
 	}
