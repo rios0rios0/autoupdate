@@ -1,6 +1,6 @@
 module github.com/rios0rios0/autoupdate
 
-go 1.26.6
+go 1.27.0
 
 require (
 	github.com/go-git/go-git/v5 v5.19.2
@@ -11,7 +11,7 @@ require (
 	github.com/rios0rios0/testkit v0.2.7
 	github.com/sirupsen/logrus v1.10.1
 	github.com/spf13/cobra v1.10.2
-	github.com/stretchr/testify v1.12.0
+	github.com/stretchr/testify v1.12.1
 	github.com/zclconf/go-cty v1.19.0
 	go.uber.org/dig v1.19.0
 	golang.org/x/mod v0.40.0
@@ -48,6 +48,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	gitlab.com/gitlab-org/api/client-go v1.46.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
