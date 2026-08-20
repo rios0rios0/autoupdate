@@ -277,70 +277,44 @@ python-version: '3.11'
 		assert.Len(t, fileContents, 2)
 	})
 
-	t.Run("should find version references in .yml files", func(t *testing.T) {
-		t.Parallel()
+	// Every Azure DevOps path `classifyFile` accepts must also be reachable by
+	// the on-disk walk; when it is not, the clone-based run scans it to no
+	// effect and still reports success. `.azure-pipelines.yml` is the case that
+	// looks skipped but is not — the old rule skipped dot-prefixed
+	// *directories*, never dot-prefixed *files* — and the README documents it,
+	// so it is pinned here rather than left to inspection of the walker.
+	for _, testCase := range []struct{ name, path string }{
+		{name: "should find version references in .yml files", path: "azure-devops/build.yml"},
+		{name: "should scan the dot-prefixed root pipeline", path: ".azure-pipelines.yml"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-		// given
-		root := t.TempDir()
-		adoDir := root + "/azure-devops"
-		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
-		require.NoError(t, os.MkdirAll(adoDir, 0o700))
-
-		content := `steps:
+			// given
+			root := t.TempDir()
+			writePipelineFile(t, root, testCase.path, `steps:
   - task: NodeTool@0
     inputs:
       versionSpec: '18.0.0'
-`
-		require.NoError(t, os.WriteFile(adoDir+"/build.yml", []byte(content), 0o644))
+`)
 
-		latestVersions := map[string]string{
-			"nodejs": "22.0.0",
-		}
+			latestVersions := map[string]string{
+				"nodejs": "22.0.0",
+			}
 
-		// when
-		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
-			t.Context(), root, nil, latestVersions,
-		)
+			// when
+			upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
+				t.Context(), root, nil, latestVersions,
+			)
 
-		// then
-		require.Len(t, upgrades, 1)
-		assert.Equal(t, "nodejs", pipeline.UpgradeTaskLanguage(upgrades[0]))
-		assert.Equal(t, "18.0.0", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
-		assert.Equal(t, "22.0.0", pipeline.UpgradeTaskNewVersion(upgrades[0]))
-		assert.Contains(t, fileContents, "azure-devops/build.yml")
-	})
-
-	t.Run("should scan a dot-prefixed .azure-pipelines.yml at the root", func(t *testing.T) {
-		t.Parallel()
-
-		// given a repository whose Azure DevOps pipeline lives in the
-		// dot-prefixed root file. The walkers only ever skipped dot-prefixed
-		// *directories*, so this file is reachable, but nothing pinned that —
-		// and the README documents it as supported.
-		root := t.TempDir()
-		content := `steps:
-  - task: NodeTool@0
-    inputs:
-      versionSpec: '18.0.0'
-`
-		require.NoError(t, os.WriteFile(root+"/.azure-pipelines.yml", []byte(content), 0o644))
-
-		latestVersions := map[string]string{
-			"nodejs": "22.0.0",
-		}
-
-		// when
-		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
-			t.Context(), root, nil, latestVersions,
-		)
-
-		// then
-		require.Len(t, upgrades, 1)
-		assert.Equal(t, "nodejs", pipeline.UpgradeTaskLanguage(upgrades[0]))
-		assert.Equal(t, "18.0.0", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
-		assert.Equal(t, "22.0.0", pipeline.UpgradeTaskNewVersion(upgrades[0]))
-		assert.Contains(t, fileContents, ".azure-pipelines.yml")
-	})
+			// then
+			require.Len(t, upgrades, 1)
+			assert.Equal(t, "nodejs", pipeline.UpgradeTaskLanguage(upgrades[0]))
+			assert.Equal(t, "18.0.0", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
+			assert.Equal(t, "22.0.0", pipeline.UpgradeTaskNewVersion(upgrades[0]))
+			assert.Contains(t, fileContents, testCase.path)
+		})
+	}
 
 	t.Run("should not misclassify a Go task version as a Node.js version", func(t *testing.T) {
 		t.Parallel()
