@@ -134,6 +134,10 @@ follows a `+` only to keep the version recognisable and then drops it, so `1.0.0
 compare equal and neither is rewritten to the other — folding it into the pre-release slot instead got
 that wrong in both directions.
 
+The three single-line pin files — `.java-version`, `.python-version`, `.ruby-version` — share
+`support.VersionPinUpdateScript` for the same reason. JavaScript and C# are not callers: one keeps
+two pin files in step, the other reads its pin out of `global.json`.
+
 The five ecosystems that rewrite `Dockerfile` base images share one emitter,
 `support.DockerfileTagUpdateScript`, which takes the image names, the shell variable holding the
 version, and any prelude deriving it (Java pins a bare major, .NET a major.minor). It emits the

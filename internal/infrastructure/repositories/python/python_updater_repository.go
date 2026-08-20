@@ -21,6 +21,10 @@ import (
 )
 
 const (
+	// pythonVersionVar is the shell variable carrying the fetched version into
+	// the generated script.
+	pythonVersionVar = "PYTHON_VERSION"
+
 	updaterName      = "python"
 	pyVersionTimeout = 15 * time.Second
 	scriptFileMode   = 0o700
@@ -624,25 +628,14 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 // repository tracking a newer pre-release series is ahead of it and keeps its
 // pin rather than being rolled back.
 func writePythonVersionPin(sb *strings.Builder) {
-	sb.WriteString(support.VersionGuardScript())
-	sb.WriteString("# Check and update Python version\n")
-	sb.WriteString("PYTHON_VERSION_CHANGED=false\n")
-	sb.WriteString("if [ -n \"${PYTHON_VERSION:-}\" ] && [ -f \".python-version\" ]; then\n")
-	sb.WriteString("    CURRENT_PY_VERSION=$(head -1 .python-version | tr -d '[:space:]')\n")
-	sb.WriteString("    if autoupdate_version_is_newer \"$PYTHON_VERSION\" \"$CURRENT_PY_VERSION\"; then\n")
-	sb.WriteString("        echo \"Updating .python-version from $CURRENT_PY_VERSION to $PYTHON_VERSION...\"\n")
-	sb.WriteString("        echo \"$PYTHON_VERSION\" > .python-version\n")
-	sb.WriteString("        PYTHON_VERSION_CHANGED=true\n")
-	sb.WriteString("        echo \"PYTHON_VERSION_UPDATED=true\"\n")
-	sb.WriteString("    else\n")
-	sb.WriteString(
-		"        echo \"Keeping .python-version at $CURRENT_PY_VERSION (not older than $PYTHON_VERSION)\"\n",
-	)
-	sb.WriteString("        echo \"PYTHON_VERSION_UPDATED=false\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"PYTHON_VERSION_UPDATED=false\"\n")
-	sb.WriteString("fi\n\n")
+	sb.WriteString(support.VersionPinUpdateScript(support.VersionPinUpdate{
+		File:       ".python-version",
+		Subject:    "Python",
+		VersionVar: pythonVersionVar,
+		CurrentVar: "CURRENT_PY_VERSION",
+		ChangedVar: "PYTHON_VERSION_CHANGED",
+		MarkerVar:  pythonVersionVar,
+	}))
 }
 
 func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
@@ -789,7 +782,7 @@ func writeEggInfoGitignore(sb *strings.Builder) {
 func writeDockerfileUpdate(sb *strings.Builder) {
 	sb.WriteString(support.DockerfileTagUpdateScript(support.DockerfileTagUpdate{
 		ChangedVar: "PYTHON_VERSION_CHANGED",
-		VersionVar: "PYTHON_VERSION",
+		VersionVar: pythonVersionVar,
 		Subject:    "Python",
 		Images:     []support.DockerfileImage{{Name: updaterName}},
 	}))

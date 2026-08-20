@@ -110,6 +110,11 @@ func writeStubs(t *testing.T, workDir string, names []string) string {
 	t.Helper()
 
 	stubDir := filepath.Join(workDir, "stubs")
+	// 0600 is not a usable mode for a directory — without the execute bit nothing
+	// can traverse into it — so 0700 is the least privilege one can be created
+	// with, and everything here lives under t.TempDir(). The rule compares the
+	// mode against 0600 regardless of the kind of node being created.
+	// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 	require.NoError(t, os.MkdirAll(stubDir, dirMode))
 
 	for _, name := range names {
@@ -137,6 +142,11 @@ func WriteFile(t *testing.T, repoDir, name, content string) {
 	t.Helper()
 
 	path := filepath.Join(repoDir, name)
+	// 0600 is not a usable mode for a directory — without the execute bit nothing
+	// can traverse into it — so 0700 is the least privilege one can be created
+	// with, and everything here lives under t.TempDir(). The rule compares the
+	// mode against 0600 regardless of the kind of node being created.
+	// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), dirMode))
 	require.NoError(t, os.WriteFile(path, []byte(content), fileMode))
 }

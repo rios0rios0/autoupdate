@@ -586,28 +586,17 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 }
 
 func writeJavaUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
-	// Update .java-version only when the fetched release is genuinely ahead of
-	// the pin: the feed reports the newest *LTS* JDK, so a repository already on
-	// a later JDK is ahead of it and must keep its pin.
-	sb.WriteString(support.VersionGuardScript())
-	sb.WriteString("# Check and update Java version\n")
-	sb.WriteString("JAVA_VERSION_CHANGED=false\n")
-	sb.WriteString("if [ -n \"${JAVA_VERSION:-}\" ] && [ -f \".java-version\" ]; then\n")
-	sb.WriteString("    CURRENT_JAVA_VERSION=$(head -1 .java-version | tr -d '[:space:]')\n")
-	sb.WriteString("    if autoupdate_version_is_newer \"$JAVA_VERSION\" \"$CURRENT_JAVA_VERSION\"; then\n")
-	sb.WriteString("        echo \"Updating .java-version from $CURRENT_JAVA_VERSION to $JAVA_VERSION...\"\n")
-	sb.WriteString("        echo \"$JAVA_VERSION\" > .java-version\n")
-	sb.WriteString("        JAVA_VERSION_CHANGED=true\n")
-	sb.WriteString("        echo \"JAVA_VERSION_UPDATED=true\"\n")
-	sb.WriteString("    else\n")
-	sb.WriteString(
-		"        echo \"Keeping .java-version at $CURRENT_JAVA_VERSION (not older than $JAVA_VERSION)\"\n",
-	)
-	sb.WriteString("        echo \"JAVA_VERSION_UPDATED=false\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"JAVA_VERSION_UPDATED=false\"\n")
-	sb.WriteString("fi\n\n")
+	// Only when the fetched release is genuinely ahead of the pin: the feed
+	// reports the newest LTS JDK, so a repository already on a later JDK is
+	// ahead of it and must keep its pin.
+	sb.WriteString(support.VersionPinUpdateScript(support.VersionPinUpdate{
+		File:       ".java-version",
+		Subject:    "Java",
+		VersionVar: "JAVA_VERSION",
+		CurrentVar: "CURRENT_JAVA_VERSION",
+		ChangedVar: "JAVA_VERSION_CHANGED",
+		MarkerVar:  "JAVA_VERSION",
+	}))
 
 	// Build system specific commands
 	sb.WriteString("# Update dependencies using detected build system\n")

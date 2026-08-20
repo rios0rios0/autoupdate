@@ -484,30 +484,16 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 }
 
 func writeRubyUpgradeCommands(sb *strings.Builder) {
-	// Update .ruby-version only when the fetched release is genuinely ahead of
-	// the pin. The guard also declines every non-numeric pin, so a repository
-	// running JRuby or TruffleRuby is no longer handed an MRI version number.
-	sb.WriteString(support.VersionGuardScript())
-	sb.WriteString("# Check and update Ruby version\n")
-	sb.WriteString("RUBY_VERSION_CHANGED=false\n")
-	sb.WriteString("if [ -n \"${TARGET_RUBY_VERSION:-}\" ] && [ -f \".ruby-version\" ]; then\n")
-	sb.WriteString("    CURRENT_RB_VERSION=$(head -1 .ruby-version | tr -d '[:space:]')\n")
-	sb.WriteString(
-		"    if autoupdate_version_is_newer \"$TARGET_RUBY_VERSION\" \"$CURRENT_RB_VERSION\"; then\n",
-	)
-	sb.WriteString("        echo \"Updating .ruby-version from $CURRENT_RB_VERSION to $TARGET_RUBY_VERSION...\"\n")
-	sb.WriteString("        echo \"$TARGET_RUBY_VERSION\" > .ruby-version\n")
-	sb.WriteString("        RUBY_VERSION_CHANGED=true\n")
-	sb.WriteString("        echo \"RUBY_VERSION_UPDATED=true\"\n")
-	sb.WriteString("    else\n")
-	sb.WriteString(
-		"        echo \"Keeping .ruby-version at $CURRENT_RB_VERSION (not older than $TARGET_RUBY_VERSION)\"\n",
-	)
-	sb.WriteString("        echo \"RUBY_VERSION_UPDATED=false\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"RUBY_VERSION_UPDATED=false\"\n")
-	sb.WriteString("fi\n\n")
+	// The guard also declines every non-numeric pin, so a repository running
+	// JRuby or TruffleRuby is no longer handed an MRI version number.
+	sb.WriteString(support.VersionPinUpdateScript(support.VersionPinUpdate{
+		File:       ".ruby-version",
+		Subject:    "Ruby",
+		VersionVar: "TARGET_RUBY_VERSION",
+		CurrentVar: "CURRENT_RB_VERSION",
+		ChangedVar: "RUBY_VERSION_CHANGED",
+		MarkerVar:  "RUBY_VERSION",
+	}))
 
 	// Update bundler and bundle update
 	sb.WriteString("# Update bundler and gem dependencies\n")

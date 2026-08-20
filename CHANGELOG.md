@@ -41,6 +41,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Changed
 
+- changed the per-ecosystem version pin rewrites to share one emitter, `support.VersionPinUpdateScript`,
+  covering `.java-version`, `.python-version` and `.ruby-version`
 - changed the five per-ecosystem `Dockerfile` base-image rewrites to share one emitter,
   `support.DockerfileTagUpdateScript`, so the walk and the version guard it depends on have a single
   spelling -- five hand-copied versions of that loop is how the guard came to be missing from some
