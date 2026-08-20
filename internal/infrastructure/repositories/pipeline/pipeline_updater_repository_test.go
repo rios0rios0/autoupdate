@@ -54,10 +54,13 @@ func TestLocalScanAndDetermineUpgrades(t *testing.T) {
 		assert.Contains(t, fileContents, "azure-devops/build.yaml")
 	})
 
-	t.Run("should skip hidden directories like .github in local filesystem walk", func(t *testing.T) {
+	t.Run("should find version references in GitHub Actions workflows", func(t *testing.T) {
 		t.Parallel()
 
 		// given
+		// A repository whose only pipeline file lives under `.github/workflows/`.
+		// The local walk used to refuse to descend into any dot-directory, so this
+		// repository was detected, cloned, and then silently yielded no upgrades.
 		root := t.TempDir()
 		ghDir := root + "/.github/workflows"
 		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
@@ -80,14 +83,95 @@ jobs:
 		}
 
 		// when
-		upgrades, _ := pipeline.LocalScanAndDetermineUpgrades(
+		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, nil, latestVersions,
 		)
 
 		// then
-		// WalkFilesByExtension skips hidden directories (.github),
-		// so no upgrades are found for GitHub Actions in local mode
+		require.Len(t, upgrades, 1)
+		assert.Equal(t, "golang", pipeline.UpgradeTaskLanguage(upgrades[0]))
+		assert.Equal(t, "1.22.0", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
+		assert.Equal(t, "1.24.1", pipeline.UpgradeTaskNewVersion(upgrades[0]))
+		assert.Contains(t, fileContents, ".github/workflows/ci.yaml")
+	})
+
+	t.Run("should find version references in nested GitHub Actions workflows", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		// `.github/` also holds files the pipeline updater must ignore: only
+		// `.github/workflows/` is classified as GitHub Actions.
+		root := t.TempDir()
+		ghDir := root + "/.github/workflows"
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(ghDir, 0o700))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(root+"/.github/ISSUE_TEMPLATE", 0o700))
+
+		workflow := `jobs:
+  build:
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+`
+		other := `name: Bug report
+python-version: '3.11'
+`
+		require.NoError(t, os.WriteFile(ghDir+"/release.yml", []byte(workflow), 0o644))
+		require.NoError(t, os.WriteFile(root+"/.github/ISSUE_TEMPLATE/bug.yml", []byte(other), 0o644))
+		require.NoError(t, os.WriteFile(root+"/.github/dependabot.yml", []byte(other), 0o644))
+
+		latestVersions := map[string]string{
+			"python": "3.13.1",
+		}
+
+		// when
+		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then
+		require.Len(t, upgrades, 1)
+		assert.Equal(t, "python", pipeline.UpgradeTaskLanguage(upgrades[0]))
+		assert.Contains(t, fileContents, ".github/workflows/release.yml")
+		assert.NotContains(t, fileContents, ".github/dependabot.yml")
+		assert.NotContains(t, fileContents, ".github/ISSUE_TEMPLATE/bug.yml")
+	})
+
+	t.Run("should skip workflow copies vendored under node_modules", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		// A dependency's own workflow is not this repository's source: rewriting
+		// it could never reach the pull request, but it would still be counted in
+		// the changelog and PR body.
+		root := t.TempDir()
+		vendored := root + "/node_modules/some-dep/.github/workflows"
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(vendored, 0o700))
+
+		content := `jobs:
+  build:
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.0'
+`
+		require.NoError(t, os.WriteFile(vendored+"/ci.yaml", []byte(content), 0o644))
+
+		latestVersions := map[string]string{
+			"golang": "1.24.1",
+		}
+
+		// when
+		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then
 		assert.Empty(t, upgrades)
+		assert.Empty(t, fileContents)
 	})
 
 	t.Run("should return empty for files with no version refs", func(t *testing.T) {

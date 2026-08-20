@@ -195,6 +195,26 @@ func TestDiscoverLocalModuleDirs(t *testing.T) {
 		assert.Equal(t, []string{"."}, dirs)
 	})
 
+	t.Run("should skip modules inside hidden directories", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		// The shared walker now descends into the repository's own hidden
+		// directories so the pipeline updater can reach `.github/workflows/`.
+		// Module discovery must not follow: `moduleDirsFromPaths` keeps dropping
+		// hidden segments, because the generated upgrade script discovers modules
+		// with `find ... -not -path '*/.*/*'` and the two sets must not diverge.
+		repoDir := t.TempDir()
+		writeModule(t, repoDir, ".", "1.24.0")
+		writeModule(t, repoDir, ".github/tools", "1.19")
+
+		// when
+		dirs := goUpdater.DiscoverLocalModuleDirs(repoDir)
+
+		// then
+		assert.Equal(t, []string{"."}, dirs)
+	})
+
 	t.Run("should return no directories when the repository holds no Go module", func(t *testing.T) {
 		t.Parallel()
 
