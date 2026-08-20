@@ -9,9 +9,10 @@ package support
 // source, so the clone-based pipeline updater could never see a GitHub Actions
 // workflow: `langforge`'s detector matched the repository through the provider
 // API, the repository was cloned, the walk then returned nothing, and the run
-// reported success with zero upgrades. Only `azure-pipelines.yml` at the root
-// and `azure-devops/` were ever reachable on disk. A discovery default of
-// "skip" fails exactly like that — silently, with no error to notice.
+// reported success with zero upgrades. Only a root `azure-pipelines.yml` or
+// `.azure-pipelines.yml` — dot-prefixed *files* were never skipped — and
+// `azure-devops/` were ever reachable on disk. A discovery default of "skip"
+// fails exactly like that — silently, with no error to notice.
 //
 // An allow list of the hidden directories that matter (`.github`, `.circleci`,
 // …) would reproduce that failure one CI system later: `.gitea/workflows/`,

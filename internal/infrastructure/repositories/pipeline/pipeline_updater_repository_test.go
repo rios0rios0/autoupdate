@@ -310,6 +310,38 @@ python-version: '3.11'
 		assert.Contains(t, fileContents, "azure-devops/build.yml")
 	})
 
+	t.Run("should scan a dot-prefixed .azure-pipelines.yml at the root", func(t *testing.T) {
+		t.Parallel()
+
+		// given a repository whose Azure DevOps pipeline lives in the
+		// dot-prefixed root file. The walkers only ever skipped dot-prefixed
+		// *directories*, so this file is reachable, but nothing pinned that —
+		// and the README documents it as supported.
+		root := t.TempDir()
+		content := `steps:
+  - task: NodeTool@0
+    inputs:
+      versionSpec: '18.0.0'
+`
+		require.NoError(t, os.WriteFile(root+"/.azure-pipelines.yml", []byte(content), 0o644))
+
+		latestVersions := map[string]string{
+			"nodejs": "22.0.0",
+		}
+
+		// when
+		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
+			t.Context(), root, nil, latestVersions,
+		)
+
+		// then
+		require.Len(t, upgrades, 1)
+		assert.Equal(t, "nodejs", pipeline.UpgradeTaskLanguage(upgrades[0]))
+		assert.Equal(t, "18.0.0", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
+		assert.Equal(t, "22.0.0", pipeline.UpgradeTaskNewVersion(upgrades[0]))
+		assert.Contains(t, fileContents, ".azure-pipelines.yml")
+	})
+
 	t.Run("should not misclassify a Go task version as a Node.js version", func(t *testing.T) {
 		t.Parallel()
 
@@ -1645,6 +1677,16 @@ func TestClassifyFile(t *testing.T) {
 
 		// given / when
 		result := pipeline.ClassifyFile("azure-pipelines.yml")
+
+		// then
+		assert.Equal(t, pipeline.CIAzureDevOps, result)
+	})
+
+	t.Run("should classify the dot-prefixed .azure-pipelines.yml", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.ClassifyFile(".azure-pipelines.yml")
 
 		// then
 		assert.Equal(t, pipeline.CIAzureDevOps, result)

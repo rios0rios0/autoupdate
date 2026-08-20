@@ -40,7 +40,7 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 | Java           | `build.gradle`, `pom.xml`              | Upgrades dependencies through Gradle or Maven, whichever the repository builds with                                                                              |
 | C#             | `*.csproj`, `*.sln`                    | Upgrades NuGet package references                                                                                                                                |
 | Dockerfile     | `Dockerfile`                           | Upgrades base image tags, verifying each against the registry                                                                                                    |
-| Pipeline/CI    | pipeline YAML                          | Upgrades pinned action refs (`uses: owner/repo@v4`) and language versions in `.github/workflows/`, `azure-pipelines.yml` and `azure-devops/`                      |
+| Pipeline/CI    | pipeline YAML                          | Upgrades pinned action refs (`uses: owner/repo@v4`) and language versions in `.github/workflows/`, `azure-devops/`, `azure-pipelines.yml` and `.azure-pipelines.yml` |
 
 Scans cover everything the repository commits, including hidden directories such as `.github/` and
 `.devcontainer/`. Trees a repository does not author are never scanned: version-control metadata
