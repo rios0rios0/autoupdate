@@ -5,6 +5,7 @@ package pipeline_test
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,25 +18,115 @@ import (
 	"github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
 )
 
+// writePipelineFile creates one file under root, making its parents. The
+// directories are owner-only: everything here lives under t.TempDir() and is
+// read by this process alone.
+func writePipelineFile(t *testing.T, root, name, content string) {
+	t.Helper()
+
+	path := filepath.Join(root, name)
+	// 0600 is not a usable mode for a directory — without the execute bit nothing
+	// can traverse into it — so 0700 is the least privilege one can be created
+	// with, and everything here lives under t.TempDir(). The rule compares the
+	// mode against 0600 regardless of the kind of node being created.
+	// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+}
+
 func TestLocalScanAndDetermineUpgrades(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should find version references in Azure DevOps pipeline files", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		root := t.TempDir()
-		adoDir := root + "/azure-devops"
-		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
-		require.NoError(t, os.MkdirAll(adoDir, 0o700))
-
-		content := `steps:
+	// The three layouts ask the same question — given these files on disk, which
+	// upgrades does the local scan plan — so they share one body. The GitHub
+	// Actions rows are the regression: the walk used to refuse to descend into
+	// any dot-directory, so a repository whose only pipeline file lived under
+	// `.github/workflows/` was detected, cloned, and then silently yielded
+	// nothing.
+	cases := []struct {
+		name     string
+		files    map[string]string
+		latest   map[string]string
+		language string
+		current  string
+		upgraded string
+		wantFile string
+	}{
+		{
+			name: "Azure DevOps pipeline files",
+			files: map[string]string{"azure-devops/build.yaml": `steps:
   - task: UsePythonVersion@0
     inputs:
       versionSpec: '3.12'
     displayName: 'Use Python 3.12'
+`},
+			latest:   map[string]string{"python": "3.13.1"},
+			language: "python", current: "3.12", upgraded: "3.13",
+			wantFile: "azure-devops/build.yaml",
+		},
+		{
+			name: "GitHub Actions workflows",
+			files: map[string]string{".github/workflows/ci.yaml": `name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.0'
+`},
+			latest:   map[string]string{"golang": "1.24.1"},
+			language: "golang", current: "1.22.0", upgraded: "1.24.1",
+			wantFile: ".github/workflows/ci.yaml",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run("should find version references in "+testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			root := t.TempDir()
+			for name, content := range testCase.files {
+				writePipelineFile(t, root, name, content)
+			}
+
+			// when
+			upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
+				t.Context(), root, nil, testCase.latest,
+			)
+
+			// then
+			require.Len(t, upgrades, 1)
+			assert.Equal(t, testCase.language, pipeline.UpgradeTaskLanguage(upgrades[0]))
+			assert.Equal(t, testCase.current, pipeline.UpgradeTaskCurrentVer(upgrades[0]))
+			assert.Equal(t, testCase.upgraded, pipeline.UpgradeTaskNewVersion(upgrades[0]))
+			assert.Contains(t, fileContents, testCase.wantFile)
+		})
+	}
+
+	t.Run("should find version references in nested GitHub Actions workflows", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		// `.github/` also holds files the pipeline updater must ignore: only
+		// `.github/workflows/` is classified as GitHub Actions.
+		root := t.TempDir()
+
+		workflow := `jobs:
+  build:
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 `
-		require.NoError(t, os.WriteFile(adoDir+"/build.yaml", []byte(content), 0o644))
+		other := `name: Bug report
+python-version: '3.11'
+`
+		writePipelineFile(t, root, ".github/workflows/release.yml", workflow)
+		writePipelineFile(t, root, ".github/ISSUE_TEMPLATE/bug.yml", other)
+		writePipelineFile(t, root, ".github/dependabot.yml", other)
 
 		latestVersions := map[string]string{
 			"python": "3.13.1",
@@ -49,45 +140,44 @@ func TestLocalScanAndDetermineUpgrades(t *testing.T) {
 		// then
 		require.Len(t, upgrades, 1)
 		assert.Equal(t, "python", pipeline.UpgradeTaskLanguage(upgrades[0]))
-		assert.Equal(t, "3.12", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
-		assert.Equal(t, "3.13", pipeline.UpgradeTaskNewVersion(upgrades[0]))
-		assert.Contains(t, fileContents, "azure-devops/build.yaml")
+		assert.Contains(t, fileContents, ".github/workflows/release.yml")
+		assert.NotContains(t, fileContents, ".github/dependabot.yml")
+		assert.NotContains(t, fileContents, ".github/ISSUE_TEMPLATE/bug.yml")
 	})
 
-	t.Run("should skip hidden directories like .github in local filesystem walk", func(t *testing.T) {
+	t.Run("should skip workflow copies vendored under node_modules", func(t *testing.T) {
 		t.Parallel()
 
 		// given
+		// A dependency's own workflow is not this repository's source: rewriting
+		// it could never reach the pull request, but it would still be counted in
+		// the changelog and PR body.
 		root := t.TempDir()
-		ghDir := root + "/.github/workflows"
+		vendored := root + "/node_modules/some-dep/.github/workflows"
 		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
-		require.NoError(t, os.MkdirAll(ghDir, 0o700))
+		require.NoError(t, os.MkdirAll(vendored, 0o700))
 
-		content := `name: CI
-on: push
-jobs:
+		content := `jobs:
   build:
-    runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22.0'
 `
-		require.NoError(t, os.WriteFile(ghDir+"/ci.yaml", []byte(content), 0o644))
+		require.NoError(t, os.WriteFile(vendored+"/ci.yaml", []byte(content), 0o644))
 
 		latestVersions := map[string]string{
 			"golang": "1.24.1",
 		}
 
 		// when
-		upgrades, _ := pipeline.LocalScanAndDetermineUpgrades(
+		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, nil, latestVersions,
 		)
 
 		// then
-		// WalkFilesByExtension skips hidden directories (.github),
-		// so no upgrades are found for GitHub Actions in local mode
 		assert.Empty(t, upgrades)
+		assert.Empty(t, fileContents)
 	})
 
 	t.Run("should return empty for files with no version refs", func(t *testing.T) {
@@ -187,38 +277,44 @@ jobs:
 		assert.Len(t, fileContents, 2)
 	})
 
-	t.Run("should find version references in .yml files", func(t *testing.T) {
-		t.Parallel()
+	// Every Azure DevOps path `classifyFile` accepts must also be reachable by
+	// the on-disk walk; when it is not, the clone-based run scans it to no
+	// effect and still reports success. `.azure-pipelines.yml` is the case that
+	// looks skipped but is not — the old rule skipped dot-prefixed
+	// *directories*, never dot-prefixed *files* — and the README documents it,
+	// so it is pinned here rather than left to inspection of the walker.
+	for _, testCase := range []struct{ name, path string }{
+		{name: "should find version references in .yml files", path: "azure-devops/build.yml"},
+		{name: "should scan the dot-prefixed root pipeline", path: ".azure-pipelines.yml"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-		// given
-		root := t.TempDir()
-		adoDir := root + "/azure-devops"
-		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
-		require.NoError(t, os.MkdirAll(adoDir, 0o700))
-
-		content := `steps:
+			// given
+			root := t.TempDir()
+			writePipelineFile(t, root, testCase.path, `steps:
   - task: NodeTool@0
     inputs:
       versionSpec: '18.0.0'
-`
-		require.NoError(t, os.WriteFile(adoDir+"/build.yml", []byte(content), 0o644))
+`)
 
-		latestVersions := map[string]string{
-			"nodejs": "22.0.0",
-		}
+			latestVersions := map[string]string{
+				"nodejs": "22.0.0",
+			}
 
-		// when
-		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
-			t.Context(), root, nil, latestVersions,
-		)
+			// when
+			upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
+				t.Context(), root, nil, latestVersions,
+			)
 
-		// then
-		require.Len(t, upgrades, 1)
-		assert.Equal(t, "nodejs", pipeline.UpgradeTaskLanguage(upgrades[0]))
-		assert.Equal(t, "18.0.0", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
-		assert.Equal(t, "22.0.0", pipeline.UpgradeTaskNewVersion(upgrades[0]))
-		assert.Contains(t, fileContents, "azure-devops/build.yml")
-	})
+			// then
+			require.Len(t, upgrades, 1)
+			assert.Equal(t, "nodejs", pipeline.UpgradeTaskLanguage(upgrades[0]))
+			assert.Equal(t, "18.0.0", pipeline.UpgradeTaskCurrentVer(upgrades[0]))
+			assert.Equal(t, "22.0.0", pipeline.UpgradeTaskNewVersion(upgrades[0]))
+			assert.Contains(t, fileContents, testCase.path)
+		})
+	}
 
 	t.Run("should not misclassify a Go task version as a Node.js version", func(t *testing.T) {
 		t.Parallel()
@@ -1555,6 +1651,16 @@ func TestClassifyFile(t *testing.T) {
 
 		// given / when
 		result := pipeline.ClassifyFile("azure-pipelines.yml")
+
+		// then
+		assert.Equal(t, pipeline.CIAzureDevOps, result)
+	})
+
+	t.Run("should classify the dot-prefixed .azure-pipelines.yml", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		result := pipeline.ClassifyFile(".azure-pipelines.yml")
 
 		// then
 		assert.Equal(t, pipeline.CIAzureDevOps, result)

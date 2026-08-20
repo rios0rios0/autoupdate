@@ -1166,22 +1166,46 @@ func TestLocalScanAllDockerfiles(t *testing.T) {
 		assert.Equal(t, 1, refs[0].Line)
 	})
 
-	t.Run("should skip hidden directories", func(t *testing.T) {
+	t.Run("should skip vendored and version-control directories", func(t *testing.T) {
 		t.Parallel()
 
 		// given
 		tmpDir := t.TempDir()
-		hiddenDir := filepath.Join(tmpDir, ".hidden")
-		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
-		require.NoError(t, os.MkdirAll(hiddenDir, 0o700))
 		content := "FROM golang:1.25-alpine\n"
-		require.NoError(t, os.WriteFile(filepath.Join(hiddenDir, "Dockerfile"), []byte(content), 0o600))
+		for _, dir := range []string{".git", "node_modules/pkg", "vendor/example.com/dep"} {
+			// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+			require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, dir), 0o700))
+			require.NoError(t, os.WriteFile(
+				filepath.Join(tmpDir, dir, "Dockerfile"), []byte(content), 0o600))
+		}
 
 		// when
 		refs := dockerfile.LocalScanAllDockerfiles(tmpDir)
 
 		// then
 		assert.Empty(t, refs)
+	})
+
+	t.Run("should find a Dockerfile in a hidden directory the repository authors", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		// `.devcontainer/Dockerfile` is committed source with a real base image
+		// pin; the previous blanket dot-directory skip made it invisible.
+		tmpDir := t.TempDir()
+		devcontainer := filepath.Join(tmpDir, ".devcontainer")
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(devcontainer, 0o700))
+		content := "FROM golang:1.25-alpine\n"
+		require.NoError(t, os.WriteFile(filepath.Join(devcontainer, "Dockerfile"), []byte(content), 0o600))
+
+		// when
+		refs := dockerfile.LocalScanAllDockerfiles(tmpDir)
+
+		// then
+		require.Len(t, refs, 1)
+		assert.Equal(t, "golang", refs[0].Name)
+		assert.Equal(t, ".devcontainer/Dockerfile", refs[0].FilePath)
 	})
 
 	t.Run("should find Dockerfile variants", func(t *testing.T) {

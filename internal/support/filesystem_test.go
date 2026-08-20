@@ -95,7 +95,7 @@ func TestWalkFilesByExtension(t *testing.T) {
 		assert.Contains(t, matches, "modules/vpc.tf")
 	})
 
-	t.Run("should skip hidden directories", func(t *testing.T) {
+	t.Run("should skip the git metadata directory", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -112,6 +112,77 @@ func TestWalkFilesByExtension(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, matches, 1)
 		assert.Contains(t, matches, "main.tf")
+	})
+
+	t.Run("should find files inside hidden directories the repository authors", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		// Hidden is not the same as "not ours": `.github/workflows/` holds the
+		// repository's own CI definition and must be scanned like any other source.
+		root := t.TempDir()
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Join(root, ".github", "workflows"), 0o700))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(root, ".github", "workflows", "ci.yaml"), []byte(""), 0o600))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Join(root, ".circleci"), 0o700))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(root, ".circleci", "config.yaml"), []byte(""), 0o600))
+
+		// when
+		matches, err := support.WalkFilesByExtension(root, ".yaml")
+
+		// then
+		require.NoError(t, err)
+		assert.Len(t, matches, 2)
+		assert.Contains(t, matches, ".github/workflows/ci.yaml")
+		assert.Contains(t, matches, ".circleci/config.yaml")
+	})
+
+	t.Run("should skip vendored and cache directories at any depth", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+		for _, dir := range []string{
+			".terraform/modules/vpc",
+			"stacks/.terragrunt-cache/abc",
+			"vendor/example.com/dep",
+			"web/node_modules/pkg",
+			".venv/lib/pkg",
+		} {
+			// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+			require.NoError(t, os.MkdirAll(filepath.Join(root, dir), 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(root, dir, "main.tf"), []byte(""), 0o600))
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(root, "main.tf"), []byte(""), 0o600))
+
+		// when
+		matches, err := support.WalkFilesByExtension(root, ".tf")
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, []string{"main.tf"}, matches)
+	})
+
+	t.Run("should scan a repository checked out into a skipped directory name", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		// Only nested directories are matched against the skip list; the root the
+		// caller passed in is always the repository it asked to scan.
+		root := filepath.Join(t.TempDir(), "vendor")
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(root, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "main.tf"), []byte(""), 0o600))
+
+		// when
+		matches, err := support.WalkFilesByExtension(root, ".tf")
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, []string{"main.tf"}, matches)
 	})
 
 	t.Run("should return empty when no files match", func(t *testing.T) {
@@ -169,14 +240,25 @@ func TestWalkFilesByPredicate(t *testing.T) {
 		assert.Empty(t, matches)
 	})
 
-	t.Run("should skip hidden directories when walking by predicate", func(t *testing.T) {
+	t.Run("should apply the same skip rule as the extension walker", func(t *testing.T) {
 		t.Parallel()
 
 		// given
+		// Both walkers share one traversal, so the vendored copy is skipped while
+		// the repository's own hidden directory is scanned.
 		root := t.TempDir()
 		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
-		require.NoError(t, os.MkdirAll(filepath.Join(root, ".hidden"), 0o700))
-		require.NoError(t, os.WriteFile(filepath.Join(root, ".hidden", "Dockerfile"), []byte(""), 0o600))
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "node_modules", "pkg"), 0o700))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(root, "node_modules", "pkg", "Dockerfile"), []byte(""), 0o600))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Join(root, ".git", "objects"), 0o700))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(root, ".git", "objects", "Dockerfile"), []byte(""), 0o600))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Join(root, ".devcontainer"), 0o700))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(root, ".devcontainer", "Dockerfile"), []byte(""), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(root, "Dockerfile"), []byte(""), 0o600))
 
 		isDockerfile := func(name string) bool {
@@ -188,8 +270,9 @@ func TestWalkFilesByPredicate(t *testing.T) {
 
 		// then
 		require.NoError(t, err)
-		assert.Len(t, matches, 1)
+		assert.Len(t, matches, 2)
 		assert.Contains(t, matches, "Dockerfile")
+		assert.Contains(t, matches, ".devcontainer/Dockerfile")
 	})
 
 	t.Run("should propagate walk error when root directory is invalid", func(t *testing.T) {

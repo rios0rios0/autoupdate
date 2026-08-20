@@ -43,7 +43,7 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - **Domain commands**: `internal/domain/commands/` — `LocalCommand` (single repo), `RunCommand` (batch mode), `SelfUpdateCommand`, and `VersionCommand`
 - **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `ProviderRepository`, and `SelfUpdateRepository` interfaces
 - **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations for local and batch modes), and `selfupdate`
-- **Support utilities**: `internal/support/` — filesystem helpers, remote file checker bridging `langforge` with `gitforge`, repo config loader for per-repo opt-out, and the shared changelog writer (see below)
+- **Support utilities**: `internal/support/` — filesystem helpers (including the shared repository walkers, see below), remote file checker bridging `langforge` with `gitforge`, repo config loader for per-repo opt-out, and the shared changelog writer (see below)
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
 
 ### Key External Libraries
@@ -104,6 +104,37 @@ configured `changesDir`/`unreleasedDir`/`kinds` are honored, and paths are valid
 the repository root because `.chlog.yaml` is untrusted input from a repo autoupdate does not own. A
 broken or unreadable `.chlog.yaml` fails loudly rather than falling back to `CHANGELOG.md`. The
 per-ecosystem `changelogEntries(vCtx)` helper is all that remains ecosystem-specific.
+
+### Repository Walking (what an on-disk scan can see)
+
+`WalkFilesByExtension` and `WalkFilesByPredicate` (`internal/support/filesystem.go`) are how every
+updater finds files in a clone. Both delegate to one unexported `walkFiles`, so the rule about which
+directories are entered lives in exactly one place — two hand-copied loops would drift, and a caller
+cannot tell which of the two it is getting.
+
+The rule is a **deny list**, `skippedWalkDirs` in `internal/support/walk_skip.go`, and the direction
+matters. These walkers feed dependency *discovery*, where a default of "skip" fails silently: nothing
+is found, no error is raised, and the run reports success with zero upgrades. The previous rule
+skipped every directory whose name began with a dot, conflating "hidden" with "not the repository's
+own source"; `.github/workflows/ci.yaml` is both hidden and the repository's own source, so the
+pipeline updater could never upgrade a GitHub Actions workflow on the clone-based path even though
+`langforge`'s detector had just matched the repository through the provider API. Do **not** replace
+the deny list with an allow list of hidden directories that matter, and do not add an opt-in
+parameter or a second walker variant: the bug *was* a missing entry in an implicit allow list, and an
+opt-in leaves the blind behaviour as the default every future caller inherits. A forgotten deny-list
+entry costs a slower walk and at worst a match inside a derived tree — loud, and visible in the diff.
+
+Every entry names a tree the repository does not author: version-control metadata, vendored code
+(`vendor`, `node_modules`) and tool caches (`.terraform`, `.venv`, `.gradle`, …). `.git` is the
+reason the list exists at all — callers feed results straight into `support.WriteFileChanges`, which
+writes back under the root, so a match there would rewrite repository internals. Editor state
+(`.idea`, `.vscode`) is deliberately absent: it is committed by the repository, so excluding it would
+need exactly the case-by-case reasoning the deny list exists to avoid.
+
+Go module discovery is the one caller that filters further on its own: `moduleDirsFromPaths`
+(`internal/infrastructure/repositories/golang/modules.go`) drops hidden, vendored and `testdata`
+segments, and must keep doing so — the generated upgrade script discovers modules with
+`find ... -not -path '*/.*/*'`, and the two sets must not disagree about which modules get upgraded.
 
 ### Stale Branch Cleanup
 

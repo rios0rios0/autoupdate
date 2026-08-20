@@ -16,41 +16,35 @@ import (
 
 // WalkFilesByExtension finds all files under root whose names end with ext.
 // Returns paths relative to root, normalized to forward slashes.
+// Directories listed in skippedWalkDirs are never descended into.
 func WalkFilesByExtension(root, ext string) ([]string, error) {
-	var matches []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			// Skip hidden directories (e.g. .git)
-			if d.Name() != "." && strings.HasPrefix(d.Name(), ".") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if strings.HasSuffix(d.Name(), ext) {
-			rel, relErr := filepath.Rel(root, path)
-			if relErr != nil {
-				return relErr
-			}
-			matches = append(matches, filepath.ToSlash(rel))
-		}
-		return nil
+	return walkFiles(root, func(name string) bool {
+		return strings.HasSuffix(name, ext)
 	})
-	return matches, err
 }
 
 // WalkFilesByPredicate finds all files under root where match(baseName)
 // returns true. Returns paths relative to root, normalized to forward slashes.
+// Directories listed in skippedWalkDirs are never descended into.
 func WalkFilesByPredicate(root string, match func(name string) bool) ([]string, error) {
+	return walkFiles(root, match)
+}
+
+// walkFiles is the single traversal both exported walkers delegate to. Sharing
+// one body is what keeps the skip rule in exactly one place: the previous two
+// hand-copied loops could — and would eventually — drift apart, and a caller has
+// no way to tell which of the two it is getting.
+func walkFiles(root string, match func(name string) bool) ([]string, error) {
 	var matches []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() != "." && strings.HasPrefix(d.Name(), ".") {
+			// The root itself is never skipped: a repository checked out into a
+			// directory that happens to be called `vendor` or `.cache` is still
+			// the repository the caller asked to scan.
+			if path != root && shouldSkipWalkDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
