@@ -140,6 +140,51 @@ segments, and must keep doing so — the generated upgrade script discovers modu
 
 Because the aggregate branch is dated (`chore/autoupdate-YYYY-MM-DD`), every run on a new day creates a new branch, so unattended runs stack up abandoned branches. `cleanupStaleAggregateBranches` (`internal/domain/commands/cleanup.go`) runs in `processLocalUpdaters` right after the clone and before `CreateBranchFromDefault`: it lists the remote branches, keeps those carrying the aggregate prefix (never the target branch), closes each one's PR via `ForgeProvider.ClosePullRequest`, then deletes the branch through `BatchGitContext.DeleteBranch` (remote **and** local — a leftover local branch would make the branch still look like it exists). It sits after the same-day `PullRequestExists` check, so a PR is never closed without a replacement being opened. It is opt-out: `entities.CleanupEnabled` treats an unset `cleanup_stale_branches` as enabled, and the persistent `--skip-cleanup` flag (applied by `applySkipCleanupFlag` in `controllers/config_helpers.go`) overrides the config per run. `entities.ResolveAggregateBranchPrefix` (`aggregate_branch_prefix`, default `chore/autoupdate-`) feeds both `buildAggregateBranchName` and the cleanup filter so they cannot diverge. Cleanup is best-effort: failures are logged and skipped, never aborting the update run.
 
+### Version Pins Only Move Forwards
+
+A version pin is rewritten **only when the fetched release is strictly newer** than the one already
+there. `support.IsNewerVersion` (`internal/support/version.go`) is the single answer to that question
+and every updater goes through it — never `current != latest`, which is what made autoupdate downgrade
+a repository that had moved past the release feed. The feeds answer a narrower question than they look:
+nodejs.org/dist reports the newest *LTS* line, the Java feed the newest *LTS* JDK, the Python and Ruby
+feeds the newest *stable* series, so a repository on Node 26 or JDK 25 is ahead of "latest".
+
+The rule exists on both sides of the Go/bash seam, because both sides act on it. Go decides
+`NeedsVersionUpgrade`, which picks the branch name, the commit message, the changelog entry and the PR
+title; the generated script re-reads the pin from the clone and decides whether the file is actually
+rewritten. `support.VersionGuardScript()` emits the bash counterpart —
+`autoupdate_version_is_newer <candidate> <current>`, plus `autoupdate_image_tag_is_older <file> <image>
+<version> [tag-pattern]` for Dockerfile base images, where one file may pin an image several times and
+the `sed` that rewrites them compares nothing. `internal/support/version_test.go` runs the same table
+through both implementations, so they cannot drift. That table is the only thing keeping the two
+halves honest, so a new comparison rule needs rows that would actually tell them apart — the
+single-digit `rc.1`/`rc.2` rows it started with agreed under both string and semver ordering, which is
+how a lexical pre-release comparison survived in the bash half. Any script fragment that calls a guard must emit
+`VersionGuardScript()` itself rather than inheriting the definition from whatever ran before it.
+
+Comparison follows Semantic Versioning precedence on both sides: a final release outranks any
+pre-release of the same version, and build metadata is excluded entirely. `parseVersion` captures what
+follows a `+` only to keep the version recognisable and then drops it, so `1.0.0+build.1` and `1.0.0`
+compare equal and neither is rewritten to the other — folding it into the pre-release slot instead got
+that wrong in both directions.
+
+The three single-line pin files — `.java-version`, `.python-version`, `.ruby-version` — share
+`support.VersionPinUpdateScript` for the same reason. JavaScript and C# are not callers: one keeps
+two pin files in step, the other reads its pin out of `global.json`.
+
+The five ecosystems that rewrite `Dockerfile` base images share one emitter,
+`support.DockerfileTagUpdateScript`, which takes the image names, the shell variable holding the
+version, and any prelude deriving it (Java pins a bare major, .NET a major.minor). It emits the
+guard itself, so a caller cannot end up with the walk but not the comparison — which is exactly how
+the blanket `sed` survived in some of them. Add an ecosystem by adding a call, not a sixth copy of
+the loop.
+
+Anything not shaped like a dotted numeric version — `lts/*`, `system`, `jruby-9.4.0.0`, `3.13t` — fails
+the comparison and the pin is left alone: those are deliberate choices by the repository being updated,
+and a release number from an unrelated channel is not a comparable replacement. `terraform`,
+`dockerfile` and the Go Dockerfile tag rewriter (`golang/dockerfile_tags.go`) reach the same conclusion
+through `golang.org/x/mod/semver` directly, since they compare registry tags rather than pin files.
+
 ### Package Manager Selection (Python)
 
 A repository is upgraded with the dependency manager it already uses; an update run must never migrate it to a different one. `newPythonProject` (`internal/infrastructure/repositories/python/toolchain.go`) is the single place that makes that decision, and `detectRemoteProject`/`detectLocalProject` are the only ways to reach it — do not re-derive the toolchain at a call site. PDM is selected **only** when a `pyproject.toml` is present: that file is PDM's project definition, so running `pdm update` without one makes PDM write a fresh `pyproject.toml`, converting a pip/`requirements.txt` repository into a PDM repository inside what was meant to be a dependency bump. A `pdm.lock` with no `pyproject.toml` beside it therefore stays on pip. A `pyproject.toml` naming PDM is not enough on its own either: `[tool.pdm]` is also how a pip project declares its package layout, so when a `requirements.txt` is present and no `pdm.lock` has ever been committed, the repository keeps pip. Upgrading it through PDM would resolve a lock file from scratch — the whole of the resulting pull request, since `pdm update` leaves the pyproject's own constraints alone — while never touching the `requirements.txt` the build installs from. A committed `pdm.lock` is what settles the question the other way, which is why `pdmMarkers` keeps the two signals apart instead of collapsing them into one boolean. The resolved `pythonProject` flows through `upgradeParams`/`localUpgradeParams` into the generated script, the changelog entry, the PR description and the dry-run report, so those cannot disagree about what ran. On the pip path the script additionally brackets the upgrade with `writeManifestSnapshot`/`writeManifestRestore`, which delete a `pyproject.toml` or `pdm.lock` that appeared during the run — never one the repository already owned.

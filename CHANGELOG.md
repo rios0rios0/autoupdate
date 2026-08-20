@@ -16,8 +16,43 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Fixed
+
+- fixed the bash half of the version guard ordering pre-release identifiers as plain strings while the
+  Go half followed Semantic Versioning precedence. `rc.10` sorts below `rc.9` as text but above it as a
+  version, so for a pin like a .NET SDK preview the two halves disagreed: Go named the branch, the
+  commit and the pull request after an upgrade the script then declined to write. Both halves now
+  compare identifiers left to right, numerically where they are numeric, ranking a numeric identifier
+  below an alphanumeric one and a longer set above its own prefix
+- fixed the version pin rewrites downgrading a repository that tracks a release ahead of the one the
+  release feed reports. Every pin was compared with a plain "is it different?" check, so a `.nvmrc`
+  reading `26.7.0` was rewritten to the `24.19.0` LTS the Node.js feed returns -- inside a pull request
+  titled as an upgrade. A rewrite now requires the fetched release to be strictly newer, and the rule
+  lives in one place (`support.IsNewerVersion` and the bash guard it emits for the generated upgrade
+  scripts) rather than being restated per ecosystem. It covers `.nvmrc`, `.node-version`,
+  `.python-version`, `.ruby-version`, `.java-version`, `global.json`, `.fvmrc`, the `go` directive, the
+  base image tags in a `Dockerfile` and the language versions in a CI pipeline
+- fixed the Go directive being written back to the target version after `go mod tidy` raised it, which
+  turned a dependency's Go requirement into a downgrade on the next run
+- fixed the base image tags in a `Dockerfile` being rewritten whenever the language pin moved, even when
+  the image was already newer than the version being rolled out
+- fixed pins that name no version at all -- `lts/*` in a `.nvmrc`, `system` in a `.ruby-version`, a JRuby
+  or TruffleRuby release -- being replaced with a version number from an unrelated release channel
+- fixed `isDockerHubImage` splitting an image name with `strings.SplitN` where `strings.Cut` says the
+  same thing, which `golangci-lint` 2.13 reports as a `modernize` finding
+- fixed build metadata being read as a pre-release when two pins are compared. Semantic Versioning
+  excludes everything after a `+` from precedence, so `1.0.0+build.1` and `1.0.0` name the same release;
+  reading it as a pre-release instead rewrote one to the other as though a pre-release were being
+  promoted, and refused the genuine upgrade from `1.0.0-rc.1` to `1.0.0+build.1`
+
 ### Changed
 
+- changed the per-ecosystem version pin rewrites to share one emitter, `support.VersionPinUpdateScript`,
+  covering `.java-version`, `.python-version` and `.ruby-version`
+- changed the five per-ecosystem `Dockerfile` base-image rewrites to share one emitter,
+  `support.DockerfileTagUpdateScript`, so the walk and the version guard it depends on have a single
+  spelling -- five hand-copied versions of that loop is how the guard came to be missing from some
+  of them in the first place
 - changed the Go module dependencies to their latest versions
 - changed the Go module dependencies to their latest versions
 

@@ -378,7 +378,7 @@ func resolveVersionContext(
 		content, err := provider.GetFileContent(ctx, repo, "global.json")
 		if err == nil {
 			currentVersion := parseGlobalJSON(content)
-			needsVersionUpgrade = currentVersion != "" && currentVersion != latestDotnetVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestDotnetVersion)
 			logger.Infof(
 				"[csharp] Current global.json SDK version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -415,7 +415,7 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionCon
 		globalJSONContent, readErr := os.ReadFile(filepath.Join(repoDir, "global.json"))
 		if readErr == nil {
 			currentVersion := parseGlobalJSON(string(globalJSONContent))
-			needsVersionUpgrade = currentVersion != "" && currentVersion != latestDotnetVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestDotnetVersion)
 			logger.Infof(
 				"[csharp] Current global.json SDK version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -543,7 +543,11 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 }
 
 func writeDotnetUpgradeCommands(sb *strings.Builder) {
-	// Update global.json SDK version if it exists and a new version is available
+	// Update the global.json SDK version only when the fetched release is
+	// genuinely ahead of the pin: a repository on a newer SDK than the one the
+	// release feed reports keeps it instead of being rolled back by a pull
+	// request titled as an upgrade.
+	sb.WriteString(support.VersionGuardScript())
 	sb.WriteString("# Check and update .NET SDK version in global.json\n")
 	sb.WriteString("DOTNET_VERSION_CHANGED=false\n")
 	sb.WriteString("if [ -n \"${DOTNET_VERSION:-}\" ] && [ -f \"global.json\" ]; then\n")
@@ -560,7 +564,7 @@ func writeDotnetUpgradeCommands(sb *strings.Builder) {
 		"head -1 | grep -o '[0-9][0-9.]*')\n")
 	sb.WriteString("    fi\n")
 	sb.WriteString(
-		"    if [ -n \"$CURRENT_GLOBAL_VERSION\" ] && [ \"$CURRENT_GLOBAL_VERSION\" != \"$DOTNET_VERSION\" ]; then\n",
+		"    if autoupdate_version_is_newer \"$DOTNET_VERSION\" \"$CURRENT_GLOBAL_VERSION\"; then\n",
 	)
 	sb.WriteString("        echo \"Updating global.json SDK version " +
 		"from $CURRENT_GLOBAL_VERSION to $DOTNET_VERSION...\"\n")
@@ -617,39 +621,19 @@ func writeNuGetUpdate(sb *strings.Builder) {
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
-	sb.WriteString("# Update Dockerfile .NET image tags when the SDK version was bumped.\n")
-	sb.WriteString("if [ \"$DOTNET_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString("    # Extract major.minor from the full version (e.g. 8.0.11 -> 8.0)\n")
-	sb.WriteString("    DOTNET_MAJOR_MINOR=$(echo \"$DOTNET_VERSION\" | cut -d '.' -f 1,2)\n")
-	sb.WriteString("    echo \"Updating Dockerfile .NET image tags to $DOTNET_MAJOR_MINOR...\"\n")
-	sb.WriteString(
-		"    find . -type f -not -path './.git/*' " +
-			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
-			"-print0 | while IFS= read -r -d '' df; do\n",
-	)
-	sb.WriteString("        if grep -q 'mcr.microsoft.com/dotnet/sdk:[0-9]' \"$df\"; then\n")
-	sb.WriteString(
-		"            sed \"s|mcr.microsoft.com/dotnet/sdk:[0-9][0-9.]*|mcr.microsoft.com/dotnet/sdk:${DOTNET_MAJOR_MINOR}|g\" " +
-			"\"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("            echo \"  Updated SDK image in $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("        if grep -q 'mcr.microsoft.com/dotnet/aspnet:[0-9]' \"$df\"; then\n")
-	sb.WriteString(
-		"            sed \"s|mcr.microsoft.com/dotnet/aspnet:[0-9][0-9.]*|mcr.microsoft.com/dotnet/aspnet:${DOTNET_MAJOR_MINOR}|g\" " +
-			"\"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("            echo \"  Updated ASP.NET image in $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("        if grep -q 'mcr.microsoft.com/dotnet/runtime:[0-9]' \"$df\"; then\n")
-	sb.WriteString(
-		"            sed \"s|mcr.microsoft.com/dotnet/runtime:[0-9][0-9.]*|mcr.microsoft.com/dotnet/runtime:${DOTNET_MAJOR_MINOR}|g\" " +
-			"\"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("            echo \"  Updated Runtime image in $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("    done\n")
-	sb.WriteString("fi\n\n")
+	// The .NET images pin major.minor, so the tag written is derived from the
+	// full SDK version (8.0.11 -> 8.0).
+	sb.WriteString(support.DockerfileTagUpdateScript(support.DockerfileTagUpdate{
+		ChangedVar: "DOTNET_VERSION_CHANGED",
+		VersionVar: "DOTNET_MAJOR_MINOR",
+		Subject:    ".NET",
+		Prelude:    "    DOTNET_MAJOR_MINOR=$(echo \"$DOTNET_VERSION\" | cut -d '.' -f 1,2)\n",
+		Images: []support.DockerfileImage{
+			{Name: "mcr.microsoft.com/dotnet/sdk", Label: "the SDK image"},
+			{Name: "mcr.microsoft.com/dotnet/aspnet", Label: "the ASP.NET image"},
+			{Name: "mcr.microsoft.com/dotnet/runtime", Label: "the runtime image"},
+		},
+	}))
 }
 
 func writeCommitAndPush(sb *strings.Builder) {

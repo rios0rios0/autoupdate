@@ -210,7 +210,7 @@ func TestDetectPackageManager(t *testing.T) {
 func TestResolveVersionContext(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should set NeedsVersionUpgrade to true when current version differs from latest", func(t *testing.T) {
+	t.Run("should set NeedsVersionUpgrade to true when the pin is older than the latest release", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -229,7 +229,7 @@ func TestResolveVersionContext(t *testing.T) {
 		assert.Equal(t, "chore/upgrade-node-20.18.0", vCtx.BranchName)
 	})
 
-	t.Run("should set NeedsVersionUpgrade to false when current version matches latest", func(t *testing.T) {
+	t.Run("should set NeedsVersionUpgrade to false when the pin already names the latest release", func(t *testing.T) {
 		t.Parallel()
 
 		// given

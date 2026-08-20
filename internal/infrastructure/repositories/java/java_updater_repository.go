@@ -420,7 +420,7 @@ func resolveVersionContext(
 		content, err := provider.GetFileContent(ctx, repo, ".java-version")
 		if err == nil {
 			currentVersion := parseJavaVersionFile(content)
-			needsVersionUpgrade = currentVersion != "" && currentVersion != latestJavaVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestJavaVersion)
 			logger.Infof(
 				"[java] Current .java-version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -458,7 +458,7 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionCon
 		javaVersionContent, readErr := os.ReadFile(filepath.Join(repoDir, ".java-version"))
 		if readErr == nil {
 			currentVersion := parseJavaVersionFile(string(javaVersionContent))
-			needsVersionUpgrade = currentVersion != "" && currentVersion != latestJavaVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestJavaVersion)
 			logger.Infof(
 				"[java] Current .java-version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -586,25 +586,17 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 }
 
 func writeJavaUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
-	// Update .java-version if it exists and a new version is available
-	sb.WriteString("# Check and update Java version\n")
-	sb.WriteString("JAVA_VERSION_CHANGED=false\n")
-	sb.WriteString("if [ -n \"${JAVA_VERSION:-}\" ] && [ -f \".java-version\" ]; then\n")
-	sb.WriteString("    CURRENT_JAVA_VERSION=$(head -1 .java-version | tr -d '[:space:]')\n")
-	sb.WriteString(
-		"    if [ -n \"$CURRENT_JAVA_VERSION\" ] && [ \"$CURRENT_JAVA_VERSION\" != \"$JAVA_VERSION\" ]; then\n",
-	)
-	sb.WriteString("        echo \"Updating .java-version from $CURRENT_JAVA_VERSION to $JAVA_VERSION...\"\n")
-	sb.WriteString("        echo \"$JAVA_VERSION\" > .java-version\n")
-	sb.WriteString("        JAVA_VERSION_CHANGED=true\n")
-	sb.WriteString("        echo \"JAVA_VERSION_UPDATED=true\"\n")
-	sb.WriteString("    else\n")
-	sb.WriteString("        echo \"Java version already at $CURRENT_JAVA_VERSION, skipping version update\"\n")
-	sb.WriteString("        echo \"JAVA_VERSION_UPDATED=false\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"JAVA_VERSION_UPDATED=false\"\n")
-	sb.WriteString("fi\n\n")
+	// Only when the fetched release is genuinely ahead of the pin: the feed
+	// reports the newest LTS JDK, so a repository already on a later JDK is
+	// ahead of it and must keep its pin.
+	sb.WriteString(support.VersionPinUpdateScript(support.VersionPinUpdate{
+		File:       ".java-version",
+		Subject:    "Java",
+		VersionVar: "JAVA_VERSION",
+		CurrentVar: "CURRENT_JAVA_VERSION",
+		ChangedVar: "JAVA_VERSION_CHANGED",
+		MarkerVar:  "JAVA_VERSION",
+	}))
 
 	// Build system specific commands
 	sb.WriteString("# Update dependencies using detected build system\n")
@@ -663,29 +655,19 @@ func writeJavaUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
-	sb.WriteString("# Update Dockerfile Java image tags when the Java version was bumped.\n")
-	sb.WriteString("if [ \"$JAVA_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString("    JAVA_MAJOR=$(echo \"$JAVA_VERSION\" | cut -d. -f1)\n")
-	sb.WriteString("    echo \"Updating Dockerfile Java image tags to major version $JAVA_MAJOR...\"\n")
-	sb.WriteString(
-		"    find . -type f -not -path './.git/*' " +
-			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
-			"-print0 | while IFS= read -r -d '' df; do\n",
-	)
-	sb.WriteString("        UPDATED=false\n")
-	sb.WriteString("        for IMAGE in eclipse-temurin openjdk amazoncorretto; do\n")
-	sb.WriteString("            if grep -q \"${IMAGE}:[0-9]\" \"$df\"; then\n")
-	sb.WriteString(
-		"                sed \"s|${IMAGE}:[0-9][0-9]*|${IMAGE}:${JAVA_MAJOR}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("                UPDATED=true\n")
-	sb.WriteString("            fi\n")
-	sb.WriteString("        done\n")
-	sb.WriteString("        if [ \"$UPDATED\" = \"true\" ]; then\n")
-	sb.WriteString("            echo \"  Updated $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("    done\n")
-	sb.WriteString("fi\n\n")
+	// The JDK images pin a bare major, so the tag written is the major of the
+	// fetched version rather than the version itself.
+	sb.WriteString(support.DockerfileTagUpdateScript(support.DockerfileTagUpdate{
+		ChangedVar: "JAVA_VERSION_CHANGED",
+		VersionVar: "JAVA_MAJOR",
+		Subject:    "Java",
+		Prelude:    "    JAVA_MAJOR=$(echo \"$JAVA_VERSION\" | cut -d. -f1)\n",
+		Images: []support.DockerfileImage{
+			{Name: "eclipse-temurin", TagPattern: support.MajorOnlyTagPattern},
+			{Name: "openjdk", TagPattern: support.MajorOnlyTagPattern},
+			{Name: "amazoncorretto", TagPattern: support.MajorOnlyTagPattern},
+		},
+	}))
 }
 
 func writeCommitAndPush(sb *strings.Builder) {

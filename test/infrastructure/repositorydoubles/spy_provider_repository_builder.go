@@ -141,22 +141,22 @@ func (b *SpyProviderRepositoryBuilder) Build() interface{} {
 // BuildSpy creates the SpyProviderRepository with a concrete return type.
 func (b *SpyProviderRepositoryBuilder) BuildSpy() *SpyProviderRepository {
 	return &SpyProviderRepository{
-		ProviderName:   b.providerName,
-		Token:          b.token,
-		Repositories:   b.repositories,
-		DiscoverErr:    b.discoverErr,
-		FileContents:   b.fileContents,
-		FileContentErr: b.fileContentErr,
-		Files:          b.files,
-		ListFileErr:    b.listFileErr,
-		Tags:           b.tags,
-		GetTagsErr:     b.getTagsErr,
-		ExistingFiles:  b.existingFiles,
+		ProviderName:    b.providerName,
+		Token:           b.token,
+		Repositories:    b.repositories,
+		DiscoverErr:     b.discoverErr,
+		FileContents:    b.fileContents,
+		FileContentErr:  b.fileContentErr,
+		Files:           b.files,
+		ListFileErr:     b.listFileErr,
+		Tags:            b.tags,
+		GetTagsErr:      b.getTagsErr,
+		ExistingFiles:   b.existingFiles,
 		CreateBranchErr: b.createBranchErr,
-		CreatedPR:      b.createdPR,
-		CreatePRErr:    b.createPRErr,
-		PRExistsResult: b.prExistsResult,
-		PRExistsErr:    b.prExistsErr,
+		CreatedPR:       b.createdPR,
+		CreatePRErr:     b.createPRErr,
+		PRExistsResult:  b.prExistsResult,
+		PRExistsErr:     b.prExistsErr,
 	}
 }
 
@@ -225,4 +225,16 @@ func (b *SpyProviderRepositoryBuilder) Clone() testkit.Builder {
 	}
 
 	return clone
+}
+
+// SpyProviderWithFile returns a provider double serving exactly one file.
+//
+// Every version-context test asks the same narrow question — given this pin,
+// does the updater plan a version upgrade? — so they share this constructor
+// instead of repeating the two-map builder chain around each one.
+func SpyProviderWithFile(path, content string) *SpyProviderRepository {
+	return NewSpyProviderRepositoryBuilder().
+		WithExistingFiles(map[string]bool{path: true}).
+		WithFileContents(map[string]string{path: content}).
+		BuildSpy()
 }

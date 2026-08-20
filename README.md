@@ -23,6 +23,7 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 - **API-Based Discovery**: Automatically discovers all repositories in an organization, group, or user account
 - **Extensible Updaters**: Plugin-based architecture for dependency ecosystems -- see [Supported Ecosystems](#supported-ecosystems)
 - **Changelog Integration**: Automatically updates `CHANGELOG.md` (Keep a Changelog format) when the target repository has one, or writes a [chlog](https://github.com/luizjhonata/chlog) fragment when the repository uses that format instead -- see [Changelog Formats](#changelog-formats)
+- **Never Downgrades**: A runtime or SDK pin is only ever rewritten forwards -- a repository tracking a release newer than the one the release feed reports keeps its pin -- see [Version Pins Only Move Forwards](#version-pins-only-move-forwards)
 - **Cronjob-Ready**: Designed to run unattended on a schedule for daily dependency updates
 - **Dry Run Mode**: Preview all changes before creating any PRs
 - **Flexible Filtering**: Run against a specific provider, organization, or updater
@@ -47,6 +48,28 @@ Scans cover everything the repository commits, including hidden directories such
 (`.git`, `.hg`, `.svn`), vendored code (`vendor/`, `node_modules/`) and tool caches (`.terraform/`,
 `.terragrunt-cache/`, `.venv/`, `.gradle/`, `.dart_tool/`, `.next/` and similar). A dependency found
 there could not reach the pull request anyway, since those paths are generated or ignored by Git.
+
+## Version Pins Only Move Forwards
+
+Every runtime and SDK pin autoupdate touches -- `.nvmrc`, `.node-version`, `.python-version`,
+`.ruby-version`, `.java-version`, `global.json`, `.fvmrc`, the `go` directive, the base image tags in a
+`Dockerfile`, and the language versions in a CI pipeline -- is rewritten **only when the fetched
+version is strictly newer** than the one already there.
+
+The distinction matters because "latest" is a narrower answer than it looks. The Node.js feed reports
+the newest **LTS** line, the Java feed the newest **LTS** JDK, and the Python and Ruby feeds the newest
+**stable** series. A repository that has deliberately moved past that line -- Node.js `26` while the LTS
+line is `24`, a JDK `25` build while the LTS is `21`, a Python `3.14` pre-release series -- is *ahead* of
+"latest", and a plain "is it different?" check would roll it back inside a pull request titled as an
+upgrade.
+
+Comparison follows Semantic Versioning precedence, so a pre-release is never rolled out over the final
+release of the same version, and two pins differing only in build metadata (`1.0.0+build.1` and
+`1.0.0`) name the same release and neither replaces the other.
+
+Pins that name no version at all are left alone for the same reason: `lts/*` in a `.nvmrc`, `system` in
+a `.ruby-version`, a JRuby or TruffleRuby pin, and a digest-pinned image are deliberate choices, not
+stale version numbers.
 
 ## Installation
 

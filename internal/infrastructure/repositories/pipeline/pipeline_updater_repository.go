@@ -386,8 +386,11 @@ func findUpgradesInFile(
 			continue
 		}
 
+		// A pipeline pinned ahead of the fetched release — a workflow on Node 26
+		// while the feed reports the 24 LTS line — must keep its pin: rewriting it
+		// would move the build backwards under an "upgraded" pull request title.
 		truncated := truncateToGranularity(latestVer, match.CurrentVer)
-		if truncated == match.CurrentVer {
+		if !support.IsNewerVersion(match.CurrentVer, truncated) {
 			continue
 		}
 

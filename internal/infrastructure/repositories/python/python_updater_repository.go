@@ -21,6 +21,10 @@ import (
 )
 
 const (
+	// pythonVersionVar is the shell variable carrying the fetched version into
+	// the generated script.
+	pythonVersionVar = "PYTHON_VERSION"
+
 	updaterName      = "python"
 	pyVersionTimeout = 15 * time.Second
 	scriptFileMode   = 0o700
@@ -491,7 +495,7 @@ func resolveVersionContext(
 		content, err := provider.GetFileContent(ctx, repo, ".python-version")
 		if err == nil {
 			currentVersion := parsePythonVersionFile(content)
-			needsVersionUpgrade = currentVersion != "" && currentVersion != latestPyVersion
+			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestPyVersion)
 			logger.Infof(
 				"[python] Current .python-version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -619,26 +623,23 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 	sb.WriteString(support.GitAuthScript(params.ProviderName))
 }
 
+// writePythonVersionPin emits the .python-version rewrite, guarded so the pin
+// only ever moves forwards: the feed reports the newest *stable* series, so a
+// repository tracking a newer pre-release series is ahead of it and keeps its
+// pin rather than being rolled back.
+func writePythonVersionPin(sb *strings.Builder) {
+	sb.WriteString(support.VersionPinUpdateScript(support.VersionPinUpdate{
+		File:       ".python-version",
+		Subject:    "Python",
+		VersionVar: pythonVersionVar,
+		CurrentVar: "CURRENT_PY_VERSION",
+		ChangedVar: "PYTHON_VERSION_CHANGED",
+		MarkerVar:  pythonVersionVar,
+	}))
+}
+
 func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
-	// Update .python-version if it exists and a new version is available
-	sb.WriteString("# Check and update Python version\n")
-	sb.WriteString("PYTHON_VERSION_CHANGED=false\n")
-	sb.WriteString("if [ -n \"${PYTHON_VERSION:-}\" ] && [ -f \".python-version\" ]; then\n")
-	sb.WriteString("    CURRENT_PY_VERSION=$(head -1 .python-version | tr -d '[:space:]')\n")
-	sb.WriteString(
-		"    if [ -n \"$CURRENT_PY_VERSION\" ] && [ \"$CURRENT_PY_VERSION\" != \"$PYTHON_VERSION\" ]; then\n",
-	)
-	sb.WriteString("        echo \"Updating .python-version from $CURRENT_PY_VERSION to $PYTHON_VERSION...\"\n")
-	sb.WriteString("        echo \"$PYTHON_VERSION\" > .python-version\n")
-	sb.WriteString("        PYTHON_VERSION_CHANGED=true\n")
-	sb.WriteString("        echo \"PYTHON_VERSION_UPDATED=true\"\n")
-	sb.WriteString("    else\n")
-	sb.WriteString("        echo \"Python version already at $CURRENT_PY_VERSION, skipping version update\"\n")
-	sb.WriteString("        echo \"PYTHON_VERSION_UPDATED=false\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"PYTHON_VERSION_UPDATED=false\"\n")
-	sb.WriteString("fi\n\n")
+	writePythonVersionPin(sb)
 
 	// Create virtual environment and upgrade dependencies
 	sb.WriteString("# Create virtual environment for dependency upgrade\n")
@@ -779,22 +780,12 @@ func writeEggInfoGitignore(sb *strings.Builder) {
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
-	sb.WriteString("# Update Dockerfile python image tags when the Python version was bumped.\n")
-	sb.WriteString("if [ \"$PYTHON_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString("    echo \"Updating Dockerfile python image tags to $PYTHON_VERSION...\"\n")
-	sb.WriteString(
-		"    find . -type f -not -path './.git/*' " +
-			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
-			"-print0 | while IFS= read -r -d '' df; do\n",
-	)
-	sb.WriteString("        if grep -q 'python:[0-9]' \"$df\"; then\n")
-	sb.WriteString(
-		"            sed \"s|python:[0-9][0-9.]*|python:${PYTHON_VERSION}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("            echo \"  Updated $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("    done\n")
-	sb.WriteString("fi\n\n")
+	sb.WriteString(support.DockerfileTagUpdateScript(support.DockerfileTagUpdate{
+		ChangedVar: "PYTHON_VERSION_CHANGED",
+		VersionVar: pythonVersionVar,
+		Subject:    "Python",
+		Images:     []support.DockerfileImage{{Name: updaterName}},
+	}))
 }
 
 func writeCommitAndPush(sb *strings.Builder) {
