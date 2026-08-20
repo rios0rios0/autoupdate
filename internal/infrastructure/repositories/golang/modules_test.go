@@ -151,69 +151,56 @@ func TestModuleDirsFromPaths(t *testing.T) {
 func TestDiscoverLocalModuleDirs(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should find the root module and every nested module", func(t *testing.T) {
-		t.Parallel()
+	// Every case here asks the same question — which directories does discovery
+	// return for this layout — so they share one body rather than four copies of
+	// it. The hidden-directory case is the one that matters now that the walker
+	// descends into `.github/`: `moduleDirsFromPaths` must keep dropping hidden
+	// segments, because the generated upgrade script discovers modules with
+	// `find ... -not -path '*/.*/*'` and the two sets must not diverge.
+	cases := []struct {
+		name    string
+		modules map[string]string
+		want    []string
+	}{
+		{
+			name:    "find the root module and every nested module",
+			modules: map[string]string{".": "1.24.0", "tests/harness": "1.23.1"},
+			want:    []string{".", "tests/harness"},
+		},
+		{
+			name:    "find a nested module when the repository has no root module",
+			modules: map[string]string{"tests/harness": "1.23.1"},
+			want:    []string{"tests/harness"},
+		},
+		{
+			name:    "skip vendored modules",
+			modules: map[string]string{".": "1.24.0", "vendor/example.com/dep": "1.19"},
+			want:    []string{"."},
+		},
+		{
+			name:    "skip modules inside hidden directories",
+			modules: map[string]string{".": "1.24.0", ".github/tools": "1.19"},
+			want:    []string{"."},
+		},
+	}
 
-		// given
-		repoDir := t.TempDir()
-		writeModule(t, repoDir, ".", "1.24.0")
-		writeModule(t, repoDir, "tests/harness", "1.23.1")
+	for _, testCase := range cases {
+		t.Run("should "+testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-		// when
-		dirs := goUpdater.DiscoverLocalModuleDirs(repoDir)
+			// given
+			repoDir := t.TempDir()
+			for dir, version := range testCase.modules {
+				writeModule(t, repoDir, dir, version)
+			}
 
-		// then
-		assert.Equal(t, []string{".", "tests/harness"}, dirs)
-	})
+			// when
+			dirs := goUpdater.DiscoverLocalModuleDirs(repoDir)
 
-	t.Run("should find a nested module when the repository has no root module", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := t.TempDir()
-		writeModule(t, repoDir, "tests/harness", "1.23.1")
-
-		// when
-		dirs := goUpdater.DiscoverLocalModuleDirs(repoDir)
-
-		// then
-		assert.Equal(t, []string{"tests/harness"}, dirs)
-	})
-
-	t.Run("should skip vendored modules", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := t.TempDir()
-		writeModule(t, repoDir, ".", "1.24.0")
-		writeModule(t, repoDir, "vendor/example.com/dep", "1.19")
-
-		// when
-		dirs := goUpdater.DiscoverLocalModuleDirs(repoDir)
-
-		// then
-		assert.Equal(t, []string{"."}, dirs)
-	})
-
-	t.Run("should skip modules inside hidden directories", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		// The shared walker now descends into the repository's own hidden
-		// directories so the pipeline updater can reach `.github/workflows/`.
-		// Module discovery must not follow: `moduleDirsFromPaths` keeps dropping
-		// hidden segments, because the generated upgrade script discovers modules
-		// with `find ... -not -path '*/.*/*'` and the two sets must not diverge.
-		repoDir := t.TempDir()
-		writeModule(t, repoDir, ".", "1.24.0")
-		writeModule(t, repoDir, ".github/tools", "1.19")
-
-		// when
-		dirs := goUpdater.DiscoverLocalModuleDirs(repoDir)
-
-		// then
-		assert.Equal(t, []string{"."}, dirs)
-	})
+			// then
+			assert.Equal(t, testCase.want, dirs)
+		})
+	}
 
 	t.Run("should return no directories when the repository holds no Go module", func(t *testing.T) {
 		t.Parallel()

@@ -229,7 +229,7 @@ func isDockerHubImage(imageName string) bool {
 	if !strings.Contains(imageName, "/") {
 		return true // official image like "golang", "python"
 	}
-	firstSegment := strings.SplitN(imageName, "/", 2)[0] //nolint:mnd // split into first/rest
+	firstSegment, _, _ := strings.Cut(imageName, "/")
 	return !strings.ContainsAny(firstSegment, ".:")
 }
 
