@@ -354,12 +354,12 @@ func TestBuildUpgradeScript(t *testing.T) {
 
 		// given
 		params := pyUpdater.UpgradeParamsExported{
-			CloneURL:        "https://example.com/org/repo.git",
-			DefaultBranch:   "main",
-			BranchName:      "chore/upgrade-python-deps",
-			PythonVersion:   "3.13.1",
-			AuthToken:       "tok123",
-			ProviderName:    "github",
+			CloneURL:      "https://example.com/org/repo.git",
+			DefaultBranch: "main",
+			BranchName:    "chore/upgrade-python-deps",
+			PythonVersion: "3.13.1",
+			AuthToken:     "tok123",
+			ProviderName:  "github",
 			Changelog:     support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
 			Project:       pyUpdater.NewPythonProject(true, true, false, false),
 			PythonBinary:  "/usr/bin/python3",

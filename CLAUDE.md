@@ -134,6 +134,13 @@ follows a `+` only to keep the version recognisable and then drops it, so `1.0.0
 compare equal and neither is rewritten to the other — folding it into the pre-release slot instead got
 that wrong in both directions.
 
+The five ecosystems that rewrite `Dockerfile` base images share one emitter,
+`support.DockerfileTagUpdateScript`, which takes the image names, the shell variable holding the
+version, and any prelude deriving it (Java pins a bare major, .NET a major.minor). It emits the
+guard itself, so a caller cannot end up with the walk but not the comparison — which is exactly how
+the blanket `sed` survived in some of them. Add an ecosystem by adding a call, not a sixth copy of
+the loop.
+
 Anything not shaped like a dotted numeric version — `lts/*`, `system`, `jruby-9.4.0.0`, `3.13t` — fails
 the comparison and the pin is left alone: those are deliberate choices by the repository being updated,
 and a release number from an unrelated channel is not a comparable replacement. `terraform`,

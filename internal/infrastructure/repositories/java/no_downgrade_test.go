@@ -20,95 +20,73 @@ var javaDowngradeRepo = entities.Repository{ //nolint:gochecknoglobals // shared
 	Name:         "repo",
 }
 
-func runJavaVersionBlock(t *testing.T, repoDir, javaVersion string) string {
-	t.Helper()
-
-	var sb strings.Builder
-	javaUpdater.WriteJavaUpgradeCommands(&sb, javaUpdater.UpgradeParamsExported{})
-
-	return scriptrunner.Run(t, repoDir, sb.String(), scriptrunner.Options{
-		Env:   map[string]string{"JAVA_VERSION": javaVersion, "BUILD_SYSTEM": "gradle"},
-		Stubs: []string{"gradle", "mvn", "java"},
-	})
-}
-
 func TestJavaVersionPinIsNeverDowngraded(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should keep the pin when the repository runs a JDK newer than the LTS", func(t *testing.T) {
-		t.Parallel()
+	cases := []scriptrunner.PinCase{
+		{
+			// The feed reports the newest LTS; this repository is past it.
+			Name:   "keep the pin when the repository runs a JDK newer than the LTS",
+			File:   ".java-version",
+			Pinned: "25", Want: "25",
+			Marker: "JAVA_VERSION_UPDATED=false",
+		},
+		{
+			Name:   "raise the pin when the repository is behind the LTS",
+			File:   ".java-version",
+			Pinned: "17", Want: "21.0.5",
+			Marker: "JAVA_VERSION_UPDATED=true",
+		},
+	}
 
-		// given — the feed reports the newest LTS, this repository is past it
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, ".java-version", "25\n")
+	var sb strings.Builder
+	javaUpdater.WriteJavaUpgradeCommands(&sb, javaUpdater.UpgradeParamsExported{})
+	opts := scriptrunner.Options{
+		Env:   map[string]string{"JAVA_VERSION": "21.0.5", "BUILD_SYSTEM": "gradle"},
+		Stubs: []string{"gradle", "mvn", "java"},
+	}
+	for _, testCase := range cases {
+		t.Run("should "+testCase.Name, func(t *testing.T) {
+			t.Parallel()
 
-		// when
-		output := runJavaVersionBlock(t, repoDir, "21.0.5")
-
-		// then
-		assert.Equal(t, "25", scriptrunner.Trimmed(t, repoDir, ".java-version"))
-		assert.Contains(t, output, "JAVA_VERSION_UPDATED=false")
-	})
-
-	t.Run("should raise the pin when the repository is behind the LTS", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, ".java-version", "17\n")
-
-		// when
-		output := runJavaVersionBlock(t, repoDir, "21.0.5")
-
-		// then
-		assert.Equal(t, "21.0.5", scriptrunner.Trimmed(t, repoDir, ".java-version"))
-		assert.Contains(t, output, "JAVA_VERSION_UPDATED=true")
-	})
+			scriptrunner.AssertVersionPin(t, sb.String(), opts, testCase)
+		})
+	}
 }
 
 func TestJavaDockerfileTagIsNeverDowngraded(t *testing.T) {
 	t.Parallel()
 
-	runDockerfileBlock := func(t *testing.T, repoDir, javaVersion string) {
-		t.Helper()
-
-		var sb strings.Builder
-		javaUpdater.WriteDockerfileUpdate(&sb)
-		scriptrunner.Run(t, repoDir, sb.String(), scriptrunner.Options{
-			Env: map[string]string{
-				"JAVA_VERSION":         javaVersion,
-				"JAVA_VERSION_CHANGED": "true",
-			},
-		})
+	cases := []scriptrunner.ImageCase{
+		{
+			Name:       "keep a base image newer than the version being rolled out",
+			Dockerfile: "FROM eclipse-temurin:25-jdk\n",
+			Want:       []string{"FROM eclipse-temurin:25-jdk"},
+		},
+		{
+			Name:       "upgrade a base image older than the version being rolled out",
+			Dockerfile: "FROM eclipse-temurin:17-jdk\n",
+			Want:       []string{"FROM eclipse-temurin:21-jdk"},
+		},
+		{
+			Name:       "upgrade every JDK vendor it knows",
+			Dockerfile: "FROM openjdk:17-slim AS a\nFROM amazoncorretto:17 AS b\n",
+			Want:       []string{"FROM openjdk:21-slim", "FROM amazoncorretto:21"},
+		},
 	}
 
-	t.Run("should keep a base image newer than the version being rolled out", func(t *testing.T) {
-		t.Parallel()
+	var sb strings.Builder
+	javaUpdater.WriteDockerfileUpdate(&sb)
+	opts := scriptrunner.Options{
+		Env: map[string]string{"JAVA_VERSION": "21.0.5", "JAVA_VERSION_CHANGED": "true"},
+	}
+	for _, testCase := range cases {
+		t.Run("should "+testCase.Name, func(t *testing.T) {
+			t.Parallel()
 
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, "Dockerfile", "FROM eclipse-temurin:25-jdk\n")
-
-		// when
-		runDockerfileBlock(t, repoDir, "21.0.5")
-
-		// then
-		assert.Contains(t, scriptrunner.ReadFile(t, repoDir, "Dockerfile"), "FROM eclipse-temurin:25-jdk")
-	})
-
-	t.Run("should upgrade a base image older than the version being rolled out", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, "Dockerfile", "FROM eclipse-temurin:17-jdk\n")
-
-		// when
-		runDockerfileBlock(t, repoDir, "21.0.5")
-
-		// then
-		assert.Contains(t, scriptrunner.ReadFile(t, repoDir, "Dockerfile"), "FROM eclipse-temurin:21-jdk")
-	})
+			scriptrunner.AssertDockerfileTags(t, sb.String(), opts, testCase)
+		})
+	}
 }
 
 func TestJavaVersionContextIsNeverADowngrade(t *testing.T) {
@@ -118,10 +96,7 @@ func TestJavaVersionContextIsNeverADowngrade(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{".java-version": true}).
-			WithFileContents(map[string]string{".java-version": "25\n"}).
-			BuildSpy()
+		provider := repositorydoubles.SpyProviderWithFile(".java-version", "25\n")
 
 		// when
 		vCtx := javaUpdater.ResolveVersionContext(t.Context(), provider, javaDowngradeRepo, "21.0.5")
@@ -134,10 +109,7 @@ func TestJavaVersionContextIsNeverADowngrade(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{".java-version": true}).
-			WithFileContents(map[string]string{".java-version": "17\n"}).
-			BuildSpy()
+		provider := repositorydoubles.SpyProviderWithFile(".java-version", "17\n")
 
 		// when
 		vCtx := javaUpdater.ResolveVersionContext(t.Context(), provider, javaDowngradeRepo, "21.0.5")

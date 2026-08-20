@@ -21,6 +21,11 @@ import (
 const (
 	scriptMode = 0o700
 	stubMode   = 0o700
+	// dirMode keeps the scratch directories owner-only: everything the runner
+	// creates lives under t.TempDir() and is read by this process alone, so the
+	// group bit would grant access nothing asks for.
+	dirMode  = 0o700
+	fileMode = 0o600
 )
 
 // Options configures one run of a script fragment.
@@ -105,7 +110,7 @@ func writeStubs(t *testing.T, workDir string, names []string) string {
 	t.Helper()
 
 	stubDir := filepath.Join(workDir, "stubs")
-	require.NoError(t, os.MkdirAll(stubDir, 0o750))
+	require.NoError(t, os.MkdirAll(stubDir, dirMode))
 
 	for _, name := range names {
 		path := filepath.Join(stubDir, name)
@@ -132,8 +137,8 @@ func WriteFile(t *testing.T, repoDir, name, content string) {
 	t.Helper()
 
 	path := filepath.Join(repoDir, name)
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
-	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), dirMode))
+	require.NoError(t, os.WriteFile(path, []byte(content), fileMode))
 }
 
 // Trimmed returns the contents of a file with surrounding whitespace removed,
@@ -142,4 +147,81 @@ func Trimmed(t *testing.T, repoDir, name string) string {
 	t.Helper()
 
 	return strings.TrimSpace(ReadFile(t, repoDir, name))
+}
+
+// PinCase is one expectation about a version pin file: what the repository has
+// pinned, and what the emitted fragment must leave behind.
+//
+// The eight ecosystems assert the same contract — a pin ahead of the fetched
+// release survives, a pin behind it is raised — so they share these helpers
+// rather than restating the arrange/act/assert around each one.
+type PinCase struct {
+	// Name completes "should ..." in the subtest description.
+	Name string
+
+	// File is the pin file's name, relative to the repository root.
+	File string
+
+	// Pinned is what the repository has in that file before the run.
+	Pinned string
+
+	// Want is the content expected afterwards. Equal to Pinned for every case
+	// that must not be rewritten.
+	Want string
+
+	// Marker is a substring the fragment's output must contain, normally the
+	// `<LANG>_VERSION_UPDATED=` line.
+	Marker string
+}
+
+// AssertVersionPin runs fragment against a repository holding the case's pin
+// file and checks both the file and the reported outcome.
+func AssertVersionPin(t *testing.T, fragment string, opts Options, testCase PinCase) {
+	t.Helper()
+
+	// given
+	repoDir := t.TempDir()
+	WriteFile(t, repoDir, testCase.File, testCase.Pinned+"\n")
+
+	// when
+	output := Run(t, repoDir, fragment, opts)
+
+	// then
+	require.Equal(t, testCase.Want, Trimmed(t, repoDir, testCase.File),
+		"%s was rewritten to the wrong version", testCase.File)
+	if testCase.Marker != "" {
+		require.Contains(t, output, testCase.Marker)
+	}
+}
+
+// ImageCase is one expectation about the base images in a Dockerfile.
+type ImageCase struct {
+	// Name completes "should ..." in the subtest description.
+	Name string
+
+	// Dockerfile is the file's content before the run.
+	Dockerfile string
+
+	// Want lists substrings the rewritten file must contain. A case that must
+	// not be rewritten lists the original clauses.
+	Want []string
+}
+
+// AssertDockerfileTags runs fragment against a repository holding the case's
+// Dockerfile and checks what survived.
+func AssertDockerfileTags(t *testing.T, fragment string, opts Options, testCase ImageCase) {
+	t.Helper()
+
+	// given
+	repoDir := t.TempDir()
+	WriteFile(t, repoDir, "Dockerfile", testCase.Dockerfile)
+
+	// when
+	Run(t, repoDir, fragment, opts)
+
+	// then
+	content := ReadFile(t, repoDir, "Dockerfile")
+	for _, want := range testCase.Want {
+		require.Contains(t, content, want)
+	}
 }

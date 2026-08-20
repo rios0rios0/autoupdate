@@ -23,46 +23,31 @@ var pythonDowngradeRepo = entities.Repository{ //nolint:gochecknoglobals // shar
 func TestPythonDockerfileTagIsNeverDowngraded(t *testing.T) {
 	t.Parallel()
 
-	runDockerfileBlock := func(t *testing.T, repoDir, pythonVersion string) {
-		t.Helper()
-
-		var sb strings.Builder
-		pyUpdater.WriteDockerfileUpdate(&sb)
-		scriptrunner.Run(t, repoDir, sb.String(), scriptrunner.Options{
-			Env: map[string]string{
-				"PYTHON_VERSION":         pythonVersion,
-				"PYTHON_VERSION_CHANGED": "true",
-			},
-		})
+	cases := []scriptrunner.ImageCase{
+		{
+			Name:       "keep a base image newer than the version being rolled out",
+			Dockerfile: "FROM python:3.14-slim\n",
+			Want:       []string{"FROM python:3.14-slim"},
+		},
+		{
+			Name:       "upgrade a base image older than the version being rolled out",
+			Dockerfile: "FROM python:3.11-slim\n",
+			Want:       []string{"FROM python:3.13.2-slim"},
+		},
 	}
 
-	t.Run("should keep a base image newer than the version being rolled out", func(t *testing.T) {
-		t.Parallel()
+	var sb strings.Builder
+	pyUpdater.WriteDockerfileUpdate(&sb)
+	opts := scriptrunner.Options{
+		Env: map[string]string{"PYTHON_VERSION": "3.13.2", "PYTHON_VERSION_CHANGED": "true"},
+	}
+	for _, testCase := range cases {
+		t.Run("should "+testCase.Name, func(t *testing.T) {
+			t.Parallel()
 
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, "Dockerfile", "FROM python:3.14-slim\n")
-
-		// when
-		runDockerfileBlock(t, repoDir, "3.13.2")
-
-		// then
-		assert.Contains(t, scriptrunner.ReadFile(t, repoDir, "Dockerfile"), "FROM python:3.14-slim")
-	})
-
-	t.Run("should upgrade a base image older than the version being rolled out", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, "Dockerfile", "FROM python:3.11-slim\n")
-
-		// when
-		runDockerfileBlock(t, repoDir, "3.13.2")
-
-		// then
-		assert.Contains(t, scriptrunner.ReadFile(t, repoDir, "Dockerfile"), "FROM python:3.13.2-slim")
-	})
+			scriptrunner.AssertDockerfileTags(t, sb.String(), opts, testCase)
+		})
+	}
 }
 
 func TestPythonVersionContextIsNeverADowngrade(t *testing.T) {
@@ -72,10 +57,7 @@ func TestPythonVersionContextIsNeverADowngrade(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{".python-version": true}).
-			WithFileContents(map[string]string{".python-version": "3.14.0\n"}).
-			BuildSpy()
+		provider := repositorydoubles.SpyProviderWithFile(".python-version", "3.14.0\n")
 
 		// when
 		vCtx := pyUpdater.ResolveVersionContext(t.Context(), provider, pythonDowngradeRepo, "3.13.2")
@@ -88,10 +70,7 @@ func TestPythonVersionContextIsNeverADowngrade(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{".python-version": true}).
-			WithFileContents(map[string]string{".python-version": "3.11.9\n"}).
-			BuildSpy()
+		provider := repositorydoubles.SpyProviderWithFile(".python-version", "3.11.9\n")
 
 		// when
 		vCtx := pyUpdater.ResolveVersionContext(t.Context(), provider, pythonDowngradeRepo, "3.13.2")

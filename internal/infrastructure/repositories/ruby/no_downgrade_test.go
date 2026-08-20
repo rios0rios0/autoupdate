@@ -20,110 +20,74 @@ var downgradeRepo = entities.Repository{ //nolint:gochecknoglobals // shared tes
 	Name:         "repo",
 }
 
-func runRubyVersionBlock(t *testing.T, repoDir, rubyVersion string) string {
-	t.Helper()
-
-	var sb strings.Builder
-	rbUpdater.WriteRubyUpgradeCommands(&sb)
-
-	return scriptrunner.Run(t, repoDir, sb.String(), scriptrunner.Options{
-		Env:   map[string]string{"TARGET_RUBY_VERSION": rubyVersion},
-		Stubs: []string{"gem", "bundle", "bundler", "ruby"},
-	})
-}
-
 func TestRubyVersionPinIsNeverDowngraded(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should keep the pin when the repository runs a newer Ruby than the latest stable", func(t *testing.T) {
-		t.Parallel()
+	cases := []scriptrunner.PinCase{
+		{
+			Name:   "keep the pin when the repository runs a newer Ruby than the latest stable",
+			File:   ".ruby-version",
+			Pinned: "3.5.0", Want: "3.5.0",
+			Marker: "RUBY_VERSION_UPDATED=false",
+		},
+		{
+			Name:   "raise the pin when the repository is behind the latest stable",
+			File:   ".ruby-version",
+			Pinned: "3.2.2", Want: "3.4.1",
+			Marker: "RUBY_VERSION_UPDATED=true",
+		},
+		{
+			// An MRI version number is not a replacement for a JRuby pin.
+			Name:   "keep a pin naming an implementation other than MRI",
+			File:   ".ruby-version",
+			Pinned: "jruby-9.4.9.0", Want: "jruby-9.4.9.0",
+			Marker: "RUBY_VERSION_UPDATED=false",
+		},
+	}
 
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, ".ruby-version", "3.5.0\n")
+	var sb strings.Builder
+	rbUpdater.WriteRubyUpgradeCommands(&sb)
+	opts := scriptrunner.Options{
+		Env:   map[string]string{"TARGET_RUBY_VERSION": "3.4.1"},
+		Stubs: []string{"gem", "bundle", "bundler", "ruby"},
+	}
+	for _, testCase := range cases {
+		t.Run("should "+testCase.Name, func(t *testing.T) {
+			t.Parallel()
 
-		// when
-		output := runRubyVersionBlock(t, repoDir, "3.4.1")
-
-		// then
-		assert.Equal(t, "3.5.0", scriptrunner.Trimmed(t, repoDir, ".ruby-version"))
-		assert.Contains(t, output, "RUBY_VERSION_UPDATED=false")
-	})
-
-	t.Run("should raise the pin when the repository is behind the latest stable", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, ".ruby-version", "3.2.2\n")
-
-		// when
-		output := runRubyVersionBlock(t, repoDir, "3.4.1")
-
-		// then
-		assert.Equal(t, "3.4.1", scriptrunner.Trimmed(t, repoDir, ".ruby-version"))
-		assert.Contains(t, output, "RUBY_VERSION_UPDATED=true")
-	})
-
-	t.Run("should keep a pin naming an implementation other than MRI", func(t *testing.T) {
-		t.Parallel()
-
-		// given — an MRI version number is not a replacement for a JRuby pin
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, ".ruby-version", "jruby-9.4.9.0\n")
-
-		// when
-		output := runRubyVersionBlock(t, repoDir, "3.4.1")
-
-		// then
-		assert.Equal(t, "jruby-9.4.9.0", scriptrunner.Trimmed(t, repoDir, ".ruby-version"))
-		assert.Contains(t, output, "RUBY_VERSION_UPDATED=false")
-	})
+			scriptrunner.AssertVersionPin(t, sb.String(), opts, testCase)
+		})
+	}
 }
 
 func TestRubyDockerfileTagIsNeverDowngraded(t *testing.T) {
 	t.Parallel()
 
-	runDockerfileBlock := func(t *testing.T, repoDir, rubyVersion string) {
-		t.Helper()
-
-		var sb strings.Builder
-		rbUpdater.WriteDockerfileUpdate(&sb)
-		scriptrunner.Run(t, repoDir, sb.String(), scriptrunner.Options{
-			Env: map[string]string{
-				"TARGET_RUBY_VERSION":  rubyVersion,
-				"RUBY_VERSION_CHANGED": "true",
-			},
-		})
+	cases := []scriptrunner.ImageCase{
+		{
+			Name:       "keep a base image newer than the version being rolled out",
+			Dockerfile: "FROM ruby:3.5.0-slim\n",
+			Want:       []string{"FROM ruby:3.5.0-slim"},
+		},
+		{
+			Name:       "upgrade a base image older than the version being rolled out",
+			Dockerfile: "FROM ruby:3.2.2-slim\n",
+			Want:       []string{"FROM ruby:3.4.1-slim"},
+		},
 	}
 
-	t.Run("should keep a base image newer than the version being rolled out", func(t *testing.T) {
-		t.Parallel()
+	var sb strings.Builder
+	rbUpdater.WriteDockerfileUpdate(&sb)
+	opts := scriptrunner.Options{
+		Env: map[string]string{"TARGET_RUBY_VERSION": "3.4.1", "RUBY_VERSION_CHANGED": "true"},
+	}
+	for _, testCase := range cases {
+		t.Run("should "+testCase.Name, func(t *testing.T) {
+			t.Parallel()
 
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, "Dockerfile", "FROM ruby:3.5.0-slim\n")
-
-		// when
-		runDockerfileBlock(t, repoDir, "3.4.1")
-
-		// then
-		assert.Contains(t, scriptrunner.ReadFile(t, repoDir, "Dockerfile"), "FROM ruby:3.5.0-slim")
-	})
-
-	t.Run("should upgrade a base image older than the version being rolled out", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, "Dockerfile", "FROM ruby:3.2.2-slim\n")
-
-		// when
-		runDockerfileBlock(t, repoDir, "3.4.1")
-
-		// then
-		assert.Contains(t, scriptrunner.ReadFile(t, repoDir, "Dockerfile"), "FROM ruby:3.4.1-slim")
-	})
+			scriptrunner.AssertDockerfileTags(t, sb.String(), opts, testCase)
+		})
+	}
 }
 
 func TestRubyVersionContextIsNeverADowngrade(t *testing.T) {
@@ -133,10 +97,7 @@ func TestRubyVersionContextIsNeverADowngrade(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{".ruby-version": true}).
-			WithFileContents(map[string]string{".ruby-version": "3.5.0\n"}).
-			BuildSpy()
+		provider := repositorydoubles.SpyProviderWithFile(".ruby-version", "3.5.0\n")
 
 		// when
 		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, downgradeRepo, "3.4.1")
@@ -150,10 +111,7 @@ func TestRubyVersionContextIsNeverADowngrade(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{".ruby-version": true}).
-			WithFileContents(map[string]string{".ruby-version": "3.2.2\n"}).
-			BuildSpy()
+		provider := repositorydoubles.SpyProviderWithFile(".ruby-version", "3.2.2\n")
 
 		// when
 		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, downgradeRepo, "3.4.1")

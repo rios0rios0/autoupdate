@@ -32,6 +32,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
   the image was already newer than the version being rolled out
 - fixed pins that name no version at all -- `lts/*` in a `.nvmrc`, `system` in a `.ruby-version`, a JRuby
   or TruffleRuby release -- being replaced with a version number from an unrelated release channel
+- fixed `isDockerHubImage` splitting an image name with `strings.SplitN` where `strings.Cut` says the
+  same thing, which `golangci-lint` 2.13 reports as a `modernize` finding
 - fixed build metadata being read as a pre-release when two pins are compared. Semantic Versioning
   excludes everything after a `+` from precedence, so `1.0.0+build.1` and `1.0.0` name the same release;
   reading it as a pre-release instead rewrote one to the other as though a pre-release were being
@@ -39,6 +41,10 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Changed
 
+- changed the five per-ecosystem `Dockerfile` base-image rewrites to share one emitter,
+  `support.DockerfileTagUpdateScript`, so the walk and the version guard it depends on have a single
+  spelling -- five hand-copied versions of that loop is how the guard came to be missing from some
+  of them in the first place
 - changed the Go module dependencies to their latest versions
 - changed the Go module dependencies to their latest versions
 

@@ -27,104 +27,67 @@ func globalJSONWith(version string) string {
 func TestDotnetDockerfileTagIsNeverDowngraded(t *testing.T) {
 	t.Parallel()
 
-	runDockerfileBlock := func(t *testing.T, repoDir, dotnetVersion string) {
-		t.Helper()
-
-		var sb strings.Builder
-		csUpdater.WriteDockerfileUpdate(&sb)
-		scriptrunner.Run(t, repoDir, sb.String(), scriptrunner.Options{
-			Env: map[string]string{
-				"DOTNET_VERSION":         dotnetVersion,
-				"DOTNET_VERSION_CHANGED": "true",
+	cases := []scriptrunner.ImageCase{
+		{
+			Name: "keep base images newer than the SDK being rolled out",
+			Dockerfile: "FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build\n" +
+				"FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime\n",
+			Want: []string{
+				"mcr.microsoft.com/dotnet/sdk:10.0",
+				"mcr.microsoft.com/dotnet/aspnet:10.0",
 			},
-		})
+		},
+		{
+			Name: "upgrade base images older than the SDK being rolled out",
+			Dockerfile: "FROM mcr.microsoft.com/dotnet/sdk:6.0 AS build\n" +
+				"FROM mcr.microsoft.com/dotnet/runtime:6.0 AS runtime\n",
+			Want: []string{
+				"mcr.microsoft.com/dotnet/sdk:8.0",
+				"mcr.microsoft.com/dotnet/runtime:8.0",
+			},
+		},
 	}
 
-	t.Run("should keep base images newer than the SDK being rolled out", func(t *testing.T) {
-		t.Parallel()
+	var sb strings.Builder
+	csUpdater.WriteDockerfileUpdate(&sb)
+	opts := scriptrunner.Options{
+		Env: map[string]string{"DOTNET_VERSION": "8.0.404", "DOTNET_VERSION_CHANGED": "true"},
+	}
+	for _, testCase := range cases {
+		t.Run("should "+testCase.Name, func(t *testing.T) {
+			t.Parallel()
 
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, "Dockerfile",
-			"FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build\n"+
-				"FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime\n")
-
-		// when
-		runDockerfileBlock(t, repoDir, "8.0.404")
-
-		// then
-		content := scriptrunner.ReadFile(t, repoDir, "Dockerfile")
-		assert.Contains(t, content, "mcr.microsoft.com/dotnet/sdk:10.0")
-		assert.Contains(t, content, "mcr.microsoft.com/dotnet/aspnet:10.0")
-	})
-
-	t.Run("should upgrade base images older than the SDK being rolled out", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := t.TempDir()
-		scriptrunner.WriteFile(t, repoDir, "Dockerfile",
-			"FROM mcr.microsoft.com/dotnet/sdk:6.0 AS build\n"+
-				"FROM mcr.microsoft.com/dotnet/runtime:6.0 AS runtime\n")
-
-		// when
-		runDockerfileBlock(t, repoDir, "8.0.404")
-
-		// then
-		content := scriptrunner.ReadFile(t, repoDir, "Dockerfile")
-		assert.Contains(t, content, "mcr.microsoft.com/dotnet/sdk:8.0")
-		assert.Contains(t, content, "mcr.microsoft.com/dotnet/runtime:8.0")
-	})
+			scriptrunner.AssertDockerfileTags(t, sb.String(), opts, testCase)
+		})
+	}
 }
 
 func TestDotnetVersionContextIsNeverADowngrade(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should report no version upgrade when global.json is ahead of the feed", func(t *testing.T) {
-		t.Parallel()
+	cases := []struct {
+		name   string
+		pinned string
+		want   bool
+	}{
+		{"report no version upgrade when global.json is ahead of the feed", "10.0.100", false},
+		// An SDK preview is deliberately ahead of the stable channel.
+		{"report no version upgrade when a release replaces a newer pre-release", "9.0.100-rc.2.24474.11", false},
+		{"report a version upgrade when global.json is behind the feed", "6.0.400", true},
+	}
 
-		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{"global.json": true}).
-			WithFileContents(map[string]string{"global.json": globalJSONWith("10.0.100")}).
-			BuildSpy()
+	for _, testCase := range cases {
+		t.Run("should "+testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-		// when
-		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, dotnetDowngradeRepo, "8.0.404")
+			// given
+			provider := repositorydoubles.SpyProviderWithFile("global.json", globalJSONWith(testCase.pinned))
 
-		// then
-		assert.False(t, vCtx.NeedsVersionUpgrade)
-	})
+			// when
+			vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, dotnetDowngradeRepo, "8.0.404")
 
-	t.Run("should report no version upgrade when a release replaces a newer pre-release", func(t *testing.T) {
-		t.Parallel()
-
-		// given — an SDK preview is deliberately ahead of the stable channel
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{"global.json": true}).
-			WithFileContents(map[string]string{"global.json": globalJSONWith("9.0.100-rc.2.24474.11")}).
-			BuildSpy()
-
-		// when
-		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, dotnetDowngradeRepo, "8.0.404")
-
-		// then
-		assert.False(t, vCtx.NeedsVersionUpgrade)
-	})
-
-	t.Run("should report a version upgrade when global.json is behind the feed", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithExistingFiles(map[string]bool{"global.json": true}).
-			WithFileContents(map[string]string{"global.json": globalJSONWith("6.0.400")}).
-			BuildSpy()
-
-		// when
-		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, dotnetDowngradeRepo, "8.0.404")
-
-		// then
-		assert.True(t, vCtx.NeedsVersionUpgrade)
-	})
+			// then
+			assert.Equal(t, testCase.want, vCtx.NeedsVersionUpgrade)
+		})
+	}
 }

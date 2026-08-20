@@ -787,25 +787,12 @@ func writeEggInfoGitignore(sb *strings.Builder) {
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
-	// Emitted here as well as by the upgrade block, so the fragment carries the
-	// comparison it depends on instead of inheriting it from whatever ran first.
-	sb.WriteString(support.VersionGuardScript())
-	sb.WriteString("# Update Dockerfile python image tags when the Python version was bumped.\n")
-	sb.WriteString("if [ \"$PYTHON_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString("    echo \"Updating Dockerfile python image tags to $PYTHON_VERSION...\"\n")
-	sb.WriteString(
-		"    find . -type f -not -path './.git/*' " +
-			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
-			"-print0 | while IFS= read -r -d '' df; do\n",
-	)
-	sb.WriteString("        if autoupdate_image_tag_is_older \"$df\" \"python\" \"$PYTHON_VERSION\"; then\n")
-	sb.WriteString(
-		"            sed \"s|python:[0-9][0-9.]*|python:${PYTHON_VERSION}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("            echo \"  Updated $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("    done\n")
-	sb.WriteString("fi\n\n")
+	sb.WriteString(support.DockerfileTagUpdateScript(support.DockerfileTagUpdate{
+		ChangedVar: "PYTHON_VERSION_CHANGED",
+		VersionVar: "PYTHON_VERSION",
+		Subject:    "Python",
+		Images:     []support.DockerfileImage{{Name: updaterName}},
+	}))
 }
 
 func writeCommitAndPush(sb *strings.Builder) {

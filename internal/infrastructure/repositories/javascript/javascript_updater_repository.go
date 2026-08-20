@@ -619,25 +619,12 @@ func writeJSUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
-	// Emitted here as well as by the upgrade block, so the fragment carries the
-	// comparison it depends on instead of inheriting it from whatever ran first.
-	sb.WriteString(support.VersionGuardScript())
-	sb.WriteString("# Update Dockerfile node image tags when the Node.js version was bumped.\n")
-	sb.WriteString("if [ \"$NODE_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString("    echo \"Updating Dockerfile node image tags to $NODE_VERSION...\"\n")
-	sb.WriteString(
-		"    find . -type f -not -path './.git/*' " +
-			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
-			"-print0 | while IFS= read -r -d '' df; do\n",
-	)
-	sb.WriteString("        if autoupdate_image_tag_is_older \"$df\" \"node\" \"$NODE_VERSION\"; then\n")
-	sb.WriteString(
-		"            sed \"s|node:[0-9][0-9.]*|node:${NODE_VERSION}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("            echo \"  Updated $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("    done\n")
-	sb.WriteString("fi\n\n")
+	sb.WriteString(support.DockerfileTagUpdateScript(support.DockerfileTagUpdate{
+		ChangedVar: "NODE_VERSION_CHANGED",
+		VersionVar: "NODE_VERSION",
+		Subject:    "Node.js",
+		Images:     []support.DockerfileImage{{Name: "node"}},
+	}))
 }
 
 func writeCommitAndPush(sb *strings.Builder) {

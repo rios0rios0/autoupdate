@@ -207,7 +207,7 @@ func runLanguageUpgradeScript(
 		TempPattern: "autoupdate-python-local-*",
 		Dir:         repoDir,
 		Env:         buildLocalEnv(params),
-		LogPrefix:   "python",
+		LogPrefix:   updaterName,
 		Verbose:     opts.Verbose,
 	})
 }

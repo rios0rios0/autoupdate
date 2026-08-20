@@ -666,34 +666,19 @@ func writeJavaUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
-	// Emitted here as well as by the upgrade block, so the fragment carries the
-	// comparison it depends on instead of inheriting it from whatever ran first.
-	sb.WriteString(support.VersionGuardScript())
-	sb.WriteString("# Update Dockerfile Java image tags when the Java version was bumped.\n")
-	sb.WriteString("if [ \"$JAVA_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString("    JAVA_MAJOR=$(echo \"$JAVA_VERSION\" | cut -d. -f1)\n")
-	sb.WriteString("    echo \"Updating Dockerfile Java image tags to major version $JAVA_MAJOR...\"\n")
-	sb.WriteString(
-		"    find . -type f -not -path './.git/*' " +
-			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
-			"-print0 | while IFS= read -r -d '' df; do\n",
-	)
-	sb.WriteString("        UPDATED=false\n")
-	sb.WriteString("        for IMAGE in eclipse-temurin openjdk amazoncorretto; do\n")
-	sb.WriteString(
-		"            if autoupdate_image_tag_is_older \"$df\" \"$IMAGE\" \"$JAVA_MAJOR\" '[0-9][0-9]*'; then\n",
-	)
-	sb.WriteString(
-		"                sed \"s|${IMAGE}:[0-9][0-9]*|${IMAGE}:${JAVA_MAJOR}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("                UPDATED=true\n")
-	sb.WriteString("            fi\n")
-	sb.WriteString("        done\n")
-	sb.WriteString("        if [ \"$UPDATED\" = \"true\" ]; then\n")
-	sb.WriteString("            echo \"  Updated $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("    done\n")
-	sb.WriteString("fi\n\n")
+	// The JDK images pin a bare major, so the tag written is the major of the
+	// fetched version rather than the version itself.
+	sb.WriteString(support.DockerfileTagUpdateScript(support.DockerfileTagUpdate{
+		ChangedVar: "JAVA_VERSION_CHANGED",
+		VersionVar: "JAVA_MAJOR",
+		Subject:    "Java",
+		Prelude:    "    JAVA_MAJOR=$(echo \"$JAVA_VERSION\" | cut -d. -f1)\n",
+		Images: []support.DockerfileImage{
+			{Name: "eclipse-temurin", TagPattern: support.MajorOnlyTagPattern},
+			{Name: "openjdk", TagPattern: support.MajorOnlyTagPattern},
+			{Name: "amazoncorretto", TagPattern: support.MajorOnlyTagPattern},
+		},
+	}))
 }
 
 func writeCommitAndPush(sb *strings.Builder) {

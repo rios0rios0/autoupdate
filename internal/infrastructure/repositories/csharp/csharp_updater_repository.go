@@ -621,51 +621,19 @@ func writeNuGetUpdate(sb *strings.Builder) {
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
-	// Emitted here as well as by the upgrade block, so the fragment carries the
-	// comparison it depends on instead of inheriting it from whatever ran first.
-	sb.WriteString(support.VersionGuardScript())
-	sb.WriteString("# Update Dockerfile .NET image tags when the SDK version was bumped.\n")
-	sb.WriteString("if [ \"$DOTNET_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString("    # Extract major.minor from the full version (e.g. 8.0.11 -> 8.0)\n")
-	sb.WriteString("    DOTNET_MAJOR_MINOR=$(echo \"$DOTNET_VERSION\" | cut -d '.' -f 1,2)\n")
-	sb.WriteString("    echo \"Updating Dockerfile .NET image tags to $DOTNET_MAJOR_MINOR...\"\n")
-	sb.WriteString(
-		"    find . -type f -not -path './.git/*' " +
-			"\\( -name 'Dockerfile' -o -name 'Dockerfile.*' -o -name '*.Dockerfile' \\) " +
-			"-print0 | while IFS= read -r -d '' df; do\n",
-	)
-	sb.WriteString(
-		"        if autoupdate_image_tag_is_older \"$df\" \"mcr.microsoft.com/dotnet/sdk\" " +
-			"\"$DOTNET_MAJOR_MINOR\"; then\n",
-	)
-	sb.WriteString(
-		"            sed \"s|mcr.microsoft.com/dotnet/sdk:[0-9][0-9.]*|mcr.microsoft.com/dotnet/sdk:${DOTNET_MAJOR_MINOR}|g\" " +
-			"\"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("            echo \"  Updated SDK image in $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString(
-		"        if autoupdate_image_tag_is_older \"$df\" \"mcr.microsoft.com/dotnet/aspnet\" " +
-			"\"$DOTNET_MAJOR_MINOR\"; then\n",
-	)
-	sb.WriteString(
-		"            sed \"s|mcr.microsoft.com/dotnet/aspnet:[0-9][0-9.]*|mcr.microsoft.com/dotnet/aspnet:${DOTNET_MAJOR_MINOR}|g\" " +
-			"\"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("            echo \"  Updated ASP.NET image in $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString(
-		"        if autoupdate_image_tag_is_older \"$df\" \"mcr.microsoft.com/dotnet/runtime\" " +
-			"\"$DOTNET_MAJOR_MINOR\"; then\n",
-	)
-	sb.WriteString(
-		"            sed \"s|mcr.microsoft.com/dotnet/runtime:[0-9][0-9.]*|mcr.microsoft.com/dotnet/runtime:${DOTNET_MAJOR_MINOR}|g\" " +
-			"\"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-	)
-	sb.WriteString("            echo \"  Updated Runtime image in $df\"\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("    done\n")
-	sb.WriteString("fi\n\n")
+	// The .NET images pin major.minor, so the tag written is derived from the
+	// full SDK version (8.0.11 -> 8.0).
+	sb.WriteString(support.DockerfileTagUpdateScript(support.DockerfileTagUpdate{
+		ChangedVar: "DOTNET_VERSION_CHANGED",
+		VersionVar: "DOTNET_MAJOR_MINOR",
+		Subject:    ".NET",
+		Prelude:    "    DOTNET_MAJOR_MINOR=$(echo \"$DOTNET_VERSION\" | cut -d '.' -f 1,2)\n",
+		Images: []support.DockerfileImage{
+			{Name: "mcr.microsoft.com/dotnet/sdk", Label: "the SDK image"},
+			{Name: "mcr.microsoft.com/dotnet/aspnet", Label: "the ASP.NET image"},
+			{Name: "mcr.microsoft.com/dotnet/runtime", Label: "the runtime image"},
+		},
+	}))
 }
 
 func writeCommitAndPush(sb *strings.Builder) {
