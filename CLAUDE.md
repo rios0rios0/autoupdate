@@ -125,7 +125,10 @@ rewritten. `support.VersionGuardScript()` emits the bash counterpart —
 `autoupdate_version_is_newer <candidate> <current>`, plus `autoupdate_image_tag_is_older <file> <image>
 <version> [tag-pattern]` for Dockerfile base images, where one file may pin an image several times and
 the `sed` that rewrites them compares nothing. `internal/support/version_test.go` runs the same table
-through both implementations, so they cannot drift. Any script fragment that calls a guard must emit
+through both implementations, so they cannot drift. That table is the only thing keeping the two
+halves honest, so a new comparison rule needs rows that would actually tell them apart — the
+single-digit `rc.1`/`rc.2` rows it started with agreed under both string and semver ordering, which is
+how a lexical pre-release comparison survived in the bash half. Any script fragment that calls a guard must emit
 `VersionGuardScript()` itself rather than inheriting the definition from whatever ran before it.
 
 Comparison follows Semantic Versioning precedence on both sides: a final release outranks any

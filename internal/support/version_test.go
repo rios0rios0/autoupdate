@@ -53,6 +53,15 @@ func versionCases() []versionCase {
 		{"final replaced by a pre-release", "9.0.100", "9.0.100-rc.2", false},
 		{"newer pre-release", "9.0.100-rc.1", "9.0.100-rc.2", true},
 		{"older pre-release", "9.0.100-rc.2", "9.0.100-rc.1", false},
+		// Multi-digit identifiers are where a string comparison and semver
+		// precedence part ways, so the table has to reach past rc.1/rc.2.
+		{"double-digit pre-release", "9.0.100-rc.9", "9.0.100-rc.10", true},
+		{"double-digit pre-release backwards", "9.0.100-rc.10", "9.0.100-rc.9", false},
+		{"double-digit against single digit", "9.0.100-rc.2", "9.0.100-rc.11", true},
+		{"longer pre-release outranks its prefix", "9.0.100-rc.2", "9.0.100-rc.2.24474.11", true},
+		{"shorter pre-release loses to its extension", "9.0.100-rc.2.24474.11", "9.0.100-rc.2", false},
+		{"numeric identifier ranks below alphanumeric", "1.0.0-1", "1.0.0-alpha", true},
+		{"alphanumeric identifier ranks above numeric", "1.0.0-alpha", "1.0.0-1", false},
 		{"build metadata added to an unchanged release", "1.0.0", "1.0.0+build.1", false},
 		{"build metadata dropped from an unchanged release", "1.0.0+build.1", "1.0.0", false},
 		{"build metadata differing on both sides", "1.0.0+build.1", "1.0.0+build.2", false},

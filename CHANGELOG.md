@@ -18,6 +18,12 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Fixed
 
+- fixed the bash half of the version guard ordering pre-release identifiers as plain strings while the
+  Go half followed Semantic Versioning precedence. `rc.10` sorts below `rc.9` as text but above it as a
+  version, so for a pin like a .NET SDK preview the two halves disagreed: Go named the branch, the
+  commit and the pull request after an upgrade the script then declined to write. Both halves now
+  compare identifiers left to right, numerically where they are numeric, ranking a numeric identifier
+  below an alphanumeric one and a longer set above its own prefix
 - fixed the version pin rewrites downgrading a repository that tracks a release ahead of the one the
   release feed reports. Every pin was compared with a plain "is it different?" check, so a `.nvmrc`
   reading `26.7.0` was rewritten to the `24.19.0` LTS the Node.js feed returns -- inside a pull request

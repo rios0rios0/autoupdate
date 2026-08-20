@@ -1,3 +1,5 @@
+//go:build integration || unit || test
+
 // Package scriptrunner executes a fragment of a generated upgrade script
 // against a temporary repository, so that a property of the emitted bash is
 // proven by running it rather than by matching its text.

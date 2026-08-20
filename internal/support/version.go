@@ -163,6 +163,34 @@ autoupdate_version_is_newer() {
             return substr(v, i + 1)
         }
         function numeric(v) { return v ~ /^[0-9]+(\.[0-9]+)*$/ }
+        # Semver pre-release precedence: identifiers are compared left to right,
+        # numeric ones numerically and the rest as ASCII, a numeric identifier
+        # always ranks below an alphanumeric one, and when everything so far is
+        # equal the longer set wins. A plain string comparison gets the numeric
+        # cases wrong -- "rc.10" sorts below "rc.9" -- which made the script
+        # refuse rewrites the Go side had already named the branch and the pull
+        # request after.
+        function compare_prerelease(a, b,   an, bn, ai, bi, i, n, x, y, xnum, ynum) {
+            an = split(a, ai, ".")
+            bn = split(b, bi, ".")
+            n = (an > bn) ? an : bn
+            for (i = 1; i <= n; i++) {
+                if (i > an) return -1
+                if (i > bn) return 1
+                x = ai[i]; y = bi[i]
+                xnum = (x ~ /^[0-9]+$/); ynum = (y ~ /^[0-9]+$/)
+                if (xnum && ynum) {
+                    if (x + 0 > y + 0) return 1
+                    if (x + 0 < y + 0) return -1
+                } else if (xnum != ynum) {
+                    return ynum ? 1 : -1
+                } else {
+                    if (x > y) return 1
+                    if (x < y) return -1
+                }
+            }
+            return 0
+        }
         BEGIN {
             candidate_release = release(cand)
             current_release = release(cur)
@@ -184,7 +212,7 @@ autoupdate_version_is_newer() {
             current_pre = prerelease(cur)
             if (candidate_pre == "" && current_pre != "") exit 0
             if (candidate_pre != "" && current_pre == "") exit 1
-            if (candidate_pre > current_pre) exit 0
+            if (compare_prerelease(candidate_pre, current_pre) > 0) exit 0
             exit 1
         }
     '
