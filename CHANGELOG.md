@@ -16,6 +16,19 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.21.3] - 2026-08-22
+
+### Changed
+
+- changed the Go version to `1.27.0` and updated all module dependencies
+- changed the per-ecosystem version pin rewrites to share one emitter, `support.VersionPinUpdateScript`,
+  covering `.java-version`, `.python-version` and `.ruby-version`
+- changed the five per-ecosystem `Dockerfile` base-image rewrites to share one emitter,
+  `support.DockerfileTagUpdateScript`, so the walk and the version guard it depends on have a single
+  spelling -- five hand-copied versions of that loop is how the guard came to be missing from some
+  of them in the first place
+- changed the Go module dependencies to their latest versions
+
 ### Fixed
 
 - fixed the bash half of the version guard ordering pre-release identifiers as plain strings while the
@@ -44,23 +57,6 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
   excludes everything after a `+` from precedence, so `1.0.0+build.1` and `1.0.0` name the same release;
   reading it as a pre-release instead rewrote one to the other as though a pre-release were being
   promoted, and refused the genuine upgrade from `1.0.0-rc.1` to `1.0.0+build.1`
-
-### Changed
-
-- changed the per-ecosystem version pin rewrites to share one emitter, `support.VersionPinUpdateScript`,
-- changed the Go version to `1.27.0` and updated all module dependencies
-  covering `.java-version`, `.python-version` and `.ruby-version`
-- changed the five per-ecosystem `Dockerfile` base-image rewrites to share one emitter,
-  `support.DockerfileTagUpdateScript`, so the walk and the version guard it depends on have a single
-  spelling -- five hand-copied versions of that loop is how the guard came to be missing from some
-  of them in the first place
-- changed the Go module dependencies to their latest versions
-- changed the Go module dependencies to their latest versions
-
-### Fixed
-
-- fixed `isDockerHubImage` splitting an image name with `strings.SplitN` where `strings.Cut` says the
-  same thing, which `golangci-lint` 2.13 reports as a `modernize` finding
 - fixed GitHub Actions workflows never being upgraded on the clone-based path. `support.WalkFilesByExtension` and `support.WalkFilesByPredicate` refused to descend into any directory whose name began with a dot, which put `.github/workflows/` out of reach of the pipeline updater's local scan. Because the pipeline updater implements `LocalUpdater`, `autoupdate run` always takes that clone-based path, so a repository was matched by the detector, cloned, scanned to no effect and reported as up to date — only a root `azure-pipelines.yml` / `.azure-pipelines.yml` and `azure-devops/` were ever reachable on disk. Both action pins (`uses: owner/repo@v4`) and language versions (`go-version:`, `python-version:`) inside workflows were affected
 - fixed the walkers conflating "hidden" with "not the repository's own source". The blanket dot-directory rule is replaced by an explicit deny list of trees a repository does not author — version-control metadata (`.git`, `.hg`, `.svn`), vendored code (`vendor`, `node_modules`) and tool caches (`.terraform`, `.terragrunt-cache`, `.venv`, `.gradle`, `.dart_tool`, `.next` and friends) — shared by both walkers through a single traversal so the rule cannot drift between them. A deny list was chosen over an allow list of hidden directories that matter because the bug being fixed *is* a missing entry in an implicit allow list: `.gitea/workflows/`, `.forgejo/workflows/` and `.woodpecker/` would each have been invisible in turn. As a consequence the Dockerfile updater now also sees committed hidden sources such as `.devcontainer/Dockerfile`, and no longer rewrites base images in `node_modules/` or `vendor/` copies that could never reach the pull request while still being counted in the changelog and PR body. Go module discovery is unchanged: `moduleDirsFromPaths` keeps dropping hidden and vendored segments so it stays in step with the `find` in the generated upgrade script
 
