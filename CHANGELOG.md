@@ -47,6 +47,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Changed
 
+- refreshed `.github/copilot-instructions.md` to document the version-pin-only-moves-forward and
+  repository-walking invariants, matching the guidance already in `CLAUDE.md`
 - changed the per-ecosystem version pin rewrites to share one emitter, `support.VersionPinUpdateScript`,
 - changed the Go version to `1.27.0` and updated all module dependencies
   covering `.java-version`, `.python-version` and `.ruby-version`
