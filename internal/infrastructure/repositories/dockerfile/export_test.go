@@ -30,6 +30,7 @@ func ScanDockerfile(content, filePath string) []scanResult {
 			CurrentVer: ref.dep.CurrentVer,
 			FilePath:   ref.dep.FilePath,
 			Line:       ref.dep.Line,
+			Digest:     ref.parsed.Digest,
 		}
 	}
 	return results
@@ -41,6 +42,7 @@ type scanResult struct {
 	CurrentVer string
 	FilePath   string
 	Line       int
+	Digest     string
 }
 
 // IsDockerfilePath is exported for testing.
@@ -130,12 +132,51 @@ func ApplyUpgrades(tasks []UpgradeTask, allRefs []ImageRef) []entities.FileChang
 // ImageRef is exported for testing.
 type ImageRef = imageRef
 
-// SetFetchTagsFunc overrides the tag fetching function for testing.
+// RegistryTag is exported for testing.
+type RegistryTag = registryTag
+
+// SetFetchTagsFunc overrides the tag fetching function for testing with one
+// that reports tag names only, as a registry listing without digests would.
 // It returns a cleanup function that restores the original.
 func SetFetchTagsFunc(fn func(ctx context.Context, ref *parsedImageRef) ([]string, error)) func() {
+	return SetFetchRegistryTagsFunc(
+		func(ctx context.Context, ref *parsedImageRef) ([]RegistryTag, error) {
+			names, err := fn(ctx, ref)
+			if err != nil {
+				return nil, err
+			}
+
+			tags := make([]RegistryTag, 0, len(names))
+			for _, name := range names {
+				tags = append(tags, RegistryTag{Name: name})
+			}
+			return tags, nil
+		},
+	)
+}
+
+// SetFetchRegistryTagsFunc overrides the tag fetching function for testing with
+// one that reports the digest each tag resolves to, which is what a real
+// listing carries. It returns a cleanup function that restores the original.
+func SetFetchRegistryTagsFunc(
+	fn func(ctx context.Context, ref *parsedImageRef) ([]RegistryTag, error),
+) func() {
 	original := fetchTagsFunc
 	fetchTagsFunc = fn
 	return func() { fetchTagsFunc = original }
+}
+
+// NewImageRefWithDigest creates an imageRef for a FROM clause that pins a
+// digest alongside its tag.
+func NewImageRefWithDigest(content, filePath, imageName, currentVer, digest string) ImageRef {
+	ref := NewImageRefFromContent(content, filePath, imageName, imageName, currentVer)
+	ref.parsed.Digest = digest
+	return ref
+}
+
+// UpgradeTaskDigest returns the digest a task writes back, exported for testing.
+func UpgradeTaskDigest(task UpgradeTask) string {
+	return task.newDigest
 }
 
 // DetermineUpgrades is exported for testing.
@@ -167,6 +208,14 @@ func NewUpgradeTaskFull(imageName, source, currentVer, newTag, filePath string) 
 		newTag: newTag,
 		parsed: &parsedImageRef{Image: imageName},
 	}
+}
+
+// NewUpgradeTaskWithDigest creates an upgradeTask that re-pins a digest, for
+// testing.
+func NewUpgradeTaskWithDigest(imageName, currentVer, newTag, filePath, digest string) UpgradeTask {
+	task := NewUpgradeTaskFull(imageName, imageName, currentVer, newTag, filePath)
+	task.newDigest = digest
+	return task
 }
 
 // NewImageRefFromContent creates an imageRef from Dockerfile content for testing.

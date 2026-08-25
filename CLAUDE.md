@@ -185,6 +185,32 @@ and a release number from an unrelated channel is not a comparable replacement. 
 `dockerfile` and the Go Dockerfile tag rewriter (`golang/dockerfile_tags.go`) reach the same conclusion
 through `golang.org/x/mod/semver` directly, since they compare registry tags rather than pin files.
 
+### Digest-Pinned Base Images
+
+A `Dockerfile` clause pinning both halves — `FROM python:3.13-slim@sha256:...` — is rewritten **only by
+code that can re-resolve the digest**, because the digest is what Docker pulls. Moving the tag and
+leaving the digest behind produces a diff that reads as an upgrade and builds the previous image, and
+nothing downstream catches it: the version pin really did move, so the branch, the commit message, the
+changelog entry and the PR title are all consistent with an upgrade that never reaches the build.
+
+The `dockerfile` updater owns them. `fromPattern` captures the digest, the Docker Hub listing that
+already answers "does this tag exist?" carries each tag's digest (`registryTag`), and `applyUpgrades`
+rewrites `image:tag@digest` as one unit through `upgradeTask.currentRef`/`newRef`. The substitution
+goes through `replaceRef`, which requires the match to end the reference: a plain `python:3.13-slim`
+also occurs inside `python:3.13-slim@sha256:...`, so a substring replace would rewrite the
+digest-pinned clause it was told to leave alone (and `python:3.1` inside `python:3.13` is the same trap
+one tag narrower). When the registry reports no digest for the tag being moved to, the clause is left
+exactly as it is — writing the tag alone pins the previous manifest beside a version it is not, and
+dropping the digest silently un-pins an image the repository pinned on purpose.
+
+Every other rewrite path has no registry, and therefore skips a digest-pinned clause instead of
+half-rewriting it: `support.DockerfileTagUpdateScript`, where the `sed` address and
+`autoupdate_image_tag_is_older` both key on the single `digestPinMarker` constant so the guard and the
+substitution cannot disagree about which lines are in play, and `golang/dockerfile_tags.go`, which has
+skipped them from the start. In batch mode the `dockerfile` updater runs against the same aggregate
+branch, so those clauses are still upgraded — correctly. Do not "fix" a skipped clause by dropping its
+digest to make the substitution apply.
+
 ### Package Manager Selection (Python)
 
 A repository is upgraded with the dependency manager it already uses; an update run must never migrate it to a different one. `newPythonProject` (`internal/infrastructure/repositories/python/toolchain.go`) is the single place that makes that decision, and `detectRemoteProject`/`detectLocalProject` are the only ways to reach it — do not re-derive the toolchain at a call site. PDM is selected **only** when a `pyproject.toml` is present: that file is PDM's project definition, so running `pdm update` without one makes PDM write a fresh `pyproject.toml`, converting a pip/`requirements.txt` repository into a PDM repository inside what was meant to be a dependency bump. A `pdm.lock` with no `pyproject.toml` beside it therefore stays on pip. A `pyproject.toml` naming PDM is not enough on its own either: `[tool.pdm]` is also how a pip project declares its package layout, so when a `requirements.txt` is present and no `pdm.lock` has ever been committed, the repository keeps pip. Upgrading it through PDM would resolve a lock file from scratch — the whole of the resulting pull request, since `pdm update` leaves the pyproject's own constraints alone — while never touching the `requirements.txt` the build installs from. A committed `pdm.lock` is what settles the question the other way, which is why `pdmMarkers` keeps the two signals apart instead of collapsing them into one boolean. The resolved `pythonProject` flows through `upgradeParams`/`localUpgradeParams` into the generated script, the changelog entry, the PR description and the dry-run report, so those cannot disagree about what ran. On the pip path the script additionally brackets the upgrade with `writeManifestSnapshot`/`writeManifestRestore`, which delete a `pyproject.toml` or `pdm.lock` that appeared during the run — never one the repository already owned.

@@ -223,10 +223,18 @@ autoupdate_version_is_newer() {
 # newer than every tag pinned for that image there. A Dockerfile that already
 # runs on a newer base image than the one being rolled out keeps it, instead of
 # being rewritten backwards by a substitution that compares nothing.
+#
+# Lines pinning a digest are excluded before anything is compared, because the
+# substitution this guards excludes them too: counting a tag the rewrite will
+# not touch would answer for a line that never moves.
 autoupdate_image_tag_is_older() {
     local file="$1" image="$2" version="$3" pattern="${4:-[0-9][0-9.]*}"
     local highest="" tag
-    for tag in $(grep -o "${image}:${pattern}" "$file" 2>/dev/null | sed "s|^${image}:||" | sort -u || true); do
+    local tags
+    tags="$(grep -v "` + digestPinMarker + `" "$file" 2>/dev/null \
+        | grep -o "${image}:${pattern}" \
+        | sed "s|^${image}:||" | sort -u || true)"
+    for tag in $tags; do
         if [ -z "$highest" ] || autoupdate_version_is_newer "$tag" "$highest"; then
             highest="$tag"
         fi

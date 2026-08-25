@@ -40,7 +40,7 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 | Ruby           | `Gemfile`, `*.gemspec`                 | Runs `bundle update` and bumps `.ruby-version`                                                                                                                   |
 | Java           | `build.gradle`, `pom.xml`              | Upgrades dependencies through Gradle or Maven, whichever the repository builds with                                                                              |
 | C#             | `*.csproj`, `*.sln`                    | Upgrades NuGet package references                                                                                                                                |
-| Dockerfile     | `Dockerfile`                           | Upgrades base image tags, verifying each against the registry                                                                                                    |
+| Dockerfile     | `Dockerfile`                           | Upgrades base image tags, verifying each against the registry, and re-pins the `@sha256:` digest of a digest-pinned image to the one the new tag resolves to      |
 | Pipeline/CI    | pipeline YAML                          | Upgrades pinned action refs (`uses: owner/repo@v4`) and language versions in `.github/workflows/`, `azure-devops/`, `azure-pipelines.yml` and `.azure-pipelines.yml` |
 
 Scans cover everything the repository commits, including hidden directories such as `.github/` and
@@ -68,8 +68,29 @@ release of the same version, and two pins differing only in build metadata (`1.0
 `1.0.0`) name the same release and neither replaces the other.
 
 Pins that name no version at all are left alone for the same reason: `lts/*` in a `.nvmrc`, `system` in
-a `.ruby-version`, a JRuby or TruffleRuby pin, and a digest-pinned image are deliberate choices, not
-stale version numbers.
+a `.ruby-version`, and a JRuby or TruffleRuby pin are deliberate choices, not stale version numbers.
+
+## Digest-Pinned Base Images
+
+A `Dockerfile` may pin a base image by both tag and digest:
+
+```dockerfile
+FROM python:3.13-slim@sha256:1f2e...
+```
+
+The digest is what Docker actually resolves. Moving the tag alone would produce a diff that reads as an
+upgrade while the build keeps pulling the previous image, so the two halves are always rewritten
+together: the Dockerfile updater takes the digest of the new tag from the same registry listing that
+told it the tag exists, and writes both.
+
+When the registry reports no digest for the tag being moved to, the clause is left exactly as it is.
+Dropping the digest would silently un-pin an image the repository pinned on purpose, and writing the
+tag without it would pin the old manifest beside a version it is not.
+
+The language updaters (Go, Python, JavaScript, Java, C#, Ruby) also refresh the base image of their own
+runtime in a `Dockerfile`. They do that inside the generated upgrade script, which does not talk to a
+registry, so they skip digest-pinned clauses and leave them to the Dockerfile updater -- which runs
+against the same branch in batch mode.
 
 ## Installation
 
