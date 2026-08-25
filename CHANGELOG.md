@@ -16,9 +16,31 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+### Added
+
+- added the `@sha256:` digest of a digest-pinned `Dockerfile` base image to what the Dockerfile updater
+  rewrites. The digest is taken from the same registry listing that already answers whether the new tag
+  exists, so re-pinning it costs no extra request. A tag the registry reports no digest for leaves the
+  clause untouched rather than half-rewritten
+
 ### Changed
 
 - changed the Go module dependencies to their latest versions
+
+### Fixed
+
+- fixed the base image rewrites moving the tag of a digest-pinned `FROM` clause and leaving the digest
+  behind. The digest is what Docker resolves, so the pull request read as an upgrade while the build
+  kept pulling the previous image -- and nothing downstream caught it, because the version pin really
+  had moved. The Dockerfile updater now rewrites both halves together, and the rewrites that have no
+  registry to ask (the shared bash emitter used by the Go, Python, JavaScript, Java, C# and Ruby
+  updaters) skip a digest-pinned clause and report that they did
+- fixed changelog entries being restated on every run. AutoUpdate runs unattended and on a schedule, so
+  the entry it wrote yesterday is already merged by the time it looks again -- and it was appended
+  again, verbatim, until the next release moved the `[Unreleased]` section away. An entry the target
+  repository already records as pending is no longer written a second time, whether it records it as a
+  bullet under `[Unreleased]` or as a chlog fragment. An entry naming a different version is a second,
+  real upgrade and is still recorded
 
 ## [0.21.3] - 2026-08-24
 

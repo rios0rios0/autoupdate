@@ -24,13 +24,20 @@ const (
 )
 
 // fromPattern matches Docker FROM clauses with pinned version tags.
-// Groups: (1) image name, (2) tag.
+// Groups: (1) image name, (2) tag, (3) the digest pinned alongside the tag, if
+// the clause carries one.
+//
+// The digest is captured rather than ignored because it is what Docker actually
+// resolves: a clause reading "python:3.13-slim@sha256:..." pulls the manifest
+// the digest names, whatever the tag beside it says. Matching it is what lets
+// the rewrite move both halves together.
 var fromPattern = regexp.MustCompile(
 	`(?m)^FROM\s+` +
 		`(?:--platform=[^\s]+\s+)?` +
 		`([a-zA-Z0-9][a-zA-Z0-9._/-]*)` +
 		`:` +
 		`([a-zA-Z0-9][a-zA-Z0-9._-]*)` +
+		`(?:@([a-zA-Z0-9]+:[a-fA-F0-9]{32,}))?` +
 		`(?:\s+[Aa][Ss]\s+\S+)?`,
 )
 
@@ -46,6 +53,11 @@ type upgradeTask struct {
 	dep    entities.Dependency
 	newTag string
 	parsed *parsedImageRef
+
+	// newDigest is the manifest newTag resolves to, carried only for a clause
+	// that pins one. It comes from the same registry listing that produced
+	// newTag, so the pair written back is the pair the registry reports.
+	newDigest string
 }
 
 // UpdaterRepository implements repositories.UpdaterRepository for Dockerfile base images.
@@ -243,6 +255,7 @@ func scanDockerfile(content, filePath string) []imageRef {
 	for i, m := range matches {
 		imageName := m[1]
 		tag := m[2]
+		digest := m[3]
 
 		// Skip build args and scratch
 		if strings.HasPrefix(imageName, "$") || strings.HasPrefix(imageName, "${") ||
@@ -291,6 +304,7 @@ func scanDockerfile(content, filePath string) []imageRef {
 				Version:   version,
 				Suffix:    suffix,
 				Precision: precision,
+				Digest:    digest,
 			},
 			fileContent: content,
 		})
@@ -307,20 +321,20 @@ var fetchTagsFunc = fetchTags //nolint:gochecknoglobals // test override for DI
 
 func determineUpgrades(ctx context.Context, allRefs []imageRef) []upgradeTask {
 	// Cache tags per image to avoid redundant API calls
-	tagCache := make(map[string][]string)
+	tagCache := make(map[string]*tagIndex)
 	var upgrades []upgradeTask
 
 	for _, ref := range allRefs {
 		cacheKey := ref.parsed.FullName()
-		tags, ok := tagCache[cacheKey]
-		if !ok {
-			var err error
-			tags, err = fetchTagsFunc(ctx, ref.parsed)
+		tags, cached := tagCache[cacheKey]
+		if !cached {
+			fetched, err := fetchTagsFunc(ctx, ref.parsed)
 			if err != nil {
 				logger.Warnf("[dockerfile] Failed to fetch tags for %s: %v", cacheKey, err)
 				tagCache[cacheKey] = nil
 				continue
 			}
+			tags = newTagIndex(fetched)
 			tagCache[cacheKey] = tags
 		}
 
@@ -328,19 +342,136 @@ func determineUpgrades(ctx context.Context, allRefs []imageRef) []upgradeTask {
 			continue
 		}
 
-		bestTag := findBestUpgrade(ref.parsed, tags)
+		bestTag := findBestUpgrade(ref.parsed, tags.names)
 		if bestTag == "" || bestTag == ref.parsed.Tag {
 			continue
 		}
 
-		upgrades = append(upgrades, upgradeTask{
-			dep:    ref.dep,
-			newTag: bestTag,
-			parsed: ref.parsed,
-		})
+		task, ok := newUpgradeTask(ref, bestTag, tags)
+		if !ok {
+			continue
+		}
+		upgrades = append(upgrades, task)
 	}
 
 	return upgrades
+}
+
+// tagIndex holds one image's published tags: the names the upgrade search runs
+// over, and the manifest each name resolves to. Both come out of the same
+// listing, which is what makes re-pinning a digest free.
+type tagIndex struct {
+	names   []string
+	digests map[string]string
+}
+
+// newTagIndex splits a registry listing into the two shapes the upgrade needs.
+func newTagIndex(tags []registryTag) *tagIndex {
+	index := &tagIndex{
+		names:   make([]string, 0, len(tags)),
+		digests: make(map[string]string, len(tags)),
+	}
+
+	for _, tag := range tags {
+		index.names = append(index.names, tag.Name)
+		if tag.Digest != "" {
+			index.digests[tag.Name] = tag.Digest
+		}
+	}
+
+	return index
+}
+
+// newUpgradeTask pairs a reference with the tag it moves to, resolving the
+// digest to write beside it when the clause pins one.
+//
+// A digest-pinned clause the registry reports no digest for is left alone
+// rather than upgraded. The two alternatives are both worse: writing the tag on
+// its own leaves the previous manifest pinned next to a version it is not --
+// a pull request that reads as an upgrade and changes nothing that gets built --
+// and dropping the digest silently un-pins a base image the repository pinned
+// on purpose.
+func newUpgradeTask(ref imageRef, newTag string, tags *tagIndex) (upgradeTask, bool) {
+	task := upgradeTask{dep: ref.dep, newTag: newTag, parsed: ref.parsed}
+	if ref.parsed.Digest == "" {
+		return task, true
+	}
+
+	digest, found := tags.digests[newTag]
+	if !found {
+		logger.Warnf(
+			"[dockerfile] %s: the registry reports no digest for %s:%s; "+
+				"leaving the digest-pinned base image unchanged",
+			ref.dep.FilePath, ref.parsed.FullName(), newTag,
+		)
+		return upgradeTask{}, false
+	}
+
+	task.newDigest = digest
+	return task, true
+}
+
+// currentRef is the reference as the Dockerfile spells it today.
+func (t upgradeTask) currentRef() string {
+	return withDigest(t.dep.Source+":"+t.dep.CurrentVer, t.parsed.Digest)
+}
+
+// newRef is the reference that replaces it: the new tag, plus the digest that
+// tag resolves to whenever the clause pinned one, so the two halves of the
+// reference cannot end up naming different images.
+func (t upgradeTask) newRef() string {
+	return withDigest(t.dep.Source+":"+t.newTag, t.newDigest)
+}
+
+// withDigest appends a digest to an image reference, or returns it unchanged
+// when there is none to pin.
+func withDigest(ref, digest string) string {
+	if digest == "" {
+		return ref
+	}
+	return ref + "@" + digest
+}
+
+// replaceRef rewrites the first whole occurrence of current, skipping any match
+// that is only the leading part of a longer reference.
+//
+// A plain "python:3.13-slim" occurs inside "python:3.13-slim@sha256:...", and a
+// substring replace would take that first match -- rewriting the digest-pinned
+// clause, which belongs to a different task or to no task at all, and leaving
+// the clause this task is for untouched. The same prefix trap catches
+// "python:3.1" inside "python:3.13". Requiring the match to end the reference
+// rules out both.
+func replaceRef(content, current, replacement string) string {
+	for offset := 0; offset <= len(content)-len(current); {
+		index := strings.Index(content[offset:], current)
+		if index < 0 {
+			break
+		}
+		index += offset
+
+		end := index + len(current)
+		if end < len(content) && continuesReference(content[end]) {
+			offset = end
+			continue
+		}
+
+		return content[:index] + replacement + content[end:]
+	}
+
+	return content
+}
+
+// continuesReference reports whether a byte could extend the image reference a
+// match stopped at: another tag character, or the "@" opening a digest.
+func continuesReference(char byte) bool {
+	switch {
+	case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
+		return true
+	case char == '.', char == '_', char == '-', char == '@':
+		return true
+	default:
+		return false
+	}
 }
 
 // --- upgrade application ---
@@ -360,9 +491,7 @@ func applyUpgrades(tasks []upgradeTask, allRefs []imageRef) []entities.FileChang
 		if !ok {
 			continue
 		}
-		old := t.dep.Source + ":" + t.dep.CurrentVer
-		replacement := t.dep.Source + ":" + t.newTag
-		content = strings.Replace(content, old, replacement, 1)
+		content = replaceRef(content, t.currentRef(), t.newRef())
 		fileContent[t.dep.FilePath] = content
 	}
 
@@ -487,9 +616,28 @@ func generatePRDescription(tasks []upgradeTask) string {
 		fmt.Fprintf(&sb, "This PR upgrades **%d** Docker base images.\n", len(tasks))
 	}
 
+	if anyDigestPinned(tasks) {
+		sb.WriteString(
+			"\nBase images pinned by digest keep their pin: the digest was re-resolved " +
+				"from the registry, so it names the new tag rather than the previous image.\n",
+		)
+	}
+
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()
+}
+
+// anyDigestPinned reports whether any of the upgrades rewrote a digest as well
+// as a tag, which is worth calling out: a reviewer seeing a changed sha256 in
+// the diff should not have to work out where it came from.
+func anyDigestPinned(tasks []upgradeTask) bool {
+	for _, t := range tasks {
+		if t.newDigest != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // appendChangelogEntry records the base image upgrades in the target repo's

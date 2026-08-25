@@ -96,6 +96,22 @@ the target repository's format and picks the destination, so the two formats can
   file, so `git checkout -- .` would leave it behind (this is why the JavaScript cosmetic-lockfile
   revert threads the staged value).
 
+No entry is ever restated. `newChangelogEntries` (`internal/support/changelog_dedupe.go`) drops any
+entry the repository already records as pending, and every `CHANGELOG.md` edit goes through
+`insertChangelogEntries` rather than calling `entities.InsertChangelogEntry` directly — gitforge
+appends whatever it is handed, so the check has to happen on this side of the call, in the one place
+every updater funnels through. It matters because autoupdate runs unattended on a schedule against the
+same repositories: yesterday's entry is merged into the default branch by the time it looks again, and
+without the check it was restated verbatim on every run until the next release moved the section away.
+The pending set is read from `[Unreleased]` for a Keep a Changelog repository (wrapped continuation
+lines folded back into their bullet) and from the fragment bodies under the unreleased directory for a
+chlog one (`internal/support/chlog_pending.go`), so the two formats cannot drift. Matching is exact
+after normalizing the bullet marker, backticks, whitespace and case — deliberately nothing fuzzier: an
+entry naming a different version ("from `3.13` to `3.14`" after "from `3.12` to `3.13`") is a second,
+real upgrade, and a similarity threshold that collapsed those would drop a change the repository took.
+Released sections are never compared against; they are history, and the same dependency moving again
+after a release is a new fact.
+
 chlog (`internal/support/chlog.go` + `internal/domain/entities/chlog.go`) is detected from a
 `.chlog.yaml`/`.chlog.yml` or a `.changes/unreleased/` directory. When detected, entries become one
 fragment file per entry (`<unixnano>-<hex>.yaml` with `kind`/`body`/`time`) and `CHANGELOG.md` is
@@ -184,6 +200,32 @@ the comparison and the pin is left alone: those are deliberate choices by the re
 and a release number from an unrelated channel is not a comparable replacement. `terraform`,
 `dockerfile` and the Go Dockerfile tag rewriter (`golang/dockerfile_tags.go`) reach the same conclusion
 through `golang.org/x/mod/semver` directly, since they compare registry tags rather than pin files.
+
+### Digest-Pinned Base Images
+
+A `Dockerfile` clause pinning both halves — `FROM python:3.13-slim@sha256:...` — is rewritten **only by
+code that can re-resolve the digest**, because the digest is what Docker pulls. Moving the tag and
+leaving the digest behind produces a diff that reads as an upgrade and builds the previous image, and
+nothing downstream catches it: the version pin really did move, so the branch, the commit message, the
+changelog entry and the PR title are all consistent with an upgrade that never reaches the build.
+
+The `dockerfile` updater owns them. `fromPattern` captures the digest, the Docker Hub listing that
+already answers "does this tag exist?" carries each tag's digest (`registryTag`), and `applyUpgrades`
+rewrites `image:tag@digest` as one unit through `upgradeTask.currentRef`/`newRef`. The substitution
+goes through `replaceRef`, which requires the match to end the reference: a plain `python:3.13-slim`
+also occurs inside `python:3.13-slim@sha256:...`, so a substring replace would rewrite the
+digest-pinned clause it was told to leave alone (and `python:3.1` inside `python:3.13` is the same trap
+one tag narrower). When the registry reports no digest for the tag being moved to, the clause is left
+exactly as it is — writing the tag alone pins the previous manifest beside a version it is not, and
+dropping the digest silently un-pins an image the repository pinned on purpose.
+
+Every other rewrite path has no registry, and therefore skips a digest-pinned clause instead of
+half-rewriting it: `support.DockerfileTagUpdateScript`, where the `sed` address and
+`autoupdate_image_tag_is_older` both key on the single `digestPinMarker` constant so the guard and the
+substitution cannot disagree about which lines are in play, and `golang/dockerfile_tags.go`, which has
+skipped them from the start. In batch mode the `dockerfile` updater runs against the same aggregate
+branch, so those clauses are still upgraded — correctly. Do not "fix" a skipped clause by dropping its
+digest to make the substitution apply.
 
 ### Package Manager Selection (Python)
 

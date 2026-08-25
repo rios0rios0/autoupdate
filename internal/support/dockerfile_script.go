@@ -15,6 +15,17 @@ const dottedTagPattern = "[0-9][0-9.]*"
 // as DockerfileImage.TagPattern to override the dotted default.
 const MajorOnlyTagPattern = "[0-9][0-9]*"
 
+// digestPinMarker identifies a base image reference that pins an immutable
+// manifest beside its tag ("python:3.13-slim@sha256:..."). It is what Docker
+// actually resolves, so such a line is never rewritten here -- see
+// [DockerfileTagUpdateScript].
+//
+// It is one constant rather than two literals because the guard and the
+// substitution have to agree on what a digest pin looks like: a line the guard
+// counted but the substitution skipped would report an upgrade that never
+// happened, and the reverse would rewrite the very line the rule protects.
+const digestPinMarker = "@sha256:"
+
 // DockerfileImage names one base image whose tag the rewrite loop maintains.
 type DockerfileImage struct {
 	// Name is the image exactly as it appears before the colon, for example
@@ -63,6 +74,15 @@ type DockerfileTagUpdate struct {
 // place: each `sed` rewrites unconditionally, and only the surrounding
 // `autoupdate_image_tag_is_older` stops a Dockerfile already on a newer base
 // image from being moved backwards.
+//
+// A line that pins a digest alongside its tag is left alone entirely. The tag
+// there is a label; the digest is what gets pulled, so moving the tag on its own
+// produces a diff that reads as an upgrade and builds the previous image — and
+// nothing downstream would catch it, because the version pin really did move.
+// Resolving the new digest needs the registry, which this script does not talk
+// to; the `dockerfile` updater does, and it rewrites both halves together on the
+// same branch. Do not "fix" this by dropping the digest to make the sed apply:
+// the repository pinned it deliberately.
 func DockerfileTagUpdateScript(update DockerfileTagUpdate) string {
 	var sb strings.Builder
 
@@ -112,10 +132,24 @@ func writeImageRewrite(sb *strings.Builder, versionVar string, image DockerfileI
 		"        if autoupdate_image_tag_is_older \"$df\" \"%s\" \"$%s\" '%s'; then\n",
 		image.Name, versionVar, pattern,
 	)
+	// The sed address skips any line carrying a digest, matching the guard,
+	// which counts only the tags that are not digest-pinned.
 	fmt.Fprintf(sb,
-		"            sed \"s|%s:%s|%s:${%s}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
-		image.Name, pattern, image.Name, versionVar,
+		"            sed \"/%s/!s|%s:%s|%s:${%s}|g\" \"$df\" > \"$df.tmp\" && mv \"$df.tmp\" \"$df\"\n",
+		digestPinMarker, image.Name, pattern, image.Name, versionVar,
 	)
 	fmt.Fprintf(sb, "            echo \"  Updated %s in $df\"\n", label)
+	sb.WriteString("        fi\n")
+	// Reported rather than silently skipped: a Dockerfile that does not move
+	// during an upgrade run is otherwise indistinguishable from one that was
+	// already up to date.
+	fmt.Fprintf(sb,
+		"        if grep -q \"%s:[^[:space:]]*%s\" \"$df\" 2>/dev/null; then\n",
+		image.Name, digestPinMarker,
+	)
+	fmt.Fprintf(sb,
+		"            echo \"  Left the digest-pinned %s in $df to the dockerfile updater\"\n",
+		label,
+	)
 	sb.WriteString("        fi\n")
 }

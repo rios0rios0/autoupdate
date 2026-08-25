@@ -113,6 +113,11 @@ fi
 // A repository using chlog gets one fragment per entry under its unreleased
 // directory; every other repository gets the entries inserted into the
 // [Unreleased] section of CHANGELOG.md, as before.
+//
+// An entry the repository already records as pending is dropped, whichever
+// format it uses. See [newChangelogEntries] for why: autoupdate runs on a
+// schedule against the same repositories, so without the check it restates
+// yesterday's entry verbatim on every run.
 func LocalChangelogUpdate(repoDir string, entries []string) bool {
 	if len(entries) == 0 {
 		return false
@@ -138,7 +143,12 @@ func writeLocalChlogFragments(
 	config *entities.ChlogConfig,
 	entries []string,
 ) bool {
-	fragments, err := config.NewChlogFragments(entries, time.Now())
+	fresh := newChangelogEntries(pendingChlogEntries(repoDir, config), entries)
+	if len(fresh) == 0 {
+		return false
+	}
+
+	fragments, err := config.NewChlogFragments(fresh, time.Now())
 	if err != nil {
 		logger.Warnf("Failed to build the chlog fragments: %v", err)
 		return false
@@ -183,7 +193,7 @@ func insertLocalChangelogEntries(repoDir string, entries []string) bool {
 	}
 
 	content := string(data)
-	modified := entities.InsertChangelogEntry(content, entries)
+	modified := insertChangelogEntries(content, entries)
 	if modified == content {
 		return false
 	}
@@ -206,7 +216,8 @@ func insertLocalChangelogEntries(repoDir string, entries []string) bool {
 //
 // A repository using chlog gets one added fragment per entry; every other
 // repository gets an edited CHANGELOG.md. A repository with neither chlog nor a
-// changelog gets nothing, leaving the change set untouched.
+// changelog gets nothing, leaving the change set untouched. An entry already
+// recorded as pending is dropped -- see [newChangelogEntries].
 func RemoteChangelogChanges(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
@@ -226,7 +237,13 @@ func RemoteChangelogChanges(
 	}
 
 	if usesChlog {
-		fragments, fragErr := config.NewChlogFragments(entries, time.Now())
+		fresh := newChangelogEntries(
+			pendingRemoteChlogEntries(ctx, provider, repo, config), entries)
+		if len(fresh) == 0 {
+			return fileChanges
+		}
+
+		fragments, fragErr := config.NewChlogFragments(fresh, time.Now())
 		if fragErr != nil {
 			logger.Warnf("Failed to build the chlog fragments: %v", fragErr)
 			return fileChanges
@@ -260,7 +277,7 @@ func remoteChangelogEdit(
 		return entities.FileChange{}, false
 	}
 
-	modified := entities.InsertChangelogEntry(content, entries)
+	modified := insertChangelogEntries(content, entries)
 	if modified == content {
 		return entities.FileChange{}, false
 	}
@@ -274,7 +291,8 @@ func remoteChangelogEdit(
 
 // StageLocalChangelog prepares the changelog payload for a repository on disk
 // without writing it into the repository, for the updaters whose upgrade runs
-// through a generated script that performs the copy itself.
+// through a generated script that performs the copy itself. An entry the
+// repository already records as pending is dropped -- see [newChangelogEntries].
 //
 // The caller must Remove the result once the script has run.
 func StageLocalChangelog(repoDir string, entries []string) StagedChangelog {
@@ -288,7 +306,7 @@ func StageLocalChangelog(repoDir string, entries []string) StagedChangelog {
 		return StagedChangelog{}
 	}
 	if usesChlog {
-		return stageChlogFragment(config, entries)
+		return stageChlogFragment(config, pendingChlogEntries(repoDir, config), entries)
 	}
 
 	content, err := os.ReadFile(filepath.Join(repoDir, ChangelogFileName))
@@ -320,7 +338,8 @@ func StageRemoteChangelog(
 		return StagedChangelog{}
 	}
 	if usesChlog {
-		return stageChlogFragment(config, entries)
+		return stageChlogFragment(
+			config, pendingRemoteChlogEntries(ctx, provider, repo, config), entries)
 	}
 
 	if !provider.HasFile(ctx, repo, ChangelogFileName) {
@@ -342,8 +361,24 @@ func StageRemoteChangelog(
 // per-dependency wording belongs to the updaters that build the change set
 // themselves -- so nothing is lost, and a multi-line body is what chlog renders
 // as one bullet with its continuation lines.
-func stageChlogFragment(config *entities.ChlogConfig, entries []string) StagedChangelog {
-	fragments, err := config.NewChlogFragments([]string{joinChangelogEntries(entries)}, time.Now())
+func stageChlogFragment(
+	config *entities.ChlogConfig,
+	recorded, entries []string,
+) StagedChangelog {
+	fresh := newChangelogEntries(recorded, entries)
+	if len(fresh) == 0 {
+		return StagedChangelog{}
+	}
+
+	// The merged body is the text that actually lands in the fragment, so it is
+	// checked too: an earlier run that merged the same entries filed exactly
+	// this statement, and the per-entry pass above cannot see that.
+	body := joinChangelogEntries(fresh)
+	if len(newChangelogEntries(recorded, []string{body})) == 0 {
+		return StagedChangelog{}
+	}
+
+	fragments, err := config.NewChlogFragments([]string{body}, time.Now())
 	if err != nil {
 		logger.Warnf("Failed to build the chlog fragment: %v", err)
 		return StagedChangelog{}
@@ -365,7 +400,7 @@ func stageChlogFragment(config *entities.ChlogConfig, entries []string) StagedCh
 // insertion that changed nothing stages nothing, so the script does not produce
 // a commit that only rewrites the changelog identically.
 func stageChangelogEdit(content string, entries []string) StagedChangelog {
-	modified := entities.InsertChangelogEntry(content, entries)
+	modified := insertChangelogEntries(content, entries)
 	if modified == content {
 		return StagedChangelog{}
 	}

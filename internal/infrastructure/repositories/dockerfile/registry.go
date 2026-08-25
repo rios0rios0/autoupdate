@@ -25,6 +25,22 @@ type parsedImageRef struct {
 	Version   string // parsed version part: "1.25.7", "3.13"
 	Suffix    string // parsed suffix part: "", "-slim-bullseye"
 	Precision int    // number of version parts: 2 for MAJOR.MINOR, 3 for MAJOR.MINOR.PATCH
+
+	// Digest is the immutable manifest the clause pins alongside the tag
+	// ("python:3.13-slim@sha256:..."), or "" when it pins the tag alone. It is
+	// what Docker actually resolves, so a rewrite that moves the tag and leaves
+	// this behind changes nothing except the label on the line.
+	Digest string
+}
+
+// registryTag is one published tag as the registry reports it: the name the
+// upgrade search runs over, and the manifest that name currently resolves to.
+//
+// The digest comes from the same listing that answers whether the tag exists at
+// all, so re-pinning a digest costs no extra request.
+type registryTag struct {
+	Name   string
+	Digest string
 }
 
 // FullName returns the fully qualified image name (e.g., "golang" or "bitnami/redis").
@@ -38,7 +54,8 @@ func (p *parsedImageRef) FullName() string {
 // --- Docker Hub API ---
 
 type dockerTagResult struct {
-	Name string `json:"name"`
+	Name   string `json:"name"`
+	Digest string `json:"digest"`
 }
 
 type dockerTagsResponse struct {
@@ -48,7 +65,7 @@ type dockerTagsResponse struct {
 
 // fetchTags queries Docker Hub for available tags of an image.
 // It paginates through up to maxTagPages pages of results.
-func fetchTags(ctx context.Context, ref *parsedImageRef) ([]string, error) {
+func fetchTags(ctx context.Context, ref *parsedImageRef) ([]registryTag, error) {
 	var apiURL string
 	if ref.Namespace == "" {
 		apiURL = fmt.Sprintf(
@@ -63,7 +80,7 @@ func fetchTags(ctx context.Context, ref *parsedImageRef) ([]string, error) {
 	}
 
 	client := &http.Client{Timeout: registryTimeout}
-	var tags []string
+	var tags []registryTag
 
 	for page := 0; page < maxTagPages && apiURL != ""; page++ {
 		pageTags, nextURL, err := fetchTagPage(ctx, client, apiURL)
@@ -78,7 +95,11 @@ func fetchTags(ctx context.Context, ref *parsedImageRef) ([]string, error) {
 }
 
 // fetchTagPage fetches a single page of tags from Docker Hub.
-func fetchTagPage(ctx context.Context, client *http.Client, apiURL string) ([]string, string, error) {
+func fetchTagPage(
+	ctx context.Context,
+	client *http.Client,
+	apiURL string,
+) ([]registryTag, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create request: %w", err)
@@ -99,9 +120,9 @@ func fetchTagPage(ctx context.Context, client *http.Client, apiURL string) ([]st
 		return nil, "", fmt.Errorf("failed to parse tags response: %w", decodeErr)
 	}
 
-	tags := make([]string, 0, len(tagsResp.Results))
+	tags := make([]registryTag, 0, len(tagsResp.Results))
 	for _, result := range tagsResp.Results {
-		tags = append(tags, result.Name)
+		tags = append(tags, registryTag(result))
 	}
 
 	return tags, tagsResp.Next, nil
