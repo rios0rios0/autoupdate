@@ -16,6 +16,8 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-25
+
 ### Added
 
 - added the `@sha256:` digest of a digest-pinned `Dockerfile` base image to what the Dockerfile updater
