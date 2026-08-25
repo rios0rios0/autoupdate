@@ -35,6 +35,12 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
   had moved. The Dockerfile updater now rewrites both halves together, and the rewrites that have no
   registry to ask (the shared bash emitter used by the Go, Python, JavaScript, Java, C# and Ruby
   updaters) skip a digest-pinned clause and report that they did
+- fixed changelog entries being restated on every run. AutoUpdate runs unattended and on a schedule, so
+  the entry it wrote yesterday is already merged by the time it looks again -- and it was appended
+  again, verbatim, until the next release moved the `[Unreleased]` section away. An entry the target
+  repository already records as pending is no longer written a second time, whether it records it as a
+  bullet under `[Unreleased]` or as a chlog fragment. An entry naming a different version is a second,
+  real upgrade and is still recorded
 
 ## [0.21.3] - 2026-08-24
 

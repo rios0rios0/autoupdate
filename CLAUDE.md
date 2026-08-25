@@ -96,6 +96,22 @@ the target repository's format and picks the destination, so the two formats can
   file, so `git checkout -- .` would leave it behind (this is why the JavaScript cosmetic-lockfile
   revert threads the staged value).
 
+No entry is ever restated. `newChangelogEntries` (`internal/support/changelog_dedupe.go`) drops any
+entry the repository already records as pending, and every `CHANGELOG.md` edit goes through
+`insertChangelogEntries` rather than calling `entities.InsertChangelogEntry` directly — gitforge
+appends whatever it is handed, so the check has to happen on this side of the call, in the one place
+every updater funnels through. It matters because autoupdate runs unattended on a schedule against the
+same repositories: yesterday's entry is merged into the default branch by the time it looks again, and
+without the check it was restated verbatim on every run until the next release moved the section away.
+The pending set is read from `[Unreleased]` for a Keep a Changelog repository (wrapped continuation
+lines folded back into their bullet) and from the fragment bodies under the unreleased directory for a
+chlog one (`internal/support/chlog_pending.go`), so the two formats cannot drift. Matching is exact
+after normalizing the bullet marker, backticks, whitespace and case — deliberately nothing fuzzier: an
+entry naming a different version ("from `3.13` to `3.14`" after "from `3.12` to `3.13`") is a second,
+real upgrade, and a similarity threshold that collapsed those would drop a change the repository took.
+Released sections are never compared against; they are history, and the same dependency moving again
+after a release is a new fact.
+
 chlog (`internal/support/chlog.go` + `internal/domain/entities/chlog.go`) is detected from a
 `.chlog.yaml`/`.chlog.yml` or a `.changes/unreleased/` directory. When detected, entries become one
 fragment file per entry (`<unixnano>-<hex>.yaml` with `kind`/`body`/`time`) and `CHANGELOG.md` is

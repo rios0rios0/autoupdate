@@ -227,6 +227,13 @@ chlog works without a configuration file. When the file is present, its
 renamed its directories or its `Changed` label still gets valid fragments. The
 `chlog merge` step later compiles them into the changelog as usual.
 
+**Entries are never restated.** AutoUpdate runs unattended and on a schedule, so
+the entry it wrote yesterday is usually already merged by the time it looks
+again. An entry the repository already records as pending -- a bullet under
+`[Unreleased]`, or the body of a fragment under `.changes/unreleased/` -- is not
+written a second time, whichever format the repository uses. An entry naming a
+different version is a second, real upgrade and is still recorded.
+
 Both formats work in every ecosystem and in both local and batch mode.
 
 ### Token Resolution
