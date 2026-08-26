@@ -22,6 +22,24 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-26
+
+### Added
+
+- added a tailored `code-review` skill under `.github/skills/` so GitHub Copilot reviews changes against the [rios0rios0/guide](https://github.com/rios0rios0/guide/wiki) standards and this repository's own load-bearing invariants
+
+### Changed
+
+- changed the changelog to [chlog](https://github.com/luizjhonata/chlog) fragments: a change now writes its own YAML file under `.changes/unreleased/` through `chlog new --kind <Kind> --body "..."`, and `CHANGELOG.md` is GENERATED from them at release time by `chlog batch auto && chlog merge`. That is the one thing a single shared file cannot do — two branches each adding an entry no longer touch the same lines, so a rebase that used to conflict on `CHANGELOG.md` now conflicts on nothing. The `[Unreleased]` section was empty, so nothing had to be carried across. AutoBump already reads the fragments directly, so the release flow is unchanged.
+- changed the Go module dependencies to their latest versions
+
+### Fixed
+
+- fixed the `main` pipeline, which every repository's `sast:gitleaks` job had been failing since the code-review skill landed: the skill's own security bullet listed credential prefixes verbatim to warn against writing them, and the scanner's second pass matches those prefixes on their own, so the warning tripped the rule it was describing. The bullet now names the vendors instead, and the commit that carried the original wording is allowlisted by fingerprint in `.gitleaksignore`, because the scan walks the whole history reachable from `HEAD` and no edit at the tip can clear a past commit. No credential was ever committed.
+- fixed the chlog fragments autoupdate writes, which were not shaped like the ones `chlog new` writes: the encoder chose a style per field, so `kind` and `body` came out as plain scalars whenever they happened not to need quoting, and `time` came out as a bare YAML timestamp — a `!!timestamp` where chlog had written a `!!str`. A repository filing entries through both tools therefore collected fragments in two shapes, with two different YAML types under the same key, and anything reading them more strictly than a Go struct decoder failed on autoupdate's alone. Every scalar is now single-quoted and the timestamp is pre-formatted as RFC3339 with nanoseconds in UTC, so the file is byte for byte what `chlog new` produces
+- fixed the default chlog kind table, which inferred a major release from the `Changed` and `Removed` kinds. Those were chlog `0.3.1`'s defaults; chlog `0.4.0` maps every non-patch kind to `minor` and no longer defines a constant for `major` at all, because under Semantic Versioning a major release means a backward-incompatible change — a property of the change, signalled per fragment by `chlog new --breaking`, and not of the category it is filed under. The values are inert (autoupdate files under one kind and never reads `auto`), but the table documented itself as mirroring chlog's own defaults, so it was a stale claim a reader would have trusted
+- fixed the pull request checklist, which told contributors to run `go test`: every test file in this repository carries the `unit` build tag, so a plain `go test ./...` runs zero tests — the checklist now points at `make lint`, `make test` and `make sast`, matching `CONTRIBUTING.md`
+
 ## [0.22.0] - 2026-08-25
 
 ### Added

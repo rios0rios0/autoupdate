@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed the default chlog kind table, which inferred a major release from the `Changed` and `Removed` kinds. Those were chlog `0.3.1`''s defaults; chlog `0.4.0` maps every non-patch kind to `minor` and no longer defines a constant for `major` at all, because under Semantic Versioning a major release means a backward-incompatible change — a property of the change, signalled per fragment by `chlog new --breaking`, and not of the category it is filed under. The values are inert (autoupdate files under one kind and never reads `auto`), but the table documented itself as mirroring chlog''s own defaults, so it was a stale claim a reader would have trusted'
-time: '2026-08-26T16:11:29.411769692Z'
