@@ -4,10 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+This file is not edited by hand. Every change writes its own fragment under
+`.changes/unreleased/` with [chlog](https://github.com/luizjhonata/chlog), and a release compiles
+the pending fragments into a version section here — so two branches each adding an entry no
+longer touch the same lines, and a rebase that used to conflict on this file now conflicts on
+nothing.
+
 When a new release is proposed:
 
 1. Create a new branch `chore/bump-x.x.x` (this isn't a long-lived branch!!!) — the name prefix matters: the release pipeline only tags merges whose branch is named `chore/bump-`;
-2. The Unreleased section on `CHANGELOG.md` gets a version number and date (AutoBump does this automatically);
+2. The fragments pending under `.changes/unreleased/` are compiled into a version section by `chlog batch auto && chlog merge` (AutoBump does this for you — it reads the fragments directly);
 3. Open a Pull Request with the bump version changes targeting the `main` branch;
 4. When the Pull Request is merged, the release pipeline detects the `chore/bump-x.x.x` branch in the merge commit and automatically creates the Git tag and GitHub release.
 
