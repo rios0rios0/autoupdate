@@ -52,6 +52,10 @@ const ChlogUpdateKind = "Changed"
 // several fragments are written inside the same nanosecond.
 const chlogRandomSuffixBytes = 2
 
+// chlogMapTag is the YAML tag of a fragment's top-level mapping, spelled out
+// because the node is built by hand rather than inferred from a Go value.
+const chlogMapTag = "!!map"
+
 var (
 	// ErrChlogPathEscapesRepo is returned when .chlog.yaml configures a path
 	// that would take autoupdate outside the repository it was pointed at.
@@ -86,6 +90,51 @@ type ChlogFragment struct {
 	Kind string    `yaml:"kind"`
 	Body string    `yaml:"body"`
 	Time time.Time `yaml:"time"`
+}
+
+// MarshalYAML renders the fragment the way chlog's own writer renders it,
+// instead of letting the encoder pick a representation per field.
+//
+// The difference is not cosmetic. Marshalling the struct directly leaves the
+// style to the encoder, which emits a plain scalar whenever a value happens not
+// to need quoting and a bare YAML timestamp for the time -- a `!!timestamp`
+// where chlog wrote a `!!str`. A repository filing entries through both tools
+// then holds fragments in two shapes, and `time` carries two different YAML
+// types depending on which one wrote the file, so anything reading them more
+// strictly than gopkg.in/yaml.v3's struct decoder -- a schema check, a `time`
+// field typed as a string, a parser outside Go -- fails on autoupdate's
+// fragments alone. Every scalar is therefore single-quoted, the timestamp is
+// pre-formatted, and the keys keep chlog's order, which makes the output byte
+// for byte what `chlog new` writes.
+//
+// chlog's optional `breaking` key is deliberately absent rather than emitted as
+// false: autoupdate only ever files dependency upgrades, and chlog omits the key
+// entirely when it is not set.
+func (f ChlogFragment) MarshalYAML() (any, error) {
+	return &yaml.Node{
+		Kind: yaml.MappingNode,
+		Tag:  chlogMapTag,
+		Content: []*yaml.Node{
+			chlogFragmentKey("kind"), chlogFragmentValue(f.Kind),
+			chlogFragmentKey("body"), chlogFragmentValue(f.Body),
+			chlogFragmentKey("time"), chlogFragmentValue(f.Time.UTC().Format(time.RFC3339Nano)),
+		},
+	}, nil
+}
+
+// chlogFragmentKey builds a mapping key node, left in the plain style chlog
+// writes its keys in.
+func chlogFragmentKey(name string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Value: name}
+}
+
+// chlogFragmentValue builds a value node. The single-quoted style is what keeps
+// the value a string whatever it holds: it is the cheapest YAML quoting that
+// suppresses tag resolution, and unlike the double-quoted style it passes the
+// text through unescaped, so a body full of backticks and Markdown reads in the
+// file exactly as it will read in the released changelog.
+func chlogFragmentValue(value string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Value: value, Style: yaml.SingleQuotedStyle}
 }
 
 // DefaultChlogConfig returns chlog's own defaults.
@@ -287,7 +336,8 @@ func StripBulletPrefix(entry string) string {
 	return trimmed
 }
 
-// renderChlogFragment marshals one fragment into chlog's on-disk YAML shape.
+// renderChlogFragment marshals one fragment into chlog's on-disk YAML shape --
+// see [ChlogFragment.MarshalYAML] for what "chlog's shape" commits to.
 func renderChlogFragment(kind, body string, at time.Time) (string, error) {
 	data, err := yaml.Marshal(&ChlogFragment{
 		Kind: kind,
