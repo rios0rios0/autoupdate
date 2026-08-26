@@ -154,6 +154,47 @@ func TestParseChlogConfig(t *testing.T) {
 	})
 }
 
+func TestDefaultChlogConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should mirror the labels chlog ships", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		expected := []string{"Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"}
+
+		// when
+		config := entities.DefaultChlogConfig()
+
+		// then
+		labels := make([]string, 0, len(config.Kinds))
+		for _, kind := range config.Kinds {
+			labels = append(labels, kind.Label)
+		}
+		assert.Equal(t, expected, labels)
+	})
+
+	t.Run("should never infer a major bump from a kind", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		// A major release means a backward-incompatible change, which chlog
+		// signals per fragment with --breaking rather than deriving from the
+		// category an entry is filed under. This mirrors the invariant chlog
+		// asserts on its own defaults.
+
+		// when
+		config := entities.DefaultChlogConfig()
+
+		// then
+		for _, kind := range config.Kinds {
+			assert.NotEqual(t, "major", kind.Auto,
+				"kind %q must not infer a major bump; major is reserved for breaking changes",
+				kind.Label)
+		}
+	})
+}
+
 func TestChlogConfigKindLabel(t *testing.T) {
 	t.Parallel()
 

@@ -56,6 +56,15 @@ const chlogRandomSuffixBytes = 2
 // because the node is built by hand rather than inferred from a Go value.
 const chlogMapTag = "!!map"
 
+// chlog's "auto" values: the release a kind infers when one is cut. autoupdate
+// never acts on them -- see [ChlogKind] -- and they exist so the default table
+// reads as chlog's own. There is deliberately no "major", which is the whole
+// point: see [DefaultChlogConfig].
+const (
+	chlogAutoMinor = "minor"
+	chlogAutoPatch = "patch"
+)
+
 var (
 	// ErrChlogPathEscapesRepo is returned when .chlog.yaml configures a path
 	// that would take autoupdate outside the repository it was pointed at.
@@ -68,7 +77,9 @@ var (
 
 // ChlogKind is a single entry of the "kinds" list in .chlog.yaml. Only Label
 // matters here: autoupdate always files under the "Changed" kind, so chlog's
-// Auto mapping (which drives version bumps) is deliberately not applied.
+// Auto mapping (which drives version bumps) is deliberately not applied. Auto is
+// still parsed and carried, because dropping the key would rewrite it away on any
+// future round trip of a repository's own configuration.
 type ChlogKind struct {
 	Label string `yaml:"label"`
 	Auto  string `yaml:"auto,omitempty"`
@@ -138,18 +149,25 @@ func chlogFragmentValue(value string) *yaml.Node {
 }
 
 // DefaultChlogConfig returns chlog's own defaults.
+//
+// No kind infers a major bump. Under Semantic Versioning a major release means a
+// backward-incompatible change, which is a property of the change and not of the
+// category it is filed under: a "Changed" entry can be a reworded log line, and
+// a "Removed" one can drop a flag nothing outside the repository ever read.
+// chlog signals it per fragment instead, through `chlog new --breaking`, and its
+// own configuration no longer has a constant for "major" at all.
 func DefaultChlogConfig() ChlogConfig {
 	return ChlogConfig{
 		ChangesDir:    DefaultChlogChangesDir,
 		UnreleasedDir: DefaultChlogUnreleasedDir,
 		ChangelogPath: DefaultChlogChangelogPath,
 		Kinds: []ChlogKind{
-			{Label: "Added", Auto: "minor"},
-			{Label: "Changed", Auto: "major"},
-			{Label: "Deprecated", Auto: "minor"},
-			{Label: "Removed", Auto: "major"},
-			{Label: "Fixed", Auto: "patch"},
-			{Label: "Security", Auto: "patch"},
+			{Label: "Added", Auto: chlogAutoMinor},
+			{Label: "Changed", Auto: chlogAutoMinor},
+			{Label: "Deprecated", Auto: chlogAutoMinor},
+			{Label: "Removed", Auto: chlogAutoMinor},
+			{Label: "Fixed", Auto: chlogAutoPatch},
+			{Label: "Security", Auto: chlogAutoPatch},
 		},
 	}
 }
