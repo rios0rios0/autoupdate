@@ -121,6 +121,19 @@ the repository root because `.chlog.yaml` is untrusted input from a repo autoupd
 broken or unreadable `.chlog.yaml` fails loudly rather than falling back to `CHANGELOG.md`. The
 per-ecosystem `changelogEntries(vCtx)` helper is all that remains ecosystem-specific.
 
+A fragment is emitted byte for byte the way `chlog new` emits one, which is why
+`ChlogFragment.MarshalYAML` builds the mapping by hand instead of letting the encoder marshal the
+struct. Marshalling the struct leaves the style to the encoder: `kind` and `body` come out as plain
+scalars whenever they happen not to need quoting, and `time` comes out as a bare YAML timestamp — a
+`!!timestamp` where chlog wrote a `!!str`. A repository that files entries through both tools then
+holds fragments in two shapes with two types under the same key, and anything reading them more
+strictly than a Go struct decoder trips on autoupdate's alone. Every scalar is therefore
+single-quoted and the timestamp is pre-formatted as RFC3339Nano in UTC. `chlog`'s optional
+`breaking` key is deliberately never written: a dependency bump is not a breaking change, and chlog
+omits the key when it is unset. The golden assertions in `internal/domain/entities/chlog_test.go`
+are what keep the two writers in step, so a change to the shape needs the golden strings updated
+against real `chlog new` output rather than against what the encoder happens to produce.
+
 ### Repository Walking (what an on-disk scan can see)
 
 `WalkFilesByExtension` and `WalkFilesByPredicate` (`internal/support/filesystem.go`) are how every

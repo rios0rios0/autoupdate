@@ -236,6 +236,113 @@ func TestNewChlogFragments(t *testing.T) {
 		assert.Equal(t, at, fragment.Time.UTC())
 	})
 
+	t.Run("should render the fragment byte for byte the way chlog writes it", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		config := entities.DefaultChlogConfig()
+		entries := []string{"- changed the Go module dependencies to their latest versions"}
+
+		// when
+		fragments, err := config.NewChlogFragments(entries, at)
+
+		// then
+		require.NoError(t, err)
+		require.Len(t, fragments, 1)
+		assert.Equal(t,
+			"kind: 'Changed'\n"+
+				"body: 'changed the Go module dependencies to their latest versions'\n"+
+				"time: '2026-07-29T10:30:00Z'\n",
+			fragments[0].Content)
+	})
+
+	t.Run("should type every value as a quoted string", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		config := entities.DefaultChlogConfig()
+		entries := []string{"- changed the Docker base image `alpine` from `3.19` to `3.20`"}
+
+		// when
+		fragments, err := config.NewChlogFragments(entries, at)
+
+		// then
+		require.NoError(t, err)
+		require.Len(t, fragments, 1)
+
+		var document yaml.Node
+		require.NoError(t, yaml.Unmarshal([]byte(fragments[0].Content), &document))
+		require.Len(t, document.Content, 1)
+		mapping := document.Content[0]
+		require.Equal(t, yaml.MappingNode, mapping.Kind)
+		require.Len(t, mapping.Content, 6)
+
+		// The time is the one that used to differ: marshalling the struct emits
+		// it as a bare YAML timestamp, which resolves to !!timestamp where chlog
+		// wrote a !!str.
+		for i := 0; i+1 < len(mapping.Content); i += 2 {
+			key, value := mapping.Content[i], mapping.Content[i+1]
+			assert.Equal(t, "!!str", value.Tag, key.Value)
+			assert.Equal(t, yaml.SingleQuotedStyle, value.Style, key.Value)
+		}
+		assert.Equal(t,
+			[]string{"kind", "body", "time"},
+			[]string{mapping.Content[0].Value, mapping.Content[2].Value, mapping.Content[4].Value})
+	})
+
+	t.Run("should double an embedded single quote instead of escaping it", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		config := entities.DefaultChlogConfig()
+		entries := []string{"- changed the tool's default so it doesn't warn"}
+
+		// when
+		fragments, err := config.NewChlogFragments(entries, at)
+
+		// then
+		require.NoError(t, err)
+		require.Len(t, fragments, 1)
+		assert.Contains(t, fragments[0].Content,
+			"body: 'changed the tool''s default so it doesn''t warn'\n")
+
+		var fragment entities.ChlogFragment
+		require.NoError(t, yaml.Unmarshal([]byte(fragments[0].Content), &fragment))
+		assert.Equal(t, "changed the tool's default so it doesn't warn", fragment.Body)
+	})
+
+	t.Run("should keep the sub-second precision chlog records", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		config := entities.DefaultChlogConfig()
+		precise := time.Date(2026, time.July, 29, 10, 30, 0, 71365791, time.UTC)
+
+		// when
+		fragments, err := config.NewChlogFragments([]string{"- changed a dependency"}, precise)
+
+		// then
+		require.NoError(t, err)
+		require.Len(t, fragments, 1)
+		assert.Contains(t, fragments[0].Content, "time: '2026-07-29T10:30:00.071365791Z'\n")
+	})
+
+	t.Run("should record the timestamp in UTC whatever zone it arrives in", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		config := entities.DefaultChlogConfig()
+		offset := time.Date(2026, time.July, 29, 7, 30, 0, 0, time.FixedZone("BRT", -3*60*60))
+
+		// when
+		fragments, err := config.NewChlogFragments([]string{"- changed a dependency"}, offset)
+
+		// then
+		require.NoError(t, err)
+		require.Len(t, fragments, 1)
+		assert.Contains(t, fragments[0].Content, "time: '2026-07-29T10:30:00Z'\n")
+	})
+
 	t.Run("should use the kind label the repository configured", func(t *testing.T) {
 		t.Parallel()
 
