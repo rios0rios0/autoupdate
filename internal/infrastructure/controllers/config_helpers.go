@@ -38,18 +38,48 @@ func downloadDefaultConfig() (*entities.Settings, error) {
 	return cfg, nil
 }
 
+// resolveConfigPath decides which configuration file to read: an explicitly supplied path wins,
+// otherwise the operator's home directory is searched first and on its own.
+//
+// The wider search that follows looks in the working directory before the home one, and
+// autoupdate is run against a local repository as `autoupdate .` -- with that repository as the
+// working directory. A target repository may carry its own `.autoupdate.yaml`, which shares this
+// file name but not this schema: it is a `skip`/`reason` opt-out (entities.RepoConfig), not the
+// global settings. Finding it here loads an opt-out marker as the whole configuration -- no
+// projects, no updaters, no tokens -- and the run then continues on downloaded defaults rather
+// than reporting that it read the wrong file.
+//
+// Split out from findReadAndValidateConfig so this decision can be tested on its own: the rest
+// of that function reads the file and reaches the network for the default config.
+func resolveConfigPath(configPath string) (string, error) {
+	if configPath != "" {
+		return configPath, nil
+	}
+
+	path, err := configHelpers.FindGlobalConfigFile("autoupdate")
+	if err == nil {
+		return path, nil
+	}
+
+	// Kept so an operator who holds no config in their home directory sees no change: they have
+	// no operator-level settings to lose.
+	path, err = configHelpers.FindConfigFile("autoupdate")
+	if err != nil {
+		return "", fmt.Errorf(
+			"no config file found: %w\nSpecify one with --config or create autoupdate.yaml",
+			err,
+		)
+	}
+
+	return path, nil
+}
+
 // findReadAndValidateConfig finds, reads, validates the config file,
 // and merges updater defaults from the remote default config.
 func findReadAndValidateConfig(configPath string) (*entities.Settings, error) {
-	if configPath == "" {
-		var err error
-		configPath, err = configHelpers.FindConfigFile("autoupdate")
-		if err != nil {
-			return nil, fmt.Errorf(
-				"no config file found: %w\nSpecify one with --config or create autoupdate.yaml",
-				err,
-			)
-		}
+	configPath, err := resolveConfigPath(configPath)
+	if err != nil {
+		return nil, err
 	}
 
 	logger.Infof("Using config file: %s", configPath)
