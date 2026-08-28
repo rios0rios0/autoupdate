@@ -22,6 +22,23 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-08-28
+
+### Changed
+
+- changed the Claude workflows to call the reusable workflows in `rios0rios0/pipelines` instead of `rios0rios0/.github`, which is where every other reusable workflow and composite action already lives, and renamed them to `claude-review.yaml` and `claude-mention.yaml`, matching the `reusable-claude-review.yaml` / `reusable-claude-mention.yaml` definitions they call
+- changed the Go module dependencies to their latest versions
+
+### Fixed
+
+- fixed the global settings being loaded from the repository being updated. The config search checked the working directory before the home one, and `autoupdate .` runs with the target repository as the working directory. A target repository may carry its own `.autoupdate.yaml` -- the same file name, but a different schema: a `skip`/`reason` opt-out (`RepoConfig`) rather than the global settings. That file was therefore loaded as the whole configuration, yielding no `projects`, no `updaters` and no tokens; the run then took the missing-`updaters` path, downloaded the defaults and carried on as though it had been configured, instead of reporting that it had read the wrong file. The operator's home directory is now searched first and on its own, through gitforge's `FindGlobalConfigFile`; the previous wider search is kept as a fallback, so an operator who keeps no config in their home directory -- and therefore has no operator-level settings to lose -- sees no change. The lookup moved into its own `resolveConfigPath`, so the decision can be tested without reading a file or reaching the network
+- restored the `.changes/unreleased/` directory with a `.gitkeep`, so the release tooling keeps recognising this project as [chlog](https://github.com/luizjhonata/chlog)-based after a release consumes the last fragment. Git tracks files rather than directories, so the bump commit that removed the final fragment removed the directory too, and the next run read the empty `[Unreleased]` section as "nothing to release"
+- restored the `id-token: write` permission on both Claude workflow callers. Without it the caller grants less than the reusable workflow declares, which GitHub rejects before the job starts -- runs ended in `startup_failure`. The action needs the scope because `setupGitHubToken()` exchanges a GitHub OIDC token for the GitHub App token it posts with, unless a `github_token` is passed explicitly.
+
+### Removed
+
+- removed the unused `id-token: write` permission from the Claude workflow callers, and changed `claude-review.yaml`'s display name to `Claude Review` so it matches its file name and its `Claude Mention` sibling. `anthropics/claude-code-action` needs `id-token: write` only for workload identity federation or the Bedrock / Vertex / Foundry OIDC paths; these authenticate with `claude_code_oauth_token`, so the scope allowed minting OIDC tokens for any audience without ever being used.
+
 ## [0.23.0] - 2026-08-26
 
 ### Added
