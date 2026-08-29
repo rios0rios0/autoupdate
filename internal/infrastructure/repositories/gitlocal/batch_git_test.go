@@ -1,5 +1,3 @@
-//go:build unit
-
 package gitlocal_test
 
 import (
@@ -82,10 +80,17 @@ func TestCleanupStaleTempDirs(t *testing.T) {
 		tempBase := t.TempDir()
 		t.Setenv("TMPDIR", tempBase)
 
+		// t.TempDir() is not a substitute for any of these three: CleanupStaleTempDirs
+		// scans os.TempDir() and matches on the `autoupdate-*` names, so a directory the
+		// testing package names, or one nested a level deeper, is invisible to the code
+		// under test.
+		//nolint:usetesting // the name and the location are what is being tested
 		batchDir, err := os.MkdirTemp("", "autoupdate-batch-*")
 		require.NoError(t, err)
+		//nolint:usetesting // the name and the location are what is being tested
 		localDir, err := os.MkdirTemp("", "autoupdate-local-*")
 		require.NoError(t, err)
+		//nolint:usetesting // the name and the location are what is being tested
 		changelogFile, err := os.CreateTemp("", "autoupdate-changelog-*.md")
 		require.NoError(t, err)
 		_ = changelogFile.Close()

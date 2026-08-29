@@ -1,5 +1,3 @@
-//go:build unit
-
 package golang_test
 
 import (
@@ -308,8 +306,12 @@ func TestGoModPathFor(t *testing.T) {
 // runUpgradeScript renders the Go upgrade commands and executes them against
 // repoDir with a stubbed `go` binary, so the loop over modules is exercised
 // for real without touching the network or the Go toolchain.
-func runUpgradeScript(t *testing.T, repoDir, goVersion string) string {
+func runUpgradeScript(t *testing.T, repoDir string) string {
 	t.Helper()
+
+	// The only version any caller has ever passed; folded in so the helper does not
+	// advertise a knob nothing turns.
+	const goVersion = "1.25.7"
 
 	bashPath, lookErr := exec.LookPath("bash")
 	if lookErr != nil {
@@ -323,12 +325,12 @@ func runUpgradeScript(t *testing.T, repoDir, goVersion string) string {
 
 	scriptDir := t.TempDir()
 	scriptPath := filepath.Join(scriptDir, "upgrade.sh")
-	require.NoError(t, os.WriteFile(scriptPath, []byte(sb.String()), 0o700)) //nolint:gosec // test script must execute
+	require.NoError(t, os.WriteFile(scriptPath, []byte(sb.String()), 0o700))
 
 	// A stub stands in for the real toolchain: the loop's job is to run the
 	// commands in each module directory, not to resolve dependencies.
 	stubPath := filepath.Join(scriptDir, "go-stub")
-	require.NoError(t, os.WriteFile(stubPath, []byte("#!/bin/bash\necho \"stub $* in $(pwd)\"\n"), 0o700)) //nolint:gosec // test stub must execute
+	require.NoError(t, os.WriteFile(stubPath, []byte("#!/bin/bash\necho \"stub $* in $(pwd)\"\n"), 0o700))
 
 	cmd := exec.CommandContext(t.Context(), bashPath, scriptPath)
 	cmd.Dir = repoDir
@@ -362,7 +364,7 @@ func TestWriteGoUpgradeCommands(t *testing.T) {
 		writeModule(t, repoDir, "tests/harness", "1.23.1")
 
 		// when
-		output := runUpgradeScript(t, repoDir, "1.25.7")
+		output := runUpgradeScript(t, repoDir)
 
 		// then
 		assert.Equal(t, "1.25.7", goDirectiveOf(t, repoDir, "."))
@@ -379,7 +381,7 @@ func TestWriteGoUpgradeCommands(t *testing.T) {
 		writeModule(t, repoDir, "tests/harness", "1.23.1")
 
 		// when
-		output := runUpgradeScript(t, repoDir, "1.25.7")
+		output := runUpgradeScript(t, repoDir)
 
 		// then
 		assert.Equal(t, "1.25.7", goDirectiveOf(t, repoDir, "tests/harness"))
@@ -395,7 +397,7 @@ func TestWriteGoUpgradeCommands(t *testing.T) {
 		writeModule(t, repoDir, "tools", "1.25.7")
 
 		// when
-		output := runUpgradeScript(t, repoDir, "1.25.7")
+		output := runUpgradeScript(t, repoDir)
 
 		// then
 		assert.Contains(t, output, "stub mod tidy in "+filepath.Join(repoDir, "tools"))
@@ -412,7 +414,7 @@ func TestWriteGoUpgradeCommands(t *testing.T) {
 		writeModule(t, repoDir, "vendor/example.com/dep", "1.19")
 
 		// when
-		runUpgradeScript(t, repoDir, "1.25.7")
+		runUpgradeScript(t, repoDir)
 
 		// then
 		assert.Equal(t, "1.25.7", goDirectiveOf(t, repoDir, "."))
@@ -433,7 +435,7 @@ func TestWriteGoUpgradeCommands(t *testing.T) {
 		writeModule(t, repoDir, "tools", "1.23.1")
 
 		// when
-		output := runUpgradeScript(t, repoDir, "1.25.7")
+		output := runUpgradeScript(t, repoDir)
 
 		// then
 		assert.Contains(t, output, "no go directive found in go.mod")
@@ -449,7 +451,7 @@ func TestWriteGoUpgradeCommands(t *testing.T) {
 		writeModule(t, repoDir, "-tools", "1.23.1")
 
 		// when
-		runUpgradeScript(t, repoDir, "1.25.7")
+		runUpgradeScript(t, repoDir)
 
 		// then
 		assert.Equal(t, "1.25.7", goDirectiveOf(t, repoDir, "-tools"))
@@ -463,7 +465,7 @@ func TestWriteGoUpgradeCommands(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "main.tf"), []byte("# tf\n"), 0o600))
 
 		// when
-		output := runUpgradeScript(t, repoDir, "1.25.7")
+		output := runUpgradeScript(t, repoDir)
 
 		// then
 		assert.Contains(t, output, "no go.mod found in the repository")

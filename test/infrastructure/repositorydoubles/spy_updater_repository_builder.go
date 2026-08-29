@@ -1,6 +1,4 @@
-//go:build integration || unit || test
-
-package repositorydoubles //nolint:revive,staticcheck // Test package naming follows established project structure
+package repositorydoubles
 
 import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
@@ -10,6 +8,7 @@ import (
 // SpyUpdaterRepositoryBuilder helps create test SpyUpdaterRepository instances with a fluent interface.
 type SpyUpdaterRepositoryBuilder struct {
 	*testkit.BaseBuilder
+
 	updaterName  string
 	detectResult bool
 	prs          []entities.PullRequest
@@ -50,7 +49,7 @@ func (b *SpyUpdaterRepositoryBuilder) WithCreatePRsErr(err error) *SpyUpdaterRep
 }
 
 // Build creates the spy (satisfies testkit.Builder interface).
-func (b *SpyUpdaterRepositoryBuilder) Build() interface{} {
+func (b *SpyUpdaterRepositoryBuilder) Build() any {
 	return b.BuildSpy()
 }
 
@@ -77,7 +76,7 @@ func (b *SpyUpdaterRepositoryBuilder) Reset() testkit.Builder {
 // Clone creates a deep copy of the SpyUpdaterRepositoryBuilder.
 func (b *SpyUpdaterRepositoryBuilder) Clone() testkit.Builder {
 	clone := &SpyUpdaterRepositoryBuilder{
-		BaseBuilder:  b.BaseBuilder.Clone().(*testkit.BaseBuilder),
+		BaseBuilder:  cloneBase(b.BaseBuilder),
 		updaterName:  b.updaterName,
 		detectResult: b.detectResult,
 		createPRsErr: b.createPRsErr,

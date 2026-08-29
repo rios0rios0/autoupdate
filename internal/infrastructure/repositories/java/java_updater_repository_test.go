@@ -1,5 +1,3 @@
-//go:build unit
-
 package java_test
 
 import (
@@ -111,7 +109,7 @@ func TestParseJavaVersionFile(t *testing.T) {
 		result := javaUpdater.ParseJavaVersionFile(content)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 
 	t.Run("should skip comment lines", func(t *testing.T) {
@@ -180,7 +178,7 @@ func TestExtractMajorVersion(t *testing.T) {
 		result := javaUpdater.ExtractMajorVersion(version)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 }
 

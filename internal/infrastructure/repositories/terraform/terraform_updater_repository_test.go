@@ -1,9 +1,7 @@
-//go:build unit
-
 package terraform_test
 
 import (
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -974,9 +972,24 @@ func TestCountByKind(t *testing.T) {
 
 		// given
 		tasks := []terraform.UpgradeTask{
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod1", Source: "github.com/org/mod1"}, "v2.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "img1", Source: "app"}, "2.0.0", "", terraform.DepKindImage),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod2", Source: "github.com/org/mod2"}, "v3.0.0", "", terraform.DepKindModule),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "mod1", Source: "github.com/org/mod1"},
+				"v2.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "img1", Source: "app"},
+				"2.0.0",
+				"",
+				terraform.DepKindImage,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "mod2", Source: "github.com/org/mod2"},
+				"v3.0.0",
+				"",
+				terraform.DepKindModule,
+			),
 		}
 
 		// when
@@ -992,8 +1005,18 @@ func TestCountByKind(t *testing.T) {
 
 		// given
 		tasks := []terraform.UpgradeTask{
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod1", Source: "github.com/org/mod1"}, "v2.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod2", Source: "github.com/org/mod2"}, "v3.0.0", "", terraform.DepKindModule),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "mod1", Source: "github.com/org/mod1"},
+				"v2.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "mod2", Source: "github.com/org/mod2"},
+				"v3.0.0",
+				"",
+				terraform.DepKindModule,
+			),
 		}
 
 		// when
@@ -1009,8 +1032,18 @@ func TestCountByKind(t *testing.T) {
 
 		// given
 		tasks := []terraform.UpgradeTask{
-			terraform.NewUpgradeTask(entities.Dependency{Name: "img1", Source: "app1"}, "2.0.0", "", terraform.DepKindImage),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "img2", Source: "app2"}, "3.0.0", "", terraform.DepKindImage),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "img1", Source: "app1"},
+				"2.0.0",
+				"",
+				terraform.DepKindImage,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "img2", Source: "app2"},
+				"3.0.0",
+				"",
+				terraform.DepKindImage,
+			),
 		}
 
 		// when
@@ -1048,9 +1081,24 @@ func TestGenerateBranchName(t *testing.T) {
 
 		// given
 		tasks := []terraform.UpgradeTask{
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod1", Source: "github.com/org/mod1"}, "v2.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod2", Source: "github.com/org/mod2"}, "v3.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "img1", Source: "app"}, "2.0.0", "", terraform.DepKindImage),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "mod1", Source: "github.com/org/mod1"},
+				"v2.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "mod2", Source: "github.com/org/mod2"},
+				"v3.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "img1", Source: "app"},
+				"2.0.0",
+				"",
+				terraform.DepKindImage,
+			),
 		}
 
 		// when
@@ -1087,9 +1135,24 @@ func TestGenerateCommitMessage(t *testing.T) {
 
 		// given
 		tasks := []terraform.UpgradeTask{
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod1", Source: "github.com/org/mod1"}, "v2.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod2", Source: "github.com/org/mod2"}, "v3.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "img1", Source: "app"}, "2.0.0", "", terraform.DepKindImage),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "mod1", Source: "github.com/org/mod1"},
+				"v2.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "mod2", Source: "github.com/org/mod2"},
+				"v3.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "img1", Source: "app"},
+				"2.0.0",
+				"",
+				terraform.DepKindImage,
+			),
 		}
 
 		// when
@@ -1126,9 +1189,24 @@ func TestGeneratePRTitle(t *testing.T) {
 
 		// given
 		tasks := []terraform.UpgradeTask{
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod1", Source: "github.com/org/mod1"}, "v2.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod2", Source: "github.com/org/mod2"}, "v3.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "img1", Source: "app"}, "2.0.0", "", terraform.DepKindImage),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "mod1", Source: "github.com/org/mod1"},
+				"v2.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "mod2", Source: "github.com/org/mod2"},
+				"v3.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "img1", Source: "app"},
+				"2.0.0",
+				"",
+				terraform.DepKindImage,
+			),
 		}
 
 		// when
@@ -1148,12 +1226,26 @@ func TestGeneratePRDescription(t *testing.T) {
 		// given
 		tasks := []terraform.UpgradeTask{
 			terraform.NewUpgradeTask(
-				entities.Dependency{Name: "mod1", Source: "github.com/org/mod1", CurrentVer: "v1.0.0", FilePath: "main.tf"},
-				"v2.0.0", "", terraform.DepKindModule,
+				entities.Dependency{
+					Name:       "mod1",
+					Source:     "github.com/org/mod1",
+					CurrentVer: "v1.0.0",
+					FilePath:   "main.tf",
+				},
+				"v2.0.0",
+				"",
+				terraform.DepKindModule,
 			),
 			terraform.NewUpgradeTask(
-				entities.Dependency{Name: "mod2", Source: "github.com/org/mod2", CurrentVer: "v0.5.0", FilePath: "modules/infra.tf"},
-				"v1.0.0", "", terraform.DepKindModule,
+				entities.Dependency{
+					Name:       "mod2",
+					Source:     "github.com/org/mod2",
+					CurrentVer: "v0.5.0",
+					FilePath:   "modules/infra.tf",
+				},
+				"v1.0.0",
+				"",
+				terraform.DepKindModule,
 			),
 		}
 
@@ -1172,12 +1264,62 @@ func TestGeneratePRDescription(t *testing.T) {
 
 		// given
 		tasks := []terraform.UpgradeTask{
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod1", Source: "github.com/org/mod1", CurrentVer: "v1.0.0", FilePath: "a.tf"}, "v2.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod2", Source: "github.com/org/mod2", CurrentVer: "v1.0.0", FilePath: "b.tf"}, "v2.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod3", Source: "github.com/org/mod3", CurrentVer: "v1.0.0", FilePath: "c.tf"}, "v2.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "mod4", Source: "github.com/org/mod4", CurrentVer: "v1.0.0", FilePath: "d.tf"}, "v2.0.0", "", terraform.DepKindModule),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "img1", Source: "app1", CurrentVer: "1.0.0", FilePath: "e.hcl"}, "2.0.0", "", terraform.DepKindImage),
-			terraform.NewUpgradeTask(entities.Dependency{Name: "img2", Source: "app2", CurrentVer: "1.0.0", FilePath: "f.hcl"}, "2.0.0", "", terraform.DepKindImage),
+			terraform.NewUpgradeTask(
+				entities.Dependency{
+					Name:       "mod1",
+					Source:     "github.com/org/mod1",
+					CurrentVer: "v1.0.0",
+					FilePath:   "a.tf",
+				},
+				"v2.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{
+					Name:       "mod2",
+					Source:     "github.com/org/mod2",
+					CurrentVer: "v1.0.0",
+					FilePath:   "b.tf",
+				},
+				"v2.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{
+					Name:       "mod3",
+					Source:     "github.com/org/mod3",
+					CurrentVer: "v1.0.0",
+					FilePath:   "c.tf",
+				},
+				"v2.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{
+					Name:       "mod4",
+					Source:     "github.com/org/mod4",
+					CurrentVer: "v1.0.0",
+					FilePath:   "d.tf",
+				},
+				"v2.0.0",
+				"",
+				terraform.DepKindModule,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "img1", Source: "app1", CurrentVer: "1.0.0", FilePath: "e.hcl"},
+				"2.0.0",
+				"",
+				terraform.DepKindImage,
+			),
+			terraform.NewUpgradeTask(
+				entities.Dependency{Name: "img2", Source: "app2", CurrentVer: "1.0.0", FilePath: "f.hcl"},
+				"2.0.0",
+				"",
+				terraform.DepKindImage,
+			),
 		}
 
 		// when
@@ -1524,7 +1666,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		updater := &terraform.UpdaterRepository{}
 
 		// when
-		upgrades := terraform.DetermineUpgrades(updater, t.Context(), provider, repo, allDeps)
+		upgrades := terraform.DetermineUpgrades(t.Context(), updater, provider, repo, allDeps)
 
 		// then
 		require.Len(t, upgrades, 1)
@@ -1567,7 +1709,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		updater := &terraform.UpdaterRepository{}
 
 		// when
-		upgrades := terraform.DetermineUpgrades(updater, t.Context(), provider, repo, allDeps)
+		upgrades := terraform.DetermineUpgrades(t.Context(), updater, provider, repo, allDeps)
 
 		// then
 		assert.Empty(t, upgrades)
@@ -1597,7 +1739,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		updater := &terraform.UpdaterRepository{}
 
 		// when
-		upgrades := terraform.DetermineUpgrades(updater, t.Context(), provider, repo, allDeps)
+		upgrades := terraform.DetermineUpgrades(t.Context(), updater, provider, repo, allDeps)
 
 		// then
 		assert.Empty(t, upgrades)
@@ -1619,7 +1761,12 @@ func TestResolveTagsForSource(t *testing.T) {
 		currentRepo := entities.Repository{Organization: "org", Name: "repo"}
 
 		// when
-		tags, repo := terraform.ResolveTagsForSource(t.Context(), provider, currentRepo, "git::https://github.com/org/my-module")
+		tags, repo := terraform.ResolveTagsForSource(
+			t.Context(),
+			provider,
+			currentRepo,
+			"git::https://github.com/org/my-module",
+		)
 
 		// then
 		require.NotNil(t, repo)
@@ -1639,7 +1786,12 @@ func TestResolveTagsForSource(t *testing.T) {
 		currentRepo := entities.Repository{Organization: "org", Name: "repo"}
 
 		// when
-		tags, repo := terraform.ResolveTagsForSource(t.Context(), provider, currentRepo, "git::https://github.com/org/my-module")
+		tags, repo := terraform.ResolveTagsForSource(
+			t.Context(),
+			provider,
+			currentRepo,
+			"git::https://github.com/org/my-module",
+		)
 
 		// then
 		assert.Nil(t, repo)
@@ -1651,12 +1803,17 @@ func TestResolveTagsForSource(t *testing.T) {
 
 		// given
 		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithDiscoverErr(fmt.Errorf("API error")).
+			WithDiscoverErr(errors.New("API error")).
 			BuildSpy()
 		currentRepo := entities.Repository{Organization: "org", Name: "repo"}
 
 		// when
-		tags, repo := terraform.ResolveTagsForSource(t.Context(), provider, currentRepo, "git::https://github.com/org/my-module")
+		tags, repo := terraform.ResolveTagsForSource(
+			t.Context(),
+			provider,
+			currentRepo,
+			"git::https://github.com/org/my-module",
+		)
 
 		// then
 		assert.Nil(t, repo)
@@ -1696,7 +1853,7 @@ func TestCreateUpgradePR(t *testing.T) {
 		updater := &terraform.UpdaterRepository{}
 
 		// when
-		prs, err := terraform.CreateUpgradePR(updater, t.Context(), provider, repo, opts, upgrades)
+		prs, err := terraform.CreateUpgradePR(t.Context(), updater, provider, repo, opts, upgrades)
 
 		// then
 		require.NoError(t, err)
@@ -1736,7 +1893,7 @@ func TestCreateUpgradePR(t *testing.T) {
 		updater := &terraform.UpdaterRepository{}
 
 		// when
-		prs, err := terraform.CreateUpgradePR(updater, t.Context(), provider, repo, opts, upgrades)
+		prs, err := terraform.CreateUpgradePR(t.Context(), updater, provider, repo, opts, upgrades)
 
 		// then
 		require.NoError(t, err)

@@ -1,8 +1,8 @@
-//go:build integration || unit || test
-
-package entitybuilders //nolint:revive,staticcheck // Test package naming follows established project structure
+package entitybuilders
 
 import (
+	"maps"
+
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	testkit "github.com/rios0rios0/testkit/pkg/test"
 )
@@ -10,6 +10,7 @@ import (
 // SettingsBuilder helps create test settings with a fluent interface.
 type SettingsBuilder struct {
 	*testkit.BaseBuilder
+
 	providers       []entities.ProviderConfig
 	updaters        map[string]entities.UpdaterConfig
 	excludeForks    bool
@@ -72,7 +73,7 @@ func (b *SettingsBuilder) WithAggregateBranchPrefix(prefix string) *SettingsBuil
 }
 
 // Build creates the settings (satisfies testkit.Builder interface).
-func (b *SettingsBuilder) Build() interface{} {
+func (b *SettingsBuilder) Build() any {
 	return b.BuildSettings()
 }
 
@@ -109,9 +110,7 @@ func (b *SettingsBuilder) Clone() testkit.Builder {
 	copy(providers, b.providers)
 
 	updaters := make(map[string]entities.UpdaterConfig, len(b.updaters))
-	for k, v := range b.updaters {
-		updaters[k] = v
-	}
+	maps.Copy(updaters, b.updaters)
 
 	excludeRepos := make([]string, len(b.excludeRepos))
 	copy(excludeRepos, b.excludeRepos)
@@ -125,7 +124,7 @@ func (b *SettingsBuilder) Clone() testkit.Builder {
 	}
 
 	return &SettingsBuilder{
-		BaseBuilder:     b.BaseBuilder.Clone().(*testkit.BaseBuilder),
+		BaseBuilder:     cloneBase(b.BaseBuilder),
 		providers:       providers,
 		updaters:        updaters,
 		excludeForks:    b.excludeForks,

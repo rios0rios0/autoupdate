@@ -1,5 +1,3 @@
-//go:build unit
-
 package support_test
 
 import (
@@ -31,11 +29,11 @@ func TestDockerfileTagUpdateScript(t *testing.T) {
 		})
 
 		// when
-		runTagUpdateScript(t, repoDir, "3.14.0")
+		runTagUpdateScript(t, repoDir)
 
 		// then
 		assert.Equal(t, "FROM python:3.14.0-slim\nRUN true\n",
-			readFile(t, repoDir, "Dockerfile"))
+			readFile(t, repoDir))
 	})
 
 	t.Run("should leave a base image pinned by digest untouched", func(t *testing.T) {
@@ -47,10 +45,10 @@ func TestDockerfileTagUpdateScript(t *testing.T) {
 		repoDir := writeDockerfiles(t, map[string]string{"Dockerfile": content})
 
 		// when
-		runTagUpdateScript(t, repoDir, "3.14.0")
+		runTagUpdateScript(t, repoDir)
 
 		// then
-		assert.Equal(t, content, readFile(t, repoDir, "Dockerfile"))
+		assert.Equal(t, content, readFile(t, repoDir))
 	})
 
 	t.Run("should report the digest-pinned reference it left behind", func(t *testing.T) {
@@ -62,7 +60,7 @@ func TestDockerfileTagUpdateScript(t *testing.T) {
 		})
 
 		// when
-		output := runTagUpdateScript(t, repoDir, "3.14.0")
+		output := runTagUpdateScript(t, repoDir)
 
 		// then
 		assert.Contains(t, output, "Left the digest-pinned python")
@@ -79,13 +77,13 @@ func TestDockerfileTagUpdateScript(t *testing.T) {
 			})
 
 			// when
-			runTagUpdateScript(t, repoDir, "3.14.0")
+			runTagUpdateScript(t, repoDir)
 
 			// then
 			assert.Equal(t,
 				"FROM python:3.13-slim"+pythonDigest+" AS builder\n"+
 					"FROM python:3.14.0-slim AS runtime\n",
-				readFile(t, repoDir, "Dockerfile"))
+				readFile(t, repoDir))
 		})
 
 	t.Run("should leave an image already ahead of the version untouched", func(t *testing.T) {
@@ -96,10 +94,10 @@ func TestDockerfileTagUpdateScript(t *testing.T) {
 		repoDir := writeDockerfiles(t, map[string]string{"Dockerfile": content})
 
 		// when
-		runTagUpdateScript(t, repoDir, "3.14.0")
+		runTagUpdateScript(t, repoDir)
 
 		// then
-		assert.Equal(t, content, readFile(t, repoDir, "Dockerfile"))
+		assert.Equal(t, content, readFile(t, repoDir))
 	})
 
 	t.Run("should leave every file alone when the version pin did not move", func(t *testing.T) {
@@ -113,7 +111,7 @@ func TestDockerfileTagUpdateScript(t *testing.T) {
 		runTagUpdateScriptWith(t, repoDir, "3.14.0", "false")
 
 		// then
-		assert.Equal(t, content, readFile(t, repoDir, "Dockerfile"))
+		assert.Equal(t, content, readFile(t, repoDir))
 	})
 }
 
@@ -138,8 +136,11 @@ func writeDockerfiles(t *testing.T, files map[string]string) string {
 
 // runTagUpdateScript runs the emitted rewrite against repoDir with the pin
 // reported as moved, which is what the generated upgrade scripts do.
-func runTagUpdateScript(t *testing.T, repoDir, version string) string {
+func runTagUpdateScript(t *testing.T, repoDir string) string {
 	t.Helper()
+
+	// The only version any caller has ever passed.
+	const version = "3.14.0"
 
 	return runTagUpdateScriptWith(t, repoDir, version, "true")
 }
@@ -173,9 +174,11 @@ func runTagUpdateScriptWith(t *testing.T, repoDir, version, changed string) stri
 	return string(output)
 }
 
-// readFile returns the current content of a file under root.
-func readFile(t *testing.T, root, name string) string {
+// readFile returns the current content of the Dockerfile under root.
+func readFile(t *testing.T, root string) string {
 	t.Helper()
+
+	const name = "Dockerfile"
 
 	content, err := os.ReadFile(filepath.Join(root, name))
 	require.NoError(t, err)

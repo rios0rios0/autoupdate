@@ -1,9 +1,8 @@
-//go:build unit
-
 package gitlocal_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
@@ -218,6 +217,9 @@ func (s *stubLocalGitAuthProvider) SSHCloneURL(_ globalEntities.Repository, _ st
 	return ""
 }
 
+// errStubNotImplemented is returned by the stub methods nothing under test calls.
+var errStubNotImplemented = errors.New("stub method not implemented")
+
 func (s *stubLocalGitAuthProvider) DiscoverRepositories(
 	_ context.Context, _ string,
 ) ([]globalEntities.Repository, error) {
@@ -227,7 +229,9 @@ func (s *stubLocalGitAuthProvider) DiscoverRepositories(
 func (s *stubLocalGitAuthProvider) CreatePullRequest(
 	_ context.Context, _ globalEntities.Repository, _ globalEntities.PullRequestInput,
 ) (*globalEntities.PullRequest, error) {
-	return nil, nil
+	// This stub exists to satisfy the interface; nothing under test opens a pull request.
+	// Saying so is better than a nil pair, which a caller would read as success.
+	return nil, errStubNotImplemented
 }
 
 func (s *stubLocalGitAuthProvider) PullRequestExists(

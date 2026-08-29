@@ -19,14 +19,21 @@ make lint                     # Lint via pipelines scripts
 make test                     # Test via pipelines scripts
 make sast                     # Security scanning via pipelines scripts
 
-go test -tags unit ./...      # Run all unit tests (requires -tags unit)
-go test -tags unit -run TestFunctionName ./internal/domain/commands/  # Run a single test
+go test ./...                 # Run all unit tests
+go test -run TestFunctionName ./internal/domain/commands/  # Run a single test
 go fmt ./...                  # Format code
 go vet ./...                  # Static analysis
 go mod tidy                   # Clean up dependencies
 ```
 
-All unit tests require the `unit` build tag: `//go:build unit`. Running without `-tags unit` will find no tests.
+Unit tests carry **no build tag**. `//go:build unit` only hid them from plain
+`go test ./...` and from IDE runs while buying nothing, because an untagged file compiles
+under a `-tags` build too — the shared pipeline still runs every one of them. Reserve
+`//go:build integration` for tests that need real infrastructure; this repository has none
+today.
+
+A test that cannot run in parallel says so in a comment above it, and the reason is usually
+`t.Setenv` or `t.Chdir` — which Go refuses anywhere under a parallel ancestor.
 
 ## Architecture
 
@@ -250,7 +257,7 @@ A repository is upgraded with the dependency manager it already uses; an update 
 
 ## Testing Conventions
 
-- Build tag: `//go:build unit` on every test file
+- No build tag on unit tests; `//go:build integration` is reserved for tests needing real infrastructure
 - External test packages (e.g., `commands_test` for package `commands`)
 - BDD structure with `// given`, `// when`, `// then` comments
 - Parallel execution via `t.Parallel()` and `t.Run()` subtests

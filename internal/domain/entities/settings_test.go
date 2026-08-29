@@ -1,5 +1,3 @@
-//go:build unit
-
 package entities_test
 
 import (
@@ -12,12 +10,13 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 )
 
-func boolPtr(v bool) *bool { return &v }
-
+//go:fix inline
 func TestIsEnabled(t *testing.T) {
 	t.Parallel()
 
 	t.Run("should return true when Enabled is nil", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		cfg := entities.UpdaterConfig{}
 
@@ -29,8 +28,10 @@ func TestIsEnabled(t *testing.T) {
 	})
 
 	t.Run("should return true when Enabled is true", func(t *testing.T) {
+		t.Parallel()
+
 		// given
-		cfg := entities.UpdaterConfig{Enabled: boolPtr(true)}
+		cfg := entities.UpdaterConfig{Enabled: new(true)}
 
 		// when
 		result := cfg.IsEnabled()
@@ -40,8 +41,10 @@ func TestIsEnabled(t *testing.T) {
 	})
 
 	t.Run("should return false when Enabled is false", func(t *testing.T) {
+		t.Parallel()
+
 		// given
-		cfg := entities.UpdaterConfig{Enabled: boolPtr(false)}
+		cfg := entities.UpdaterConfig{Enabled: new(false)}
 
 		// when
 		result := cfg.IsEnabled()
@@ -55,6 +58,8 @@ func TestIsAutoComplete(t *testing.T) {
 	t.Parallel()
 
 	t.Run("should return false when AutoComplete is nil", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		cfg := entities.UpdaterConfig{}
 
@@ -66,8 +71,10 @@ func TestIsAutoComplete(t *testing.T) {
 	})
 
 	t.Run("should return true when AutoComplete is true", func(t *testing.T) {
+		t.Parallel()
+
 		// given
-		cfg := entities.UpdaterConfig{AutoComplete: boolPtr(true)}
+		cfg := entities.UpdaterConfig{AutoComplete: new(true)}
 
 		// when
 		result := cfg.IsAutoComplete()
@@ -77,8 +84,10 @@ func TestIsAutoComplete(t *testing.T) {
 	})
 
 	t.Run("should return false when AutoComplete is false", func(t *testing.T) {
+		t.Parallel()
+
 		// given
-		cfg := entities.UpdaterConfig{AutoComplete: boolPtr(false)}
+		cfg := entities.UpdaterConfig{AutoComplete: new(false)}
 
 		// when
 		result := cfg.IsAutoComplete()
@@ -101,7 +110,7 @@ func TestNewSettings(t *testing.T) {
 		_, err := entities.NewSettings(path)
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to read config file")
 	})
 
@@ -116,7 +125,7 @@ func TestNewSettings(t *testing.T) {
 		_, err := entities.NewSettings(tmpFile)
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse config file")
 	})
 
@@ -131,7 +140,7 @@ func TestNewSettings(t *testing.T) {
 		_, err := entities.NewSettings(tmpFile)
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "at least one provider")
 	})
 }
@@ -158,7 +167,7 @@ updaters:
 		settings, err := entities.DecodeSettings(data, false)
 
 		// then
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, settings.Providers, 1)
 		assert.Equal(t, "github", settings.Providers[0].Type)
 		assert.True(t, settings.Updaters["terraform"].IsEnabled())
@@ -201,7 +210,7 @@ unknown_field: value
 		settings, err := entities.DecodeSettings(data, false)
 
 		// then
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, settings.Providers, 1)
 	})
 
@@ -249,7 +258,7 @@ func TestValidateSettings(t *testing.T) {
 		err := entities.ValidateSettings(settings)
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "at least one provider")
 	})
 
@@ -267,7 +276,7 @@ func TestValidateSettings(t *testing.T) {
 		err := entities.ValidateSettings(settings)
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "type is required")
 	})
 
@@ -285,7 +294,7 @@ func TestValidateSettings(t *testing.T) {
 		err := entities.ValidateSettings(settings)
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "token is required")
 	})
 
@@ -303,7 +312,7 @@ func TestValidateSettings(t *testing.T) {
 		err := entities.ValidateSettings(settings)
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "organizations must have at least one entry")
 	})
 
@@ -406,10 +415,12 @@ func TestMergeUpdatersConfig(t *testing.T) {
 	t.Parallel()
 
 	t.Run("should keep all defaults when overrides is empty", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		defaults := map[string]entities.UpdaterConfig{
-			"terraform": {Enabled: boolPtr(true), AutoComplete: boolPtr(false)},
-			"golang":    {Enabled: boolPtr(true), AutoComplete: boolPtr(false)},
+			"terraform": {Enabled: new(true), AutoComplete: new(false)},
+			"golang":    {Enabled: new(true), AutoComplete: new(false)},
 		}
 		overrides := map[string]entities.UpdaterConfig{}
 
@@ -424,12 +435,14 @@ func TestMergeUpdatersConfig(t *testing.T) {
 	})
 
 	t.Run("should override enabled when user provides non-nil value", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		defaults := map[string]entities.UpdaterConfig{
-			"terraform": {Enabled: boolPtr(true), AutoComplete: boolPtr(false)},
+			"terraform": {Enabled: new(true), AutoComplete: new(false)},
 		}
 		overrides := map[string]entities.UpdaterConfig{
-			"terraform": {Enabled: boolPtr(false)},
+			"terraform": {Enabled: new(false)},
 		}
 
 		// when
@@ -441,12 +454,14 @@ func TestMergeUpdatersConfig(t *testing.T) {
 	})
 
 	t.Run("should override auto_complete when user provides non-nil value", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		defaults := map[string]entities.UpdaterConfig{
-			"terraform": {Enabled: boolPtr(true), AutoComplete: boolPtr(false)},
+			"terraform": {Enabled: new(true), AutoComplete: new(false)},
 		}
 		overrides := map[string]entities.UpdaterConfig{
-			"terraform": {AutoComplete: boolPtr(true)},
+			"terraform": {AutoComplete: new(true)},
 		}
 
 		// when
@@ -458,9 +473,11 @@ func TestMergeUpdatersConfig(t *testing.T) {
 	})
 
 	t.Run("should override target_branch when user provides non-empty value", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		defaults := map[string]entities.UpdaterConfig{
-			"terraform": {Enabled: boolPtr(true)},
+			"terraform": {Enabled: new(true)},
 		}
 		overrides := map[string]entities.UpdaterConfig{
 			"terraform": {TargetBranch: "develop"},
@@ -475,9 +492,11 @@ func TestMergeUpdatersConfig(t *testing.T) {
 	})
 
 	t.Run("should keep default fields when user provides only target_branch", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		defaults := map[string]entities.UpdaterConfig{
-			"golang": {Enabled: boolPtr(true), AutoComplete: boolPtr(false), TargetBranch: "main"},
+			"golang": {Enabled: new(true), AutoComplete: new(false), TargetBranch: "main"},
 		}
 		overrides := map[string]entities.UpdaterConfig{
 			"golang": {TargetBranch: "develop"},
@@ -493,12 +512,14 @@ func TestMergeUpdatersConfig(t *testing.T) {
 	})
 
 	t.Run("should add new updater not present in defaults", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		defaults := map[string]entities.UpdaterConfig{
-			"terraform": {Enabled: boolPtr(true)},
+			"terraform": {Enabled: new(true)},
 		}
 		overrides := map[string]entities.UpdaterConfig{
-			"custom": {Enabled: boolPtr(true), TargetBranch: "main"},
+			"custom": {Enabled: new(true), TargetBranch: "main"},
 		}
 
 		// when
@@ -511,13 +532,15 @@ func TestMergeUpdatersConfig(t *testing.T) {
 	})
 
 	t.Run("should keep default updater untouched when not in overrides", func(t *testing.T) {
+		t.Parallel()
+
 		// given
 		defaults := map[string]entities.UpdaterConfig{
-			"terraform": {Enabled: boolPtr(true), AutoComplete: boolPtr(false)},
-			"golang":    {Enabled: boolPtr(true), AutoComplete: boolPtr(true), TargetBranch: "main"},
+			"terraform": {Enabled: new(true), AutoComplete: new(false)},
+			"golang":    {Enabled: new(true), AutoComplete: new(true), TargetBranch: "main"},
 		}
 		overrides := map[string]entities.UpdaterConfig{
-			"terraform": {AutoComplete: boolPtr(true)},
+			"terraform": {AutoComplete: new(true)},
 		}
 
 		// when

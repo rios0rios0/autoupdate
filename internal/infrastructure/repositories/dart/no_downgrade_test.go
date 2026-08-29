@@ -1,5 +1,3 @@
-//go:build unit
-
 package dart_test
 
 import (

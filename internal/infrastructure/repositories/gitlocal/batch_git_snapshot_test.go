@@ -1,5 +1,3 @@
-//go:build unit
-
 package gitlocal_test
 
 import (
@@ -35,33 +33,36 @@ func TestHeadHash(t *testing.T) {
 func TestRestoreSnapshot(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should hard-reset the worktree to the given hash without losing earlier accumulated changes", func(t *testing.T) {
-		t.Parallel()
+	t.Run(
+		"should hard-reset the worktree to the given hash without losing earlier accumulated changes",
+		func(t *testing.T) {
+			t.Parallel()
 
-		// given — clone, branch, write fileA, advance snapshot, then write fileB on top
-		repoDir := createTestRepoWithCommit(t)
-		ctx := newBatchGitContext(t, repoDir)
-		require.NoError(t, ctx.CreateBranchFromDefault("chore/autoupdate-2026-04-15"))
+			// given — clone, branch, write fileA, advance snapshot, then write fileB on top
+			repoDir := createTestRepoWithCommit(t)
+			ctx := newBatchGitContext(t, repoDir)
+			require.NoError(t, ctx.CreateBranchFromDefault("chore/autoupdate-2026-04-15"))
 
-		baseHash, err := ctx.HeadHash()
-		require.NoError(t, err)
+			baseHash, err := ctx.HeadHash()
+			require.NoError(t, err)
 
-		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("A"), 0o600))
-		snapAfterA, err := ctx.AdvanceSnapshot(baseHash)
-		require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(repoDir, "fileA.txt"), []byte("A"), 0o600))
+			snapAfterA, err := ctx.AdvanceSnapshot(baseHash)
+			require.NoError(t, err)
 
-		require.NoError(t, os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("B"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(repoDir, "fileB.txt"), []byte("B"), 0o600))
 
-		// when — restore back to the snapshot taken after fileA
-		require.NoError(t, ctx.RestoreSnapshot(snapAfterA))
+			// when — restore back to the snapshot taken after fileA
+			require.NoError(t, ctx.RestoreSnapshot(snapAfterA))
 
-		// then — fileA is still present (committed into the snapshot), fileB is gone
-		_, statErrA := os.Stat(filepath.Join(repoDir, "fileA.txt"))
-		assert.NoError(t, statErrA, "fileA from a prior accumulated snapshot should be preserved")
+			// then — fileA is still present (committed into the snapshot), fileB is gone
+			_, statErrA := os.Stat(filepath.Join(repoDir, "fileA.txt"))
+			require.NoError(t, statErrA, "fileA from a prior accumulated snapshot should be preserved")
 
-		_, statErrB := os.Stat(filepath.Join(repoDir, "fileB.txt"))
-		assert.True(t, os.IsNotExist(statErrB), "fileB from the failed updater should be discarded")
-	})
+			_, statErrB := os.Stat(filepath.Join(repoDir, "fileB.txt"))
+			assert.True(t, os.IsNotExist(statErrB), "fileB from the failed updater should be discarded")
+		},
+	)
 }
 
 func TestAdvanceSnapshot(t *testing.T) {
@@ -125,9 +126,9 @@ func TestFlattenToWorktree(t *testing.T) {
 
 		// then — both files still exist on disk and the worktree reports changes
 		_, statErrA := os.Stat(filepath.Join(repoDir, "fileA.txt"))
-		assert.NoError(t, statErrA)
+		require.NoError(t, statErrA)
 		_, statErrB := os.Stat(filepath.Join(repoDir, "fileB.txt"))
-		assert.NoError(t, statErrB)
+		require.NoError(t, statErrB)
 
 		hasChanges, hcErr := ctx.HasChanges()
 		require.NoError(t, hcErr)

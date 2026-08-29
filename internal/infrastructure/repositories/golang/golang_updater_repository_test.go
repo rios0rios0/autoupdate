@@ -1,5 +1,3 @@
-//go:build unit
-
 package golang_test
 
 import (
@@ -143,7 +141,7 @@ func TestParseGoDirective(t *testing.T) {
 		result := goUpdater.ParseGoDirective(content)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 
 	t.Run("should handle go directive with toolchain line", func(t *testing.T) {

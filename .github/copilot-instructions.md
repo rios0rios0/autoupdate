@@ -9,7 +9,7 @@ Always reference these instructions first and fallback to search or bash command
 ### Bootstrap, Build, and Test
 - Install dependencies: `go mod download` -- takes <1 second (after first download)
 - Build the binary: `make build` -- takes ~35 seconds first time, <1 second after. NEVER CANCEL. Set timeout to 60+ minutes.
-- Run tests: `go test -tags unit ./...` -- takes <1 second (cached), ~7 seconds clean. NEVER CANCEL. Set timeout to 30+ minutes.
+- Run tests: `go test ./...` -- takes <1 second (cached), ~10 seconds clean. NEVER CANCEL. Set timeout to 30+ minutes.
 - Format code: `go fmt ./...`
 - Static analysis: `go vet ./...`
 - Tidy dependencies: `go mod tidy`
@@ -65,7 +65,7 @@ Note: The CI/CD pipeline automatically uses these scripts via the reusable workf
 ### Testing Scenarios
 After making changes, ALWAYS run through these validation steps:
 1. `make build` - must complete successfully
-2. `go test -tags unit ./...` - all tests must pass
+2. `go test ./...` - all tests must pass
 3. `./bin/autoupdate --help` - must show help text with available commands
 4. `./bin/autoupdate run --dry-run` - should process config and discover repos in dry-run mode
 5. `go fmt ./...` and `go vet ./...` - must pass clean
@@ -73,7 +73,7 @@ After making changes, ALWAYS run through these validation steps:
 ### Pre-commit Validation
 - Always run `go fmt ./...` before committing or CI will fail
 - Always run `go vet ./...` before committing
-- Always run `go test -tags unit ./...` to ensure no regressions
+- Always run `go test ./...` to ensure no regressions
 - For full linting validation, use the pipeline script: `/tmp/pipelines/global/scripts/GoLang/GoLangCI-Lint/run.sh`
 - CI pipeline uses the rios0rios0/pipelines repository scripts which will fail if code style or quality issues exist
 
@@ -161,7 +161,7 @@ Push transport is auto-detected from the origin remote URL:
 - Entries name trees the repo does not author (VCS metadata, `vendor`/`node_modules`, tool caches like `.terraform`/`.venv`/`.gradle`). `.git` is why the list exists: results feed `support.WriteFileChanges`, which writes back under the root. Editor state (`.idea`, `.vscode`) is deliberately absent — it is committed. Go module discovery filters further (`moduleDirsFromPaths` in `golang/modules.go` drops hidden/vendored/`testdata`) to stay in sync with the script's `find ... -not -path '*/.*/*'`.
 
 ### Testing Infrastructure
-- All unit tests are tagged with `//go:build unit` and must be run with `-tags unit`
+- Unit tests carry no build tag, so `go test ./...` runs them; `//go:build integration` is reserved for tests needing real infrastructure
 - Uses testify for assertions (`assert`/`require`) — prefer stubs over mocks
 - Test doubles in `test/domain/commanddoubles/` (stubs), `test/domain/entitybuilders/` (builders), and `test/infrastructure/repositorydoubles/` (stubs, spies, builders)
 - Uses `github.com/rios0rios0/testkit` for additional test helpers

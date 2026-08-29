@@ -1,5 +1,3 @@
-//go:build unit
-
 package python_test
 
 import (
@@ -504,7 +502,7 @@ func runGuardScript(t *testing.T, repoDir, upgrade string) string {
 	pyUpdater.WriteManifestRestore(&sb)
 
 	scriptPath := filepath.Join(t.TempDir(), "guard.sh")
-	require.NoError(t, os.WriteFile(scriptPath, []byte(sb.String()), 0o700)) //nolint:gosec // test script must be executable
+	require.NoError(t, os.WriteFile(scriptPath, []byte(sb.String()), 0o700))
 
 	cmd := exec.CommandContext(t.Context(), "bash", scriptPath)
 	cmd.Dir = repoDir

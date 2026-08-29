@@ -1,8 +1,8 @@
-//go:build integration || unit || test
-
-package repositorydoubles //nolint:revive,staticcheck // Test package naming follows established project structure
+package repositorydoubles
 
 import (
+	"maps"
+
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	testkit "github.com/rios0rios0/testkit/pkg/test"
 )
@@ -10,6 +10,7 @@ import (
 // SpyProviderRepositoryBuilder helps create test SpyProviderRepository instances with a fluent interface.
 type SpyProviderRepositoryBuilder struct {
 	*testkit.BaseBuilder
+
 	providerName    string
 	token           string
 	repositories    []entities.Repository
@@ -134,7 +135,7 @@ func (b *SpyProviderRepositoryBuilder) WithPRExistsErr(err error) *SpyProviderRe
 }
 
 // Build creates the spy (satisfies testkit.Builder interface).
-func (b *SpyProviderRepositoryBuilder) Build() interface{} {
+func (b *SpyProviderRepositoryBuilder) Build() any {
 	return b.BuildSpy()
 }
 
@@ -185,7 +186,7 @@ func (b *SpyProviderRepositoryBuilder) Reset() testkit.Builder {
 // Clone creates a deep copy of the SpyProviderRepositoryBuilder.
 func (b *SpyProviderRepositoryBuilder) Clone() testkit.Builder {
 	clone := &SpyProviderRepositoryBuilder{
-		BaseBuilder:     b.BaseBuilder.Clone().(*testkit.BaseBuilder),
+		BaseBuilder:     cloneBase(b.BaseBuilder),
 		providerName:    b.providerName,
 		token:           b.token,
 		discoverErr:     b.discoverErr,
@@ -205,9 +206,7 @@ func (b *SpyProviderRepositoryBuilder) Clone() testkit.Builder {
 	}
 	if b.fileContents != nil {
 		clone.fileContents = make(map[string]string, len(b.fileContents))
-		for k, v := range b.fileContents {
-			clone.fileContents[k] = v
-		}
+		maps.Copy(clone.fileContents, b.fileContents)
 	}
 	if b.files != nil {
 		clone.files = make([]entities.File, len(b.files))
@@ -219,9 +218,7 @@ func (b *SpyProviderRepositoryBuilder) Clone() testkit.Builder {
 	}
 	if b.existingFiles != nil {
 		clone.existingFiles = make(map[string]bool, len(b.existingFiles))
-		for k, v := range b.existingFiles {
-			clone.existingFiles[k] = v
-		}
+		maps.Copy(clone.existingFiles, b.existingFiles)
 	}
 
 	return clone

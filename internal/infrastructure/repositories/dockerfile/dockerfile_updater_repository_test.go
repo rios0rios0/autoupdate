@@ -1,9 +1,8 @@
-//go:build unit
-
 package dockerfile_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,7 +93,7 @@ func TestDockerfileDetect(t *testing.T) {
 
 		// given
 		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithListFileErr(fmt.Errorf("network timeout")).
+			WithListFileErr(errors.New("network timeout")).
 			BuildSpy()
 		repo := entities.Repository{Organization: "org", Name: "repo"}
 
@@ -952,7 +951,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchTagsFunc(
 			func(_ context.Context, _ *dockerfile.ParsedImageRef) ([]string, error) {
-				return nil, fmt.Errorf("network error")
+				return nil, errors.New("network error")
 			},
 		)
 		defer cleanup()

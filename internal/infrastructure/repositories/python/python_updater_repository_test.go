@@ -1,5 +1,3 @@
-//go:build unit
-
 package python_test
 
 import (
@@ -98,7 +96,7 @@ func TestParsePythonVersionFile(t *testing.T) {
 		result := pyUpdater.ParsePythonVersionFile(content)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 
 	t.Run("should skip comment lines", func(t *testing.T) {
@@ -837,7 +835,7 @@ func TestOpenPullRequest(t *testing.T) {
 		prs, err := pyUpdater.OpenPullRequest(t.Context(), provider, repo, opts, vCtx, result)
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Nil(t, prs)
 		assert.Contains(t, err.Error(), "failed to create PR")
 	})
@@ -1043,7 +1041,7 @@ func TestWriteLocalAuth(t *testing.T) {
 		pyUpdater.WriteLocalAuth(&sb, params)
 
 		// then
-		assert.Equal(t, "", sb.String())
+		assert.Empty(t, sb.String())
 	})
 
 	t.Run("should write github auth when provider is github", func(t *testing.T) {
@@ -1213,10 +1211,6 @@ func TestFindPythonBinary(t *testing.T) {
 		assert.NotEmpty(t, path)
 		assert.Contains(t, path, "python")
 	})
-}
-
-func writeTestFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 // envToMap converts a slice of KEY=VALUE strings into a map for easy assertion.

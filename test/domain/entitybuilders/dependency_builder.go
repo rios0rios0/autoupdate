@@ -1,6 +1,4 @@
-//go:build integration || unit || test
-
-package entitybuilders //nolint:revive,staticcheck // Test package naming follows established project structure
+package entitybuilders
 
 import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
@@ -10,6 +8,7 @@ import (
 // DependencyBuilder helps create test dependencies with a fluent interface.
 type DependencyBuilder struct {
 	*testkit.BaseBuilder
+
 	name       string
 	source     string
 	currentVer string
@@ -68,7 +67,7 @@ func (b *DependencyBuilder) WithLine(line int) *DependencyBuilder {
 }
 
 // Build creates the dependency (satisfies testkit.Builder interface).
-func (b *DependencyBuilder) Build() interface{} {
+func (b *DependencyBuilder) Build() any {
 	return b.BuildDependency()
 }
 
@@ -99,7 +98,7 @@ func (b *DependencyBuilder) Reset() testkit.Builder {
 // Clone creates a deep copy of the DependencyBuilder.
 func (b *DependencyBuilder) Clone() testkit.Builder {
 	return &DependencyBuilder{
-		BaseBuilder: b.BaseBuilder.Clone().(*testkit.BaseBuilder),
+		BaseBuilder: cloneBase(b.BaseBuilder),
 		name:        b.name,
 		source:      b.source,
 		currentVer:  b.currentVer,

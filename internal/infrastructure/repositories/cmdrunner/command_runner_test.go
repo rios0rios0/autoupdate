@@ -1,5 +1,3 @@
-//go:build unit
-
 package cmdrunner_test
 
 import (

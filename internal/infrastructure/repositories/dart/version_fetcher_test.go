@@ -1,5 +1,3 @@
-//go:build unit
-
 package dart_test
 
 import (
@@ -137,8 +135,11 @@ func TestHTTPFlutterVersionFetcher(t *testing.T) {
 		t.Parallel()
 
 		// given
-		server := newJSONServer(t, http.StatusOK,
-			`{"current_release":{"stable":"missing"},"releases":[{"hash":"other","channel":"stable","version":"1.0.0"}]}`)
+		server := newJSONServer(
+			t,
+			http.StatusOK,
+			`{"current_release":{"stable":"missing"},"releases":[{"hash":"other","channel":"stable","version":"1.0.0"}]}`,
+		)
 		fetcher := dartUpdater.NewHTTPFlutterVersionFetcherWithURL(
 			&http.Client{Timeout: fetcherTimeout}, server.URL,
 		)

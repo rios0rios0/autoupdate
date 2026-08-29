@@ -1,5 +1,3 @@
-//go:build unit
-
 package csharp
 
 import (
@@ -39,7 +37,7 @@ type VersionContext = versionContext
 
 // NewUpdaterRepositoryForTest creates an updater with injected dependencies.
 func NewUpdaterRepositoryForTest(vf VersionFetcher, runner ...cmdrunner.Runner) *UpdaterRepository {
-	r := cmdrunner.Runner(cmdrunner.NewDefaultRunner())
+	r := cmdrunner.NewDefaultRunner()
 	if len(runner) > 0 {
 		r = runner[0]
 	}

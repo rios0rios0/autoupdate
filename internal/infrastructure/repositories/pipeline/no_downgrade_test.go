@@ -1,5 +1,3 @@
-//go:build unit
-
 package pipeline_test
 
 import (

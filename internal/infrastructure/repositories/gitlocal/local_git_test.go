@@ -1,5 +1,3 @@
-//go:build unit
-
 package gitlocal_test
 
 import (

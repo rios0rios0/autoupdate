@@ -1,5 +1,3 @@
-//go:build unit
-
 package golang_test
 
 import (
@@ -83,7 +81,7 @@ func TestHTTPGoVersionFetcher(t *testing.T) {
 		version, err := fetcher.FetchLatestVersion(t.Context())
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no stable Go version found")
 		assert.Empty(t, version)
 	})
@@ -102,7 +100,7 @@ func TestHTTPGoVersionFetcher(t *testing.T) {
 		version, err := fetcher.FetchLatestVersion(t.Context())
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected status code: 500")
 		assert.Empty(t, version)
 	})
@@ -122,7 +120,7 @@ func TestHTTPGoVersionFetcher(t *testing.T) {
 		version, err := fetcher.FetchLatestVersion(t.Context())
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse Go versions")
 		assert.Empty(t, version)
 	})
@@ -137,7 +135,7 @@ func TestHTTPGoVersionFetcher(t *testing.T) {
 		version, err := fetcher.FetchLatestVersion(t.Context())
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to fetch Go versions")
 		assert.Empty(t, version)
 	})
@@ -157,7 +155,7 @@ func TestHTTPGoVersionFetcher(t *testing.T) {
 		version, err := fetcher.FetchLatestVersion(t.Context())
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no stable Go version found")
 		assert.Empty(t, version)
 	})

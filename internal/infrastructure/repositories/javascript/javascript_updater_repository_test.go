@@ -1,5 +1,3 @@
-//go:build unit
-
 package javascript_test
 
 import (
@@ -108,7 +106,7 @@ func TestParseNodeVersionFile(t *testing.T) {
 		result := jsUpdater.ParseNodeVersionFile(content)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 }
 
@@ -263,7 +261,7 @@ func TestResolveVersionContext(t *testing.T) {
 
 		// then
 		assert.False(t, vCtx.NeedsVersionUpgrade)
-		assert.Equal(t, "", vCtx.LatestVersion)
+		assert.Empty(t, vCtx.LatestVersion)
 		assert.Equal(t, "chore/upgrade-js-deps", vCtx.BranchName)
 	})
 
@@ -355,7 +353,7 @@ func TestReadCurrentNodeVersion(t *testing.T) {
 		version := jsUpdater.ReadCurrentNodeVersion(t.Context(), provider, repo)
 
 		// then
-		assert.Equal(t, "", version)
+		assert.Empty(t, version)
 	})
 
 	t.Run("should return empty string when version file content is empty", func(t *testing.T) {
@@ -372,7 +370,7 @@ func TestReadCurrentNodeVersion(t *testing.T) {
 		version := jsUpdater.ReadCurrentNodeVersion(t.Context(), provider, repo)
 
 		// then
-		assert.Equal(t, "", version)
+		assert.Empty(t, version)
 	})
 }
 
@@ -1000,7 +998,7 @@ func TestParseNodeVersionFileEdgeCases(t *testing.T) {
 		result := jsUpdater.ParseNodeVersionFile(content)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 
 	t.Run("should handle version with leading and trailing whitespace", func(t *testing.T) {
@@ -1174,7 +1172,7 @@ func TestWriteLocalAuth(t *testing.T) {
 		result := jsUpdater.WriteLocalAuth(params)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 
 	t.Run("should contain GitHub auth when provider is github and token exists", func(t *testing.T) {
@@ -1453,7 +1451,7 @@ func TestReadLocalNodeVersion(t *testing.T) {
 		version := jsUpdater.ReadLocalNodeVersion(tmpDir)
 
 		// then
-		assert.Equal(t, "", version)
+		assert.Empty(t, version)
 	})
 
 	t.Run("should prefer .nvmrc over .node-version when both exist", func(t *testing.T) {
