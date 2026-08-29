@@ -1,4 +1,0 @@
-kind: 'Changed'
-body: 'split `configs/autoupdate.yaml` into the defaults AutoUpdate ships and `configs/autoupdate.example.yaml`. The shipped file is merged into every run now, so it can no longer carry the placeholder `providers` block it used to: an operator with no configuration of their own and a `GITHUB_TOKEN` in their environment would have passed validation and had `autoupdate run` walk an organization called `my-org`. Copy the example file instead.'
-breaking: true
-time: '2026-08-29T03:46:00.497714111Z'

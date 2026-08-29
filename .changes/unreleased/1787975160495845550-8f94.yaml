@@ -1,4 +1,0 @@
-kind: 'Changed'
-body: 'stopped requiring a configured provider for `autoupdate .`, which takes its provider from the repository''s own `origin` remote and never needed one. Validation now depends on the mode: `autoupdate run` still needs at least one provider to have anything to discover. In practice local mode gains rather than loses — it used to fall back to nil settings whenever validation failed, so `updaters` and `exclude_repos` were silently inert there.'
-breaking: true
-time: '2026-08-29T03:46:00.495804779Z'

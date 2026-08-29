@@ -22,6 +22,33 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-29
+
+### Added
+
+- layered the configuration. AutoUpdate now folds four sources, each overriding only the keys its own document declares: the built-in defaults it ships with (embedded in the binary, so it knows every updater it supports with no configuration and no network), the same file fetched from `main` on a best effort, the operator's own file, and the `.autoupdate.yaml` inside the repository being updated. Only the operator's file may name a credential, a `providers` list or the aggregate branch prefix; the other three decode through a schema that has no field for them, so those keys have nowhere to land rather than being caught by a check that has to run at the right moment.
+- made a target repository's `.autoupdate.yaml` a settings file as well as an opt-out marker. `skip` and `reason` mean exactly what they meant; alongside them it may now set `updaters`, `exclude_repos`, `exclude_forks`, `exclude_archived` and `cleanup_stale_branches`, so a project can say how it wants to be updated rather than only refusing. The exclusion keys finally do something from inside a repository: `entities.ExcludesSelf` gives them a second pass after the file has been read, which is the only point at which a project can exclude itself — the organization-wide filter runs before that file exists to be fetched.
+- validated `aggregate_branch_prefix` before anything uses it. The prefix decides which branches stale-branch cleanup deletes, and an operator's typo is as capable of a mass deletion as a hostile repository would be, so it must name a branch git accepts, must contain a `/`, and must not stop at one — `chore/` matches AutoBump's `chore/bump-*` branches, which is how one tool ends up deleting another's branches and closing its pull requests. A bad prefix fails at startup, before a single branch has been listed.
+
+### Changed
+
+- **BREAKING CHANGE:** split `configs/autoupdate.yaml` into the defaults AutoUpdate ships and `configs/autoupdate.example.yaml`. The shipped file is merged into every run now, so it can no longer carry the placeholder `providers` block it used to: an operator with no configuration of their own and a `GITHUB_TOKEN` in their environment would have passed validation and had `autoupdate run` walk an organization called `my-org`. Copy the example file instead.
+- **BREAKING CHANGE:** started reporting unknown keys in the operator's configuration instead of ignoring them. The file used to be decoded leniently, so a typo was silent. Worth knowing if you copied a configuration across from AutoBump: it tags `gitlab_ci_job_token` as a real key while AutoUpdate reads that value from the environment and does not accept it in the file at all.
+- **BREAKING CHANGE:** stopped requiring a configured provider for `autoupdate .`, which takes its provider from the repository's own `origin` remote and never needed one. Validation now depends on the mode: `autoupdate run` still needs at least one provider to have anything to discover. In practice local mode gains rather than loses — it used to fall back to nil settings whenever validation failed, so `updaters` and `exclude_repos` were silently inert there.
+- **BREAKING CHANGE:** stopped resolving the operator's configuration from the working directory. AutoUpdate runs against a local repository as `autoupdate .`, with that repository as the working directory, and a target repository may carry its own `.autoupdate.yaml` — the same file name, a narrower schema. Reading it as the operator's configuration substituted a project's settings for an operator's, and the run then carried on with downloaded defaults rather than reporting that it had read the wrong file. Finding no configuration is no longer an error either: the built-in defaults are the base of every run.
+- changed the Go module dependencies to their latest versions
+- dropped the `unit` build tag from every test. It hid the whole suite from plain `go test ./...`, from IDE runs and from the linter while buying nothing, since an untagged file compiles under a `-tags` build too.
+
+### Fixed
+
+- fixed the report files this project's pipeline writes being left untracked-but-unignored, where a `git add -A` could sweep them into a commit. `make test` alone drops `cobertura.xml`, `coverage.txt`, `coverage.xml` and `junit.xml` into the repository root, and `make sast` adds `.codeql-db/`; ten of the twelve paths the shared block names were ignored by nothing (`reports/` and `build/reports/` were already covered by this project's own unanchored entries). They are now covered by the shared block `make gitignore` generates from [rios0rios0/pipelines](https://github.com/rios0rios0/pipelines), so the list is maintained where those filenames are decided rather than copied here by hand. The project's own entries are untouched and sit below the block, where gitignore's last-match-wins rule lets them override anything it says
+- honoured `updaters.<name>.enabled` in `autoupdate .`. Local mode dispatched on the detected language alone and never consulted the configuration, so an updater disabled for `autoupdate run` still ran there.
+- stopped a target repository re-enabling stale-branch cleanup. `--skip-cleanup` is applied to the resolved settings before the repository's own layer is folded, so a `.autoupdate.yaml` carrying `cleanup_stale_branches: true` was overriding the flag and deleting the branches the operator had reached for it to keep. That key is now honoured from a repository only when it is `false`: off can only ever remove an action. Also guarded `ApplyRepoOverlay` against the nil settings `autoupdate .` deliberately keeps working with, which any non-empty repository file would otherwise have dereferenced, and stopped validating the provider list outside batch mode — local mode takes its provider from the repository's own `origin` remote and never reads it, so refusing a run over an entry it will not touch cost that run its updaters and exclusions too.
+
+### Removed
+
+- **BREAKING CHANGE:** removed the `local` subcommand. `autoupdate .` and `autoupdate /path` are the single-repository form, and `autoupdate` with no arguments still prints help. `autoupdate local` is kept hidden and deprecated rather than deleted outright: without it the bare word would fall through to the root command's positional argument and be read as a path, so the error would say `./local` does not exist rather than that the command is gone.
+
 ## [0.23.1] - 2026-08-28
 
 ### Changed

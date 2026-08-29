@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'honoured `updaters.<name>.enabled` in `autoupdate .`. Local mode dispatched on the detected language alone and never consulted the configuration, so an updater disabled for `autoupdate run` still ran there.'
-time: '2026-08-29T03:46:00.50154698Z'
