@@ -98,25 +98,13 @@ func (c UpdaterConfig) IsAutoComplete() bool {
 // `origin` remote and has never needed one, so demanding one there would refuse a run that
 // works.
 func ValidateSettings(settings *Settings, batch bool) error {
-	if batch && len(settings.Providers) == 0 {
-		return ErrNoProvidersConfigured
-	}
-
-	for i, p := range settings.Providers {
-		if p.Type == "" {
-			return fmt.Errorf("providers[%d].type is required", i)
-		}
-		if p.Token == "" {
-			return fmt.Errorf(
-				"providers[%d].token is required (set inline, via ${ENV_VAR}, or as file path)",
-				i,
-			)
-		}
-		if len(p.Organizations) == 0 {
-			return fmt.Errorf(
-				"providers[%d].organizations must have at least one entry",
-				i,
-			)
+	// The provider list is validated only for `run`. Local mode takes its provider from the
+	// repository's own `origin` remote and never reads it, so refusing a run over an entry it
+	// will not touch costs that run its updaters and exclusions as well -- LocalController
+	// answers a failed load with nil settings, deliberately, so it keeps working with none.
+	if batch {
+		if err := validateProviders(settings.Providers); err != nil {
+			return err
 		}
 	}
 
@@ -132,6 +120,30 @@ func ValidateSettings(settings *Settings, batch bool) error {
 	}
 
 	return ValidateAggregateBranchPrefix(settings.AggregateBranchPrefix)
+}
+
+// validateProviders checks the discovery configuration `autoupdate run` needs.
+func validateProviders(providers []ProviderConfig) error {
+	if len(providers) == 0 {
+		return ErrNoProvidersConfigured
+	}
+
+	for i, provider := range providers {
+		if provider.Type == "" {
+			return fmt.Errorf("providers[%d].type is required", i)
+		}
+		if provider.Token == "" {
+			return fmt.Errorf(
+				"providers[%d].token is required (set inline, via ${ENV_VAR}, or as file path)",
+				i,
+			)
+		}
+		if len(provider.Organizations) == 0 {
+			return fmt.Errorf("providers[%d].organizations must have at least one entry", i)
+		}
+	}
+
+	return nil
 }
 
 // ErrNoProvidersConfigured is returned when `autoupdate run` has nothing to discover.

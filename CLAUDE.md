@@ -98,9 +98,14 @@ with `MergeUpdatersConfig` afterwards. Apply is atomic, and a comments-only docu
 Only the operator's layer is `ScopeOperator`. The other three decode through
 `RestrictedConfig`, which has **no field** for `providers`, any credential,
 `aggregate_branch_prefix` or `concurrency` -- enforcement by schema, not by a check that has
-to run at the right moment. `operatorOnlyKeys` only reports what was ignored. The working
-directory is never searched, and finding no configuration is not an error: the built-in
-defaults are the base of every run.
+to run at the right moment. `operatorOnlyKeys` only reports what was ignored. One field it *does*
+have is accepted in one direction only: `cleanup_stale_branches` may be switched **off** by
+a restricted layer and never on (`acceptSwitchOff`). Off can only ever remove an action, and
+`applySkipCleanupFlag` is applied in the controller *before* this layer is folded, so
+honouring an enable would override `--skip-cleanup`. The working directory is never
+searched, and finding no configuration is not an error: the built-in defaults are the base
+of every run. `ApplyRepoOverlay` also tolerates nil settings, which is the state
+`LocalController` deliberately keeps working in.
 
 `ValidateSettings(settings, batch)` mirrors AutoBump's: `batch=true` requires a provider,
 `batch=false` does not, because `autoupdate .` takes its provider from the repository's own

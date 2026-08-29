@@ -259,6 +259,60 @@ func TestApplyRepoOverlay(t *testing.T) {
 		assert.Same(t, base, settings)
 	})
 
+	t.Run("should tolerate nil settings", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- LocalController answers a failed configuration load with nil settings,
+		// deliberately, so `autoupdate .` keeps working with none. A repository carrying any
+		// non-empty file would otherwise reach applyTo and dereference it.
+		config, err := entities.ParseRepoConfig([]byte("updaters:\n  golang:\n    enabled: false\n"))
+		require.NoError(t, err)
+
+		// when
+		settings, err := entities.ApplyRepoOverlay(nil, config)
+
+		// then
+		require.NoError(t, err)
+		assert.Nil(t, settings)
+	})
+
+	t.Run("should not let a repository turn cleanup on", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- applySkipCleanupFlag is applied to the resolved settings in the
+		// controller, and this layer is folded per repository afterwards, so honouring an
+		// enable here would override the --skip-cleanup an operator reached for precisely to
+		// stop branches being deleted
+		disabled := false
+		base := &entities.Settings{CleanupStaleBranches: &disabled}
+		config, err := entities.ParseRepoConfig([]byte("cleanup_stale_branches: true\n"))
+		require.NoError(t, err)
+
+		// when
+		settings, err := entities.ApplyRepoOverlay(base, config)
+
+		// then
+		require.NoError(t, err)
+		require.NotNil(t, settings.CleanupStaleBranches)
+		assert.False(t, *settings.CleanupStaleBranches, "--skip-cleanup must have the last word")
+	})
+
+	t.Run("should let a repository turn cleanup off", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- off can only ever remove an action
+		config, err := entities.ParseRepoConfig([]byte("cleanup_stale_branches: false\n"))
+		require.NoError(t, err)
+
+		// when
+		settings, err := entities.ApplyRepoOverlay(&entities.Settings{}, config)
+
+		// then
+		require.NoError(t, err)
+		require.NotNil(t, settings.CleanupStaleBranches)
+		assert.False(t, *settings.CleanupStaleBranches)
+	})
+
 	t.Run("should not mutate the settings the fan-out shares", func(t *testing.T) {
 		t.Parallel()
 

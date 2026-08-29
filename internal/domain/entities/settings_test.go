@@ -422,6 +422,55 @@ func TestMergeUpdatersConfig(t *testing.T) {
 	})
 }
 
+func TestValidateSettingsByMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should not require a provider outside batch mode", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- `autoupdate .` takes its provider from the repository's own origin remote
+		settings := &entities.Settings{}
+
+		// when
+		err := entities.ValidateSettings(settings, false)
+
+		// then
+		assert.NoError(t, err)
+	})
+
+	t.Run("should not validate a provider entry outside batch mode", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- refusing a local run over an entry it never reads costs it the updaters
+		// and exclusions too, because LocalController answers a failed load with nil settings
+		settings := &entities.Settings{
+			Providers: []entities.ProviderConfig{{Type: "github", Token: "", Organizations: nil}},
+		}
+
+		// when
+		localErr := entities.ValidateSettings(settings, false)
+		batchErr := entities.ValidateSettings(settings, true)
+
+		// then
+		require.NoError(t, localErr)
+		require.Error(t, batchErr)
+	})
+
+	t.Run("should still validate exclusions and the prefix outside batch mode", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- both are read by `autoupdate .`
+		settings := &entities.Settings{ExcludeRepos: []string{"bad/[unclosed"}}
+
+		// when
+		err := entities.ValidateSettings(settings, false)
+
+		// then
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exclude_repos[0]")
+	})
+}
+
 func TestValidateAggregateBranchPrefix(t *testing.T) {
 	t.Parallel()
 

@@ -238,7 +238,7 @@ cleanup_stale_branches: false
 | `skip`, `reason` | Opt out entirely, with an explanation for the log |
 | `updaters` | Per-updater `enabled`, `auto_complete`, `target_branch` |
 | `exclude_repos`, `exclude_forks`, `exclude_archived` | Let the repository exclude *itself* |
-| `cleanup_stale_branches` | Keep this project's dated branches |
+| `cleanup_stale_branches` | Only `false`, to keep this project's dated branches. An enable here would arrive after `--skip-cleanup` had been applied and would override it |
 
 And the keys it may **not** set, which are reported and ignored when a repository tries:
 

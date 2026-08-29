@@ -161,7 +161,7 @@ func applyRestrictedLayer(config *Settings, layer ConfigLayer) (*Settings, error
 		return nil, err
 	}
 
-	return restricted.applyTo(config), nil
+	return restricted.applyTo(config, layer.describe()), nil
 }
 
 // decodeRestricted reads a layer through RestrictedConfig and reports the operator-only
@@ -192,7 +192,10 @@ func decodeRestricted(layer ConfigLayer) (RestrictedConfig, error) {
 // it would leak one repository's configuration into another's -- nondeterministically,
 // which is the worst shape that bug can take.
 func ApplyRepoOverlay(base *Settings, config *RepoConfig) (*Settings, error) {
-	if config == nil || len(config.Layer) == 0 {
+	// base is nil when local mode could not load a configuration at all, which is a state
+	// LocalController deliberately keeps working. There is nothing for the layer to override,
+	// and applyTo would dereference it.
+	if base == nil || config == nil || len(config.Layer) == 0 {
 		return base, nil
 	}
 
@@ -224,10 +227,10 @@ type RestrictedConfig struct {
 }
 
 // applyTo folds the restricted layer onto settings, returning a copy.
-func (r RestrictedConfig) applyTo(settings *Settings) *Settings {
+func (r RestrictedConfig) applyTo(settings *Settings, layerName string) *Settings {
 	next := *settings
 
-	if r.CleanupStaleBranches != nil {
+	if acceptSwitchOff(r.CleanupStaleBranches, layerName, "cleanup_stale_branches") {
 		next.CleanupStaleBranches = r.CleanupStaleBranches
 	}
 	if r.ExcludeForks != nil {
@@ -243,6 +246,33 @@ func (r RestrictedConfig) applyTo(settings *Settings) *Settings {
 	next.Updaters = MergeUpdatersConfig(settings.Updaters, r.Updaters)
 
 	return &next
+}
+
+// acceptSwitchOff reports whether a restricted layer's toggle may be honoured.
+//
+// Stale-branch cleanup deletes remote branches and closes their pull requests, so a layer
+// that is not the operator's may turn it *off* and never on. Off is safe in a way on is not:
+// it can only ever remove an action.
+//
+// The ordering is what makes this necessary rather than merely tidy. applySkipCleanupFlag is
+// applied to the resolved settings in the controller, and this layer is folded per repository
+// afterwards -- so honouring an enable here would let a target repository override the
+// --skip-cleanup an operator reached for precisely to stop branches being deleted.
+func acceptSwitchOff(value *bool, layerName, key string) bool {
+	if value == nil {
+		return false
+	}
+	if !*value {
+		return true
+	}
+
+	logger.Warnf(
+		"Ignoring %q: %s from the %s can only turn it off, not on -- it deletes remote "+
+			"branches and closes their pull requests, and --skip-cleanup is applied before "+
+			"this layer", key, key, layerName,
+	)
+
+	return false
 }
 
 const (

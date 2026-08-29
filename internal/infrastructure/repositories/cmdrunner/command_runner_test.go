@@ -3,6 +3,7 @@ package cmdrunner_test
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -126,13 +127,7 @@ func TestRun_WithEnvOption(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 0, result.ExitCode)
 
-		found := false
-		for _, line := range strings.Split(result.Output, "\n") {
-			if line == "TEST_VAR=hello" {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(strings.Split(result.Output, "\n"), "TEST_VAR=hello")
 		assert.True(t, found, "expected TEST_VAR=hello in env output")
 	})
 }
