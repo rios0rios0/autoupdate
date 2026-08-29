@@ -1,6 +1,4 @@
-//go:build integration || unit || test
-
-package entitybuilders //nolint:revive,staticcheck // Test package naming follows established project structure
+package entitybuilders
 
 import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
@@ -10,6 +8,7 @@ import (
 // RepositoryBuilder helps create test repositories with a fluent interface.
 type RepositoryBuilder struct {
 	*testkit.BaseBuilder
+
 	id            string
 	name          string
 	organization  string
@@ -26,12 +25,12 @@ func NewRepositoryBuilder() *RepositoryBuilder {
 		BaseBuilder:   testkit.NewBaseBuilder(),
 		id:            "test-repo-id",
 		name:          "test-repo",
-		organization:  "test-org",
+		organization:  defaultOrganization,
 		project:       "",
 		defaultBranch: "refs/heads/main",
 		remoteURL:     "https://github.com/test-org/test-repo.git",
 		sshURL:        "git@github.com:test-org/test-repo.git",
-		providerName:  "github",
+		providerName:  defaultProviderType,
 	}
 }
 
@@ -78,7 +77,7 @@ func (b *RepositoryBuilder) WithProviderName(name string) *RepositoryBuilder {
 }
 
 // Build creates the repository (satisfies testkit.Builder interface).
-func (b *RepositoryBuilder) Build() interface{} {
+func (b *RepositoryBuilder) Build() any {
 	return b.BuildRepository()
 }
 
@@ -113,7 +112,7 @@ func (b *RepositoryBuilder) Reset() testkit.Builder {
 // Clone creates a deep copy of the RepositoryBuilder.
 func (b *RepositoryBuilder) Clone() testkit.Builder {
 	return &RepositoryBuilder{
-		BaseBuilder:   b.BaseBuilder.Clone().(*testkit.BaseBuilder),
+		BaseBuilder:   cloneBase(b.BaseBuilder),
 		id:            b.id,
 		name:          b.name,
 		organization:  b.organization,

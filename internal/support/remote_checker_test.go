@@ -1,11 +1,10 @@
-//go:build unit
-
 package support_test
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/support"
@@ -29,7 +28,7 @@ func TestDetectRemote(t *testing.T) {
 		found, err := support.DetectRemote(t.Context(), &langGolang.Detector{}, provider, repo)
 
 		// then
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.True(t, found)
 	})
 
@@ -46,7 +45,7 @@ func TestDetectRemote(t *testing.T) {
 		found, err := support.DetectRemote(t.Context(), &langGolang.Detector{}, provider, repo)
 
 		// then
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.False(t, found)
 	})
 }

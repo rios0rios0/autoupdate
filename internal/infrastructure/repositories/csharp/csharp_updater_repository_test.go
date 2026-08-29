@@ -1,5 +1,3 @@
-//go:build unit
-
 package csharp_test
 
 import (
@@ -93,7 +91,7 @@ func TestParseGlobalJSON(t *testing.T) {
 		result := csUpdater.ParseGlobalJSON(content)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 
 	t.Run("should return empty for invalid JSON", func(t *testing.T) {
@@ -106,7 +104,7 @@ func TestParseGlobalJSON(t *testing.T) {
 		result := csUpdater.ParseGlobalJSON(content)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 
 	t.Run("should return empty for empty string", func(t *testing.T) {
@@ -119,7 +117,7 @@ func TestParseGlobalJSON(t *testing.T) {
 		result := csUpdater.ParseGlobalJSON(content)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 
 	t.Run("should return empty when version is empty string", func(t *testing.T) {
@@ -132,7 +130,7 @@ func TestParseGlobalJSON(t *testing.T) {
 		result := csUpdater.ParseGlobalJSON(content)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 }
 

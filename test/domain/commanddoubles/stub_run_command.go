@@ -1,6 +1,4 @@
-//go:build integration || unit || test
-
-package commanddoubles //nolint:revive,staticcheck // Test package naming follows established project structure
+package commanddoubles
 
 import (
 	"context"

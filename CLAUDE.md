@@ -19,14 +19,21 @@ make lint                     # Lint via pipelines scripts
 make test                     # Test via pipelines scripts
 make sast                     # Security scanning via pipelines scripts
 
-go test -tags unit ./...      # Run all unit tests (requires -tags unit)
-go test -tags unit -run TestFunctionName ./internal/domain/commands/  # Run a single test
+go test ./...                 # Run all unit tests
+go test -run TestFunctionName ./internal/domain/commands/  # Run a single test
 go fmt ./...                  # Format code
 go vet ./...                  # Static analysis
 go mod tidy                   # Clean up dependencies
 ```
 
-All unit tests require the `unit` build tag: `//go:build unit`. Running without `-tags unit` will find no tests.
+Unit tests carry **no build tag**. `//go:build unit` only hid them from plain
+`go test ./...` and from IDE runs while buying nothing, because an untagged file compiles
+under a `-tags` build too — the shared pipeline still runs every one of them. Reserve
+`//go:build integration` for tests that need real infrastructure; this repository has none
+today.
+
+A test that cannot run in parallel says so in a comment above it, and the reason is usually
+`t.Setenv` or `t.Chdir` — which Go refuses anywhere under a parallel ancestor.
 
 ## Architecture
 
@@ -73,11 +80,50 @@ The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` 
 
 ### Config System
 
-Auto-discovery searches `.`, `.config`, `configs`, `$HOME`, `$HOME/.config` for `autoupdate.yaml` / `.autoupdate.yaml`. Tokens support inline values, `${ENV_VAR}` expansion, and file path resolution.
+Configuration is **layered**: built-in defaults (`configs/autoupdate.yaml`, embedded via
+`go:embed` in `configs/embed.go`) -> published defaults (the same file fetched from `main`,
+best effort) -> the operator's file (`--config`, else `~/` or `~/.config/`) -> the target
+repository's own `.autoupdate.yaml`. Each layer overrides only the keys its document
+declares. `internal/domain/entities/config_layers.go` is the engine; `configLoader` in
+`internal/infrastructure/controllers/config_helpers.go` assembles the first three, and
+`ApplyRepoOverlay` folds the fourth per repository.
+
+The mechanism is `yaml.v3` decoding into a *non-zero* struct: only the keys the document
+carries are assigned, so absent-versus-`false` needs no pointer fields -- `ExcludeForks`,
+`ExcludeArchived` and `Concurrency` stay value types. Maps are the exception (each value
+decodes into a fresh zero element), so `Updaters` is blanked before the decode and re-merged
+with `MergeUpdatersConfig` afterwards. Apply is atomic, and a comments-only document returns
+`io.EOF`, which is a layer with nothing to say rather than a broken one.
+
+Only the operator's layer is `ScopeOperator`. The other three decode through
+`RestrictedConfig`, which has **no field** for `providers`, any credential,
+`aggregate_branch_prefix` or `concurrency` -- enforcement by schema, not by a check that has
+to run at the right moment. `operatorOnlyKeys` only reports what was ignored. One field it *does*
+have is accepted in one direction only: `cleanup_stale_branches` may be switched **off** by
+a restricted layer and never on (`acceptSwitchOff`). Off can only ever remove an action, and
+`applySkipCleanupFlag` is applied in the controller *before* this layer is folded, so
+honouring an enable would override `--skip-cleanup`. The working directory is never
+searched, and finding no configuration is not an error: the built-in defaults are the base
+of every run. `ApplyRepoOverlay` also tolerates nil settings, which is the state
+`LocalController` deliberately keeps working in.
+
+`ValidateSettings(settings, batch)` mirrors AutoBump's: `batch=true` requires a provider,
+`batch=false` does not, because `autoupdate .` takes its provider from the repository's own
+`origin` remote. `aggregate_branch_prefix` is operator-only *and* validated
+(`ValidateAggregateBranchPrefix`): it aims a destructive operation, so it must name a branch
+git accepts, contain a `/`, and not stop at one -- `chore/` would match AutoBump's
+`chore/bump-*` branches.
 
 **Repository exclusions:**
-- **Global**: `exclude_repos` in user config — right-anchored glob list matched against `<org>/<repo>` (or `<org>/<project>/<repo>` for ADO). Honored in batch mode and in local mode when a config file is loadable.
-- **Per-repo**: `.autoupdate.yaml` in the target repository's root with `skip: true` (and optional `reason`). Checked in both `autoupdate run` (fetched via provider API) and `autoupdate .` (read from disk).
+- **Global**: `exclude_repos` in the operator's config -- right-anchored glob list matched
+  against `<org>/<repo>` (or `<org>/<project>/<repo>` on Azure DevOps).
+- **Per-repo**: `.autoupdate.yaml` in the target repository's root. `skip: true` (with an
+  optional `reason`) opts out entirely; the same file is also the project settings layer.
+  `narrowToProjectSchema` prunes it to the keys the layer may carry before it is applied.
+- `entities.ExcludesSelf` is the shared predicate. `filterRepositories` calls it
+  organization-wide, and `loadRepoSettings`/`resolveLocalSettings` call it again once the
+  repository's own file has been folded in -- which is the only pass in which a repository's
+  own `exclude_*` keys can act, since the first ran before that file existed to be read.
 
 ### Changelog Writing (Keep a Changelog and chlog)
 
@@ -250,7 +296,7 @@ A repository is upgraded with the dependency manager it already uses; an update 
 
 ## Testing Conventions
 
-- Build tag: `//go:build unit` on every test file
+- No build tag on unit tests; `//go:build integration` is reserved for tests needing real infrastructure
 - External test packages (e.g., `commands_test` for package `commands`)
 - BDD structure with `// given`, `// when`, `// then` comments
 - Parallel execution via `t.Parallel()` and `t.Run()` subtests

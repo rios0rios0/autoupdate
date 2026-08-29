@@ -130,7 +130,31 @@ Download pre-built binaries from the [releases page](https://github.com/rios0rio
 
 ## Configuration
 
-Create an `autoupdate.yaml` (or `.autoupdate.yaml`) in the current directory, `~/.config/`, or pass it with `--config`.
+### Configuration Layers
+
+AutoUpdate folds four configuration sources, each overriding only the keys it declares:
+
+| # | Layer | Where it comes from | May set |
+|---|-------|---------------------|---------|
+| 1 | **built-in defaults** | `configs/autoupdate.yaml`, compiled into the binary | updaters and behaviour |
+| 2 | **published defaults** | the same file fetched from `main`, best effort | updaters and behaviour |
+| 3 | **operator configuration** | `--config <path>`, else `~/.autoupdate.yaml` or `~/.config/autoupdate.yaml` | **everything** |
+| 4 | **project configuration** | `.autoupdate.yaml` in the target repository | updaters, exclusions, cleanup |
+
+Layer 1 always exists, so AutoUpdate knows every updater it supports with no configuration
+and no network. Layer 2 lets a change reach an installed binary without a release; when it
+cannot be fetched, the run says so and carries on. Layer 3 is the only one that may name a
+credential, a `providers` list, or the aggregate branch prefix -- the other three decode
+through a schema that has no field for them, so a target repository cannot hand AutoUpdate
+credentials or aim its branch deletion.
+
+The working directory is never searched for the operator's configuration. `autoupdate .`
+runs with the target repository as the working directory, and that repository may carry its
+own `.autoupdate.yaml`; reading it as the operator's configuration would substitute a
+project's settings for the operator's rather than layering them.
+
+Copy [`configs/autoupdate.example.yaml`](configs/autoupdate.example.yaml) to
+`~/.config/autoupdate.yaml`, or pass your own with `--config`.
 
 ```yaml
 providers:
@@ -169,7 +193,8 @@ exclude_repos:
 
 # The updaters section is optional. All 10 updaters (terraform, golang, python,
 # javascript, dart, ruby, java, csharp, pipeline, dockerfile) are enabled by default.
-# Default config is fetched from GitHub and merged with your overrides.
+# The binary ships those defaults; the copy published on `main` is fetched on top of them
+# when it is reachable, and an unreachable network changes nothing.
 # Only specify what you want to change:
 updaters:
   terraform:
@@ -178,10 +203,14 @@ updaters:
     enabled: false
 ```
 
-### Skipping a Single Repository (Per-Repo Opt-Out)
+### Per-Repository Configuration (`.autoupdate.yaml`)
 
-Drop a `.autoupdate.yaml` in the **target repository's root** to opt that
-project out of automated updates without touching the global config:
+Drop a `.autoupdate.yaml` in the **target repository's root** to change how that project is
+updated, without touching your own configuration. It is the last
+[configuration layer](#configuration-layers), and it is honoured in both `autoupdate run`
+(read via the provider API on the default branch) and `autoupdate .` (read from disk).
+
+The simplest use is still opting out entirely:
 
 ```yaml
 # .autoupdate.yaml in the target repo
@@ -189,12 +218,40 @@ skip: true
 reason: 'fork of upstream; rebase manually before any update'
 ```
 
-The `reason` is optional but is logged when the skip fires, so reviewers
-can tell at a glance why a repo is being passed over. The file is
-honored in both `autoupdate run` (read via the provider API on the
-default branch) and `autoupdate .` (read directly from disk). Use it for
-forks you maintain by hand, frozen branches, or any project where
-automated PRs would create more work than they save.
+The `reason` is optional but is logged when the skip fires, so reviewers can tell at a
+glance why a repository is being passed over. Use it for forks you maintain by hand, frozen
+branches, or any project where automated PRs would create more work than they save.
+
+The same file can also adjust the settings the project is updated under:
+
+```yaml
+# .autoupdate.yaml in the target repo
+updaters:
+  golang:
+    enabled: false      # this project pins its Go modules by hand
+exclude_forks: true     # ...and excludes itself if it is ever forked
+cleanup_stale_branches: false
+```
+
+| Key | Purpose |
+|-----|---------|
+| `skip`, `reason` | Opt out entirely, with an explanation for the log |
+| `updaters` | Per-updater `enabled`, `auto_complete`, `target_branch` |
+| `exclude_repos`, `exclude_forks`, `exclude_archived` | Let the repository exclude *itself* |
+| `cleanup_stale_branches` | Only `false`, to keep this project's dated branches. An enable here would arrive after `--skip-cleanup` had been applied and would override it |
+
+And the keys it may **not** set, which are reported and ignored when a repository tries:
+
+| Key | Why it is yours alone |
+|-----|------------------------|
+| `providers` | Which repositories are scanned, and which servers are talked to, is not a repository's to decide |
+| `github_access_token`, `gitlab_access_token`, `azure_devops_access_token`, `gpg_key_path`, `gpg_key_passphrase` | A repository handing AutoUpdate a credential — or a *path* to read one from — is a credential it chose |
+| `aggregate_branch_prefix` | The prefix decides which branches stale-branch cleanup **deletes**, and whose pull requests it closes |
+| `concurrency` | The fan-out is decided per organization, before any repository's own file has been read |
+
+This is not a trust check that runs at the right moment: the three non-operator layers
+decode through a struct that has no field for those keys, so there is nowhere for them to
+land.
 
 ### Changelog Formats
 
@@ -263,6 +320,10 @@ autoupdate --dry-run .
 # Use an explicit token (overrides env var detection)
 autoupdate --token ghp_abc123 .
 ```
+
+> The `local` subcommand was removed in `1.0.0`. `autoupdate local` still works, hidden and
+> deprecated, so that the word is not silently read as a path -- but it warns and will go.
+> `autoupdate` with no arguments prints help.
 
 Auth tokens are read automatically from standard environment variables:
 

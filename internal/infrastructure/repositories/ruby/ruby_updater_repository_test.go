@@ -1,5 +1,3 @@
-//go:build unit
-
 package ruby_test
 
 import (
@@ -93,7 +91,7 @@ func TestParseRubyVersionFile(t *testing.T) {
 		result := rbUpdater.ParseRubyVersionFile(content)
 
 		// then
-		assert.Equal(t, "", result)
+		assert.Empty(t, result)
 	})
 
 	t.Run("should skip comment lines", func(t *testing.T) {

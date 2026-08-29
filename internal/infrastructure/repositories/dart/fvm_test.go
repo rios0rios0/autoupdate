@@ -1,5 +1,3 @@
-//go:build unit
-
 package dart_test
 
 import (
@@ -14,10 +12,10 @@ import (
 	dartUpdater "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dart"
 )
 
-func writeFvmrc(t *testing.T, content string) (dir string, path string) {
+func writeFvmrc(t *testing.T, content string) (string, string) {
 	t.Helper()
-	dir = t.TempDir()
-	path = filepath.Join(dir, ".fvmrc")
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".fvmrc")
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 	return dir, path
 }

@@ -1,6 +1,4 @@
-//go:build integration || unit || test
-
-package entitybuilders //nolint:revive,staticcheck // Test package naming follows established project structure
+package entitybuilders
 
 import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
@@ -10,6 +8,7 @@ import (
 // UpdaterConfigBuilder helps create test updater configurations with a fluent interface.
 type UpdaterConfigBuilder struct {
 	*testkit.BaseBuilder
+
 	enabled      *bool
 	autoComplete *bool
 	targetBranch string
@@ -44,7 +43,7 @@ func (b *UpdaterConfigBuilder) WithTargetBranch(branch string) *UpdaterConfigBui
 }
 
 // Build creates the updater config (satisfies testkit.Builder interface).
-func (b *UpdaterConfigBuilder) Build() interface{} {
+func (b *UpdaterConfigBuilder) Build() any {
 	return b.BuildUpdaterConfig()
 }
 
@@ -79,7 +78,7 @@ func (b *UpdaterConfigBuilder) Clone() testkit.Builder {
 		clonedAutoComplete = &v
 	}
 	return &UpdaterConfigBuilder{
-		BaseBuilder:  b.BaseBuilder.Clone().(*testkit.BaseBuilder),
+		BaseBuilder:  cloneBase(b.BaseBuilder),
 		enabled:      clonedEnabled,
 		autoComplete: clonedAutoComplete,
 		targetBranch: b.targetBranch,

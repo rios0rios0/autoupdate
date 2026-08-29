@@ -1,6 +1,4 @@
-//go:build integration || unit || test
-
-package repositorydoubles //nolint:revive,staticcheck // Test package naming follows established project structure
+package repositorydoubles
 
 import (
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
@@ -11,6 +9,7 @@ import (
 // instances with a fluent interface.
 type SpyLocalUpdaterRepositoryBuilder struct {
 	*testkit.BaseBuilder
+
 	updaterName   string
 	detectResult  bool
 	applyUpdateFn func(repoDir string) (*repositories.LocalUpdateResult, error)
@@ -48,7 +47,7 @@ func (b *SpyLocalUpdaterRepositoryBuilder) WithApplyUpdateFn(
 }
 
 // Build creates the spy (satisfies testkit.Builder interface).
-func (b *SpyLocalUpdaterRepositoryBuilder) Build() interface{} {
+func (b *SpyLocalUpdaterRepositoryBuilder) Build() any {
 	return b.BuildSpy()
 }
 
@@ -73,7 +72,7 @@ func (b *SpyLocalUpdaterRepositoryBuilder) Reset() testkit.Builder {
 // Clone creates a deep copy of the SpyLocalUpdaterRepositoryBuilder.
 func (b *SpyLocalUpdaterRepositoryBuilder) Clone() testkit.Builder {
 	return &SpyLocalUpdaterRepositoryBuilder{
-		BaseBuilder:   b.BaseBuilder.Clone().(*testkit.BaseBuilder),
+		BaseBuilder:   cloneBase(b.BaseBuilder),
 		updaterName:   b.updaterName,
 		detectResult:  b.detectResult,
 		applyUpdateFn: b.applyUpdateFn,

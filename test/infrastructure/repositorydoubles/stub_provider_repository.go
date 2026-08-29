@@ -1,8 +1,6 @@
-//go:build integration || unit || test
-
 // Package repositorydoubles provides test doubles (spies, stubs, dummies) for
 // repository interfaces. These are hand-crafted implementations — no mock frameworks.
-package repositorydoubles //nolint:revive,staticcheck // Test package naming follows established project structure
+package repositorydoubles
 
 import (
 	"context"

@@ -1,5 +1,3 @@
-//go:build unit
-
 package javascript
 
 import (

@@ -1,6 +1,4 @@
-//go:build integration || unit || test
-
-package entitybuilders //nolint:revive,staticcheck // Test package naming follows established project structure
+package entitybuilders
 
 import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
@@ -10,6 +8,7 @@ import (
 // ProviderConfigBuilder helps create test provider configurations with a fluent interface.
 type ProviderConfigBuilder struct {
 	*testkit.BaseBuilder
+
 	providerType  string
 	token         string
 	organizations []string
@@ -19,9 +18,9 @@ type ProviderConfigBuilder struct {
 func NewProviderConfigBuilder() *ProviderConfigBuilder {
 	return &ProviderConfigBuilder{
 		BaseBuilder:   testkit.NewBaseBuilder(),
-		providerType:  "github",
+		providerType:  defaultProviderType,
 		token:         "test-token",
-		organizations: []string{"test-org"},
+		organizations: []string{defaultOrganization},
 	}
 }
 
@@ -44,7 +43,7 @@ func (b *ProviderConfigBuilder) WithOrganizations(orgs []string) *ProviderConfig
 }
 
 // Build creates the provider config (satisfies testkit.Builder interface).
-func (b *ProviderConfigBuilder) Build() interface{} {
+func (b *ProviderConfigBuilder) Build() any {
 	return b.BuildProviderConfig()
 }
 
@@ -72,7 +71,7 @@ func (b *ProviderConfigBuilder) Clone() testkit.Builder {
 	copy(orgs, b.organizations)
 
 	return &ProviderConfigBuilder{
-		BaseBuilder:   b.BaseBuilder.Clone().(*testkit.BaseBuilder),
+		BaseBuilder:   cloneBase(b.BaseBuilder),
 		providerType:  b.providerType,
 		token:         b.token,
 		organizations: orgs,

@@ -1,0 +1,4 @@
+kind: 'Changed'
+body: 'stopped resolving the operator''s configuration from the working directory. AutoUpdate runs against a local repository as `autoupdate .`, with that repository as the working directory, and a target repository may carry its own `.autoupdate.yaml` — the same file name, a narrower schema. Reading it as the operator''s configuration substituted a project''s settings for an operator''s, and the run then carried on with downloaded defaults rather than reporting that it had read the wrong file. Finding no configuration is no longer an error either: the built-in defaults are the base of every run.'
+breaking: true
+time: '2026-08-29T03:45:48.702582151Z'

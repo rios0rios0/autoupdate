@@ -1,8 +1,7 @@
-//go:build unit
-
 package pipeline_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -438,7 +437,13 @@ func TestCreateUpgradePR(t *testing.T) {
 		}
 		opts := entities.UpdateOptions{AutoComplete: true}
 		upgrades := []pipeline.UpgradeTask{
-			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-devops/build.yml", "versionSpec: '3.12'"),
+			pipeline.NewUpgradeTaskWithFullMatch(
+				"python",
+				"3.12",
+				"3.13",
+				"azure-devops/build.yml",
+				"versionSpec: '3.12'",
+			),
 		}
 		fileContents := map[string]string{
 			"azure-devops/build.yml": "versionSpec: '3.12'",
@@ -478,7 +483,13 @@ func TestCreateUpgradePR(t *testing.T) {
 		}
 		opts := entities.UpdateOptions{}
 		upgrades := []pipeline.UpgradeTask{
-			pipeline.NewUpgradeTaskWithFullMatch("golang", "1.21", "1.22", ".github/workflows/ci.yml", "go-version: '1.21'"),
+			pipeline.NewUpgradeTaskWithFullMatch(
+				"golang",
+				"1.21",
+				"1.22",
+				".github/workflows/ci.yml",
+				"go-version: '1.21'",
+			),
 		}
 		fileContents := map[string]string{
 			".github/workflows/ci.yml": "go-version: '1.21'",
@@ -508,7 +519,13 @@ func TestCreateUpgradePR(t *testing.T) {
 		}
 		opts := entities.UpdateOptions{TargetBranch: "develop"}
 		upgrades := []pipeline.UpgradeTask{
-			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-devops/build.yml", "versionSpec: '3.12'"),
+			pipeline.NewUpgradeTaskWithFullMatch(
+				"python",
+				"3.12",
+				"3.13",
+				"azure-devops/build.yml",
+				"versionSpec: '3.12'",
+			),
 		}
 		fileContents := map[string]string{
 			"azure-devops/build.yml": "versionSpec: '3.12'",
@@ -530,7 +547,7 @@ func TestCreateUpgradePR(t *testing.T) {
 
 		// given
 		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithCreateBranchErr(fmt.Errorf("branch creation failed")).
+			WithCreateBranchErr(errors.New("branch creation failed")).
 			BuildSpy()
 		repo := entities.Repository{
 			Organization:  "org",
@@ -539,7 +556,13 @@ func TestCreateUpgradePR(t *testing.T) {
 		}
 		opts := entities.UpdateOptions{}
 		upgrades := []pipeline.UpgradeTask{
-			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-devops/build.yml", "versionSpec: '3.12'"),
+			pipeline.NewUpgradeTaskWithFullMatch(
+				"python",
+				"3.12",
+				"3.13",
+				"azure-devops/build.yml",
+				"versionSpec: '3.12'",
+			),
 		}
 		fileContents := map[string]string{
 			"azure-devops/build.yml": "versionSpec: '3.12'",
@@ -559,7 +582,7 @@ func TestCreateUpgradePR(t *testing.T) {
 
 		// given
 		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithCreatePRErr(fmt.Errorf("PR creation failed")).
+			WithCreatePRErr(errors.New("PR creation failed")).
 			WithExistingFiles(map[string]bool{"CHANGELOG.md": false}).
 			BuildSpy()
 		repo := entities.Repository{
@@ -569,7 +592,13 @@ func TestCreateUpgradePR(t *testing.T) {
 		}
 		opts := entities.UpdateOptions{}
 		upgrades := []pipeline.UpgradeTask{
-			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-devops/build.yml", "versionSpec: '3.12'"),
+			pipeline.NewUpgradeTaskWithFullMatch(
+				"python",
+				"3.12",
+				"3.13",
+				"azure-devops/build.yml",
+				"versionSpec: '3.12'",
+			),
 		}
 		fileContents := map[string]string{
 			"azure-devops/build.yml": "versionSpec: '3.12'",
@@ -605,7 +634,13 @@ func TestCreateUpgradePR(t *testing.T) {
 		}
 		opts := entities.UpdateOptions{}
 		upgrades := []pipeline.UpgradeTask{
-			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-devops/build.yml", "versionSpec: '3.12'"),
+			pipeline.NewUpgradeTaskWithFullMatch(
+				"python",
+				"3.12",
+				"3.13",
+				"azure-devops/build.yml",
+				"versionSpec: '3.12'",
+			),
 		}
 		fileContents := map[string]string{
 			"azure-devops/build.yml": "versionSpec: '3.12'",
@@ -709,7 +744,7 @@ func TestDetect(t *testing.T) {
 
 		// given
 		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithListFileErr(fmt.Errorf("API rate limit exceeded")).
+			WithListFileErr(errors.New("API rate limit exceeded")).
 			BuildSpy()
 		repo := entities.Repository{Organization: "org", Name: "repo"}
 
@@ -1255,20 +1290,23 @@ func TestScanFileForActions(t *testing.T) {
 		assert.Equal(t, "v4", refs[0].CurrentRef)
 	})
 
-	t.Run("should detect action references with trailing inline comment excluding comment from FullMatch", func(t *testing.T) {
-		t.Parallel()
+	t.Run(
+		"should detect action references with trailing inline comment excluding comment from FullMatch",
+		func(t *testing.T) {
+			t.Parallel()
 
-		// given
-		content := "    - uses: actions/checkout@v4 # pinned to v4\n"
+			// given
+			content := "    - uses: actions/checkout@v4 # pinned to v4\n"
 
-		// when
-		refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
+			// when
+			refs := pipeline.ScanFileForActions(content, ".github/workflows/ci.yml")
 
-		// then
-		require.Len(t, refs, 1)
-		assert.Equal(t, "v4", refs[0].CurrentRef)
-		assert.Equal(t, "uses: actions/checkout@v4", refs[0].FullMatch)
-	})
+			// then
+			require.Len(t, refs, 1)
+			assert.Equal(t, "v4", refs[0].CurrentRef)
+			assert.Equal(t, "uses: actions/checkout@v4", refs[0].FullMatch)
+		},
+	)
 
 	t.Run("should detect multiple actions in one file", func(t *testing.T) {
 		t.Parallel()
@@ -1795,8 +1833,20 @@ func TestGeneratePRDescription(t *testing.T) {
 
 		// given
 		tasks := []pipeline.UpgradeTask{
-			pipeline.NewUpgradeTaskWithFullMatch("python", "3.12", "3.13", "azure-pipelines.yml", "versionSpec: '3.12'"),
-			pipeline.NewUpgradeTaskWithFullMatch("go", "1.24", "1.25", ".github/workflows/ci.yml", "go-version: '1.24'"),
+			pipeline.NewUpgradeTaskWithFullMatch(
+				"python",
+				"3.12",
+				"3.13",
+				"azure-pipelines.yml",
+				"versionSpec: '3.12'",
+			),
+			pipeline.NewUpgradeTaskWithFullMatch(
+				"go",
+				"1.24",
+				"1.25",
+				".github/workflows/ci.yml",
+				"go-version: '1.24'",
+			),
 		}
 
 		// when

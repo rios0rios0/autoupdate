@@ -2,6 +2,7 @@ package entities
 
 import (
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -70,4 +71,30 @@ func (s *Settings) IsRepoExcluded(repo Repository) (bool, string) {
 		return false, ""
 	}
 	return MatchesExcludePattern(repo, s.ExcludeRepos)
+}
+
+// ExcludesSelf reports whether these settings exclude the repository they describe, and
+// names the rule that did.
+//
+// filterRepositories runs the same predicates organization-wide, before any repository's
+// own file has been read. This is the second pass the project layer earns, and it is the
+// only place a repository's own `exclude_forks`, `exclude_archived` or `exclude_repos` can
+// mean anything at all -- a project excluding *itself* is the one useful thing those keys
+// can say from inside the repository.
+func ExcludesSelf(settings *Settings, repo Repository) (bool, string) {
+	if settings == nil {
+		return false, ""
+	}
+
+	if settings.ExcludeForks && repo.IsFork {
+		return true, "exclude_forks"
+	}
+	if settings.ExcludeArchived && repo.IsArchived {
+		return true, "exclude_archived"
+	}
+	if excluded, pattern := settings.IsRepoExcluded(repo); excluded {
+		return true, "exclude_repos pattern " + strconv.Quote(pattern)
+	}
+
+	return false, ""
 }

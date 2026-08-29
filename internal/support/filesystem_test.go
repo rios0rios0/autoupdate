@@ -1,5 +1,3 @@
-//go:build unit
-
 package support_test
 
 import (
@@ -285,7 +283,7 @@ func TestWalkFilesByPredicate(t *testing.T) {
 		matches, err := support.WalkFilesByPredicate(root, func(string) bool { return true })
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Nil(t, matches)
 	})
 }
@@ -411,7 +409,7 @@ func initGitRepo(t *testing.T, dir string) {
 		{"git", "config", "user.name", "Test"},
 	}
 	for _, args := range cmds {
-		cmd := exec.Command(args[0], args[1:]...) //nolint:gosec // test helper
+		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
 		require.NoError(t, cmd.Run(), "failed to run: %v", args)
 	}
@@ -420,7 +418,7 @@ func initGitRepo(t *testing.T, dir string) {
 	add := exec.Command("git", "add", ".")
 	add.Dir = dir
 	require.NoError(t, add.Run())
-	commit := exec.Command("git", "commit", "-m", "initial") //nolint:gosec // test
+	commit := exec.Command("git", "commit", "-m", "initial")
 	commit.Dir = dir
 	require.NoError(t, commit.Run())
 }

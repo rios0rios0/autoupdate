@@ -1,5 +1,3 @@
-//go:build unit
-
 package dockerfile_test
 
 import (
@@ -22,7 +20,7 @@ func TestParseTag(t *testing.T) {
 		// then
 		assert.True(t, ok)
 		assert.Equal(t, "1.25.7", version)
-		assert.Equal(t, "", suffix)
+		assert.Empty(t, suffix)
 		assert.Equal(t, 3, precision)
 	})
 
@@ -35,7 +33,7 @@ func TestParseTag(t *testing.T) {
 		// then
 		assert.True(t, ok)
 		assert.Equal(t, "3.13", version)
-		assert.Equal(t, "", suffix)
+		assert.Empty(t, suffix)
 		assert.Equal(t, 2, precision)
 	})
 
@@ -160,7 +158,7 @@ func TestFindBestUpgrade(t *testing.T) {
 		best := dockerfile.FindBestUpgrade(current, tags)
 
 		// then
-		assert.Equal(t, "", best)
+		assert.Empty(t, best)
 	})
 
 	t.Run("should return empty when already at latest", func(t *testing.T) {
@@ -181,7 +179,7 @@ func TestFindBestUpgrade(t *testing.T) {
 		best := dockerfile.FindBestUpgrade(current, tags)
 
 		// then
-		assert.Equal(t, "", best)
+		assert.Empty(t, best)
 	})
 
 	t.Run("should not cross minor version for patch-pinned versions", func(t *testing.T) {

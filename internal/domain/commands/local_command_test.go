@@ -1,5 +1,3 @@
-//go:build unit
-
 package commands_test
 
 import (
@@ -347,7 +345,7 @@ func TestServiceTypeToProvider(t *testing.T) {
 		mapping := commands.ServiceTypeToProvider()
 
 		// then
-		assert.Equal(t, "", mapping[globalEntities.UNKNOWN])
+		assert.Empty(t, mapping[globalEntities.UNKNOWN])
 	})
 
 	t.Run("should map BITBUCKET to empty string", func(t *testing.T) {
@@ -357,7 +355,7 @@ func TestServiceTypeToProvider(t *testing.T) {
 		mapping := commands.ServiceTypeToProvider()
 
 		// then
-		assert.Equal(t, "", mapping[globalEntities.BITBUCKET])
+		assert.Empty(t, mapping[globalEntities.BITBUCKET])
 	})
 
 	t.Run("should map CODECOMMIT to empty string", func(t *testing.T) {
@@ -367,7 +365,7 @@ func TestServiceTypeToProvider(t *testing.T) {
 		mapping := commands.ServiceTypeToProvider()
 
 		// then
-		assert.Equal(t, "", mapping[globalEntities.CODECOMMIT])
+		assert.Empty(t, mapping[globalEntities.CODECOMMIT])
 	})
 }
 
@@ -378,7 +376,7 @@ func TestDetectDefaultBranch(t *testing.T) {
 		t.Parallel()
 
 		// given
-		repoDir := initTestGitRepo(t, "main")
+		repoDir := initTestGitRepo(t)
 
 		// when
 		branch, err := commands.DetectDefaultBranch(context.Background(), repoDir)
@@ -392,7 +390,7 @@ func TestDetectDefaultBranch(t *testing.T) {
 		t.Parallel()
 
 		// given
-		repoDir := initTestGitRepo(t, "main")
+		repoDir := initTestGitRepo(t)
 		runGit(t, repoDir, "checkout", "-b", "feat/test-branch")
 
 		// when
@@ -424,7 +422,7 @@ func TestParseGitRemote(t *testing.T) {
 		t.Parallel()
 
 		// given
-		repoDir := initTestGitRepo(t, "main")
+		repoDir := initTestGitRepo(t)
 		runGit(t, repoDir, "remote", "add", "origin", "git@github.com:testorg/testrepo.git")
 
 		// when
@@ -441,7 +439,7 @@ func TestParseGitRemote(t *testing.T) {
 		t.Parallel()
 
 		// given
-		repoDir := initTestGitRepo(t, "main")
+		repoDir := initTestGitRepo(t)
 
 		// when
 		_, err := commands.ParseGitRemote(context.Background(), repoDir)
@@ -454,7 +452,7 @@ func TestParseGitRemote(t *testing.T) {
 		t.Parallel()
 
 		// given
-		repoDir := initTestGitRepo(t, "main")
+		repoDir := initTestGitRepo(t)
 		runGit(t, repoDir, "remote", "add", "origin", "https://github.com/anotherorg/anotherrepo.git")
 
 		// when
@@ -471,7 +469,7 @@ func TestParseGitRemote(t *testing.T) {
 		t.Parallel()
 
 		// given
-		repoDir := initTestGitRepo(t, "main")
+		repoDir := initTestGitRepo(t)
 		runGit(t, repoDir, "remote", "add", "origin", "git@ssh.dev.azure.com:v3/myorg/myproject/myrepo")
 
 		// when
@@ -486,7 +484,7 @@ func TestParseGitRemote(t *testing.T) {
 	})
 }
 
-func TestCheckLocalRepoConfigSkip(t *testing.T) {
+func TestResolveLocalSettings(t *testing.T) {
 	t.Parallel()
 
 	t.Run("should return false when .autoupdate.yaml does not exist", func(t *testing.T) {
@@ -496,7 +494,7 @@ func TestCheckLocalRepoConfigSkip(t *testing.T) {
 		dir := t.TempDir()
 
 		// when
-		skipped, err := commands.CheckLocalRepoConfigSkip(dir)
+		_, skipped, err := commands.ResolveLocalSettings(dir, &entities.Settings{})
 
 		// then
 		require.NoError(t, err)
@@ -515,7 +513,7 @@ func TestCheckLocalRepoConfigSkip(t *testing.T) {
 		))
 
 		// when
-		skipped, err := commands.CheckLocalRepoConfigSkip(dir)
+		_, skipped, err := commands.ResolveLocalSettings(dir, &entities.Settings{})
 
 		// then
 		require.NoError(t, err)
@@ -534,7 +532,7 @@ func TestCheckLocalRepoConfigSkip(t *testing.T) {
 		))
 
 		// when
-		skipped, err := commands.CheckLocalRepoConfigSkip(dir)
+		_, skipped, err := commands.ResolveLocalSettings(dir, &entities.Settings{})
 
 		// then
 		require.NoError(t, err)
@@ -553,24 +551,28 @@ func TestCheckLocalRepoConfigSkip(t *testing.T) {
 		))
 
 		// when
-		_, err := commands.CheckLocalRepoConfigSkip(dir)
+		_, _, err := commands.ResolveLocalSettings(dir, &entities.Settings{})
 
 		// then
 		require.Error(t, err)
 	})
 }
 
-func TestIsExcludedByGlobalList(t *testing.T) {
+func TestLocalSelfExclusion(t *testing.T) {
 	t.Parallel()
 
-	github := &commands.RemoteInfo{Org: "rios0rios0", RepoName: "autoupdate"}
-	ado := &commands.RemoteInfo{Org: "ContosoSecurity", Project: "frontend", RepoName: "opensearch-dashboards"}
+	// Local mode resolves the repository from its own origin remote and then asks the same
+	// question run mode does, through the same function.
+	github := entities.Repository{Organization: "rios0rios0", Name: "autoupdate"}
+	ado := entities.Repository{
+		Organization: "ContosoSecurity", Project: "frontend", Name: "opensearch-dashboards",
+	}
 
 	t.Run("should return false when settings is nil", func(t *testing.T) {
 		t.Parallel()
 
 		// given/when
-		excluded := commands.IsExcludedByGlobalList(nil, github)
+		excluded, _ := entities.ExcludesSelf(nil, github)
 
 		// then
 		assert.False(t, excluded)
@@ -583,7 +585,7 @@ func TestIsExcludedByGlobalList(t *testing.T) {
 		settings := &entities.Settings{}
 
 		// when
-		excluded := commands.IsExcludedByGlobalList(settings, github)
+		excluded, _ := entities.ExcludesSelf(settings, github)
 
 		// then
 		assert.False(t, excluded)
@@ -596,7 +598,7 @@ func TestIsExcludedByGlobalList(t *testing.T) {
 		settings := &entities.Settings{ExcludeRepos: []string{"rios0rios0/autoupdate"}}
 
 		// when
-		excluded := commands.IsExcludedByGlobalList(settings, github)
+		excluded, _ := entities.ExcludesSelf(settings, github)
 
 		// then
 		assert.True(t, excluded)
@@ -611,7 +613,7 @@ func TestIsExcludedByGlobalList(t *testing.T) {
 		}}
 
 		// when
-		excluded := commands.IsExcludedByGlobalList(settings, ado)
+		excluded, _ := entities.ExcludesSelf(settings, ado)
 
 		// then
 		assert.True(t, excluded)
@@ -624,7 +626,7 @@ func TestIsExcludedByGlobalList(t *testing.T) {
 		settings := &entities.Settings{ExcludeRepos: []string{"opensearch-dashboards"}}
 
 		// when
-		excluded := commands.IsExcludedByGlobalList(settings, ado)
+		excluded, _ := entities.ExcludesSelf(settings, ado)
 
 		// then
 		assert.True(t, excluded)
@@ -638,7 +640,7 @@ func TestLocalCommandExecute(t *testing.T) {
 		t.Parallel()
 
 		// given
-		repoDir := initTestGitRepo(t, "main")
+		repoDir := initTestGitRepo(t)
 		runGit(t, repoDir, "remote", "add", "origin", "git@github.com:rios0rios0/autoupdate.git")
 		require.NoError(t, os.WriteFile(
 			filepath.Join(repoDir, ".autoupdate.yaml"),
@@ -666,7 +668,7 @@ func TestLocalCommandExecute(t *testing.T) {
 		t.Parallel()
 
 		// given
-		repoDir := initTestGitRepo(t, "main")
+		repoDir := initTestGitRepo(t)
 		runGit(t, repoDir, "remote", "add", "origin", "git@github.com:rios0rios0/autoupdate.git")
 
 		registry := infraRepos.NewProviderRegistry()
@@ -692,7 +694,7 @@ func TestLocalCommandExecute(t *testing.T) {
 		t.Parallel()
 
 		// given
-		repoDir := initTestGitRepo(t, "main")
+		repoDir := initTestGitRepo(t)
 		require.NoError(t, os.WriteFile(
 			filepath.Join(repoDir, ".autoupdate.yaml"),
 			[]byte("skip: : not-yaml"),
@@ -715,8 +717,10 @@ func TestLocalCommandExecute(t *testing.T) {
 
 // --- test helpers ---
 
-// initTestGitRepo creates a temporary git repo with an initial commit using exec.Command.
-func initTestGitRepo(t *testing.T, branchName string) string {
+// initTestGitRepo creates a temporary git repo with an initial commit using [exec.Command].
+func initTestGitRepo(t *testing.T) string {
+	const branchName = "main"
+
 	t.Helper()
 
 	repoDir := t.TempDir()

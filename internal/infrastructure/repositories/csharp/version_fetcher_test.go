@@ -1,5 +1,3 @@
-//go:build unit
-
 package csharp_test
 
 import (
@@ -130,7 +128,7 @@ func TestHTTPDotnetVersionFetcher(t *testing.T) {
 		version, err := fetcher.FetchLatestVersion(t.Context())
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no active .NET release found")
 		assert.Empty(t, version)
 	})
@@ -149,7 +147,7 @@ func TestHTTPDotnetVersionFetcher(t *testing.T) {
 		version, err := fetcher.FetchLatestVersion(t.Context())
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unexpected status code: 503")
 		assert.Empty(t, version)
 	})
@@ -169,7 +167,7 @@ func TestHTTPDotnetVersionFetcher(t *testing.T) {
 		version, err := fetcher.FetchLatestVersion(t.Context())
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to parse .NET versions")
 		assert.Empty(t, version)
 	})
@@ -184,7 +182,7 @@ func TestHTTPDotnetVersionFetcher(t *testing.T) {
 		version, err := fetcher.FetchLatestVersion(t.Context())
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to fetch .NET versions")
 		assert.Empty(t, version)
 	})
@@ -204,7 +202,7 @@ func TestHTTPDotnetVersionFetcher(t *testing.T) {
 		version, err := fetcher.FetchLatestVersion(t.Context())
 
 		// then
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no active .NET release found")
 		assert.Empty(t, version)
 	})

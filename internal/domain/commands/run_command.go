@@ -207,18 +207,10 @@ func filterRepositories(
 
 	filtered := make([]entities.Repository, 0, len(repos))
 	for _, repo := range repos {
-		key := entities.RepoKey(repo)
-		if settings.ExcludeForks && repo.IsFork {
-			logger.Debugf("Skipping fork: %s", key)
-			continue
-		}
-		if settings.ExcludeArchived && repo.IsArchived {
-			logger.Debugf("Skipping archived repo: %s", key)
-			continue
-		}
-		if excluded, pattern := settings.IsRepoExcluded(repo); excluded {
-			logger.Infof("Skipping %s: matched exclude_repos pattern %q",
-				key, pattern)
+		// The same predicates the project layer gets a second pass at, through
+		// entities.ExcludesSelf. Sharing them is what keeps the two from drifting.
+		if excluded, rule := entities.ExcludesSelf(settings, repo); excluded {
+			logger.Infof("Skipping %s: matched %s", entities.RepoKey(repo), rule)
 			continue
 		}
 		filtered = append(filtered, repo)
@@ -226,35 +218,53 @@ func filterRepositories(
 	return filtered
 }
 
-// isSkippedByRepoConfig reads the target repository's .autoupdate.yaml
-// via the provider API. It returns true only when the file exists and
-// requests an explicit skip; transient fetch or parse errors fail open
-// (proceed with the update) so a flaky API call cannot silently disable
-// every update.
-func isSkippedByRepoConfig(
+// loadRepoSettings reads the target repository's `.autoupdate.yaml` over the provider API
+// and returns the settings this repository is processed with, or nil when the file asks to
+// be skipped.
+//
+// One fetch answers both questions the file can settle, because they come from the same
+// document. Transient fetch and parse errors fail open -- on the operator's settings,
+// unchanged -- so a flaky API call cannot silently disable every update in an organization.
+func loadRepoSettings(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
-) bool {
+	settings *entities.Settings,
+) *entities.Settings {
 	key := entities.RepoKey(repo)
-	cfg, err := support.LoadRemoteRepoConfig(ctx, provider, repo)
+
+	config, err := support.LoadRemoteRepoConfig(ctx, provider, repo)
 	if err != nil {
 		logger.Warnf("Could not read %s for %s: %v (continuing without it)",
 			entities.RepoConfigFile, key, err)
-		return false
-	}
-	if !cfg.IsSkipped() {
-		return false
+		return settings
 	}
 
-	if cfg.Reason != "" {
-		logger.Infof("Skipping %s: %s requested skip (%s)",
-			key, entities.RepoConfigFile, cfg.Reason)
-	} else {
-		logger.Infof("Skipping %s: %s requested skip",
-			key, entities.RepoConfigFile)
+	if config.IsSkipped() {
+		if config.Reason != "" {
+			logger.Infof("Skipping %s: %s requested skip (%s)",
+				key, entities.RepoConfigFile, config.Reason)
+		} else {
+			logger.Infof("Skipping %s: %s requested skip", key, entities.RepoConfigFile)
+		}
+		return nil
 	}
-	return true
+
+	merged, err := entities.ApplyRepoOverlay(settings, config)
+	if err != nil {
+		logger.Warnf("Could not apply %s for %s: %v (continuing without it)",
+			entities.RepoConfigFile, key, err)
+		return settings
+	}
+
+	// The second pass filterRepositories could not do: it runs organization-wide, before
+	// any repository's own file exists to be read.
+	if excluded, rule := entities.ExcludesSelf(merged, repo); excluded {
+		logger.Infof("Skipping %s: its own %s matched %s", key, entities.RepoConfigFile, rule)
+		return nil
+	}
+
+	return merged
 }
 
 // applicableUpdater holds an updater and its resolved options.
@@ -274,7 +284,11 @@ func (it *RunCommand) processRepository(
 	settings *entities.Settings,
 	runOpts RunOptions,
 ) ([]entities.PullRequest, int) {
-	if isSkippedByRepoConfig(ctx, provider, repo) {
+	// The repository's own configuration is the last layer. It is folded onto a copy, not
+	// through the shared settings: this runs inside the per-organization fan-out, so a
+	// layer that wrote through would leak one repository's configuration into another's.
+	settings = loadRepoSettings(ctx, provider, repo, settings)
+	if settings == nil {
 		return nil, 0
 	}
 

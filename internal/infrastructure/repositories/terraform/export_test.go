@@ -1,5 +1,3 @@
-//go:build unit
-
 package terraform
 
 import (
@@ -188,8 +186,8 @@ func LocalScanAllDependencies(u *UpdaterRepository, repoDir string) []DepWithCon
 
 // DetermineUpgrades is exported for testing.
 func DetermineUpgrades(
-	u *UpdaterRepository,
 	ctx context.Context,
+	u *UpdaterRepository,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	allDeps []DepWithContent,
@@ -199,8 +197,8 @@ func DetermineUpgrades(
 
 // CreateUpgradePR is exported for testing.
 func CreateUpgradePR(
-	u *UpdaterRepository,
 	ctx context.Context,
+	u *UpdaterRepository,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	opts entities.UpdateOptions,

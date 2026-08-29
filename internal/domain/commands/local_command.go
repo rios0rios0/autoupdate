@@ -98,11 +98,16 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 		return fmt.Errorf("invalid path: %w", err)
 	}
 
-	if skipped, skipErr := checkLocalRepoConfigSkip(repoDir); skipErr != nil {
+	// The repository's own configuration is the last layer, and it is read before anything
+	// else so that a project that opted out pays for nothing.
+	settings, skipped, skipErr := resolveLocalSettings(repoDir, opts.Settings)
+	if skipErr != nil {
 		return skipErr
-	} else if skipped {
+	}
+	if skipped {
 		return nil
 	}
+	opts.Settings = settings
 
 	// Detect Git provider from remote URL — done early so the global
 	// exclude_repos list can short-circuit before paying the cost of
@@ -113,7 +118,12 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 	}
 	logger.Infof("Detected provider: %s, org: %s, repo: %s", remote.ProviderType, remote.Org, remote.RepoName)
 
-	if isExcludedByGlobalList(opts.Settings, remote) {
+	if excluded, rule := entities.ExcludesSelf(opts.Settings, entities.Repository{
+		Organization: remote.Org,
+		Project:      remote.Project,
+		Name:         remote.RepoName,
+	}); excluded {
+		logger.Infof("Skipping %s/%s: matched %s", remote.Org, remote.RepoName, rule)
 		return nil
 	}
 
@@ -124,6 +134,11 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 	}
 	projType := langProvider.Language()
 	logger.Infof("Detected project type: %s", projType)
+
+	if !updaterEnabledForLanguage(opts.Settings, projType) {
+		logger.Infof("Skipping %s: its updater is disabled in the configuration", projType)
+		return nil
+	}
 
 	// Resolve auth token
 	token := opts.Token
@@ -179,6 +194,58 @@ type localUpgradeHandler func(
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error)
+
+// updaterNameForLanguage maps a detected langforge Language to the updater name the
+// configuration keys on, so `updaters.<name>.enabled: false` means the same thing in
+// `autoupdate .` as it does in `autoupdate run`.
+//
+// Without it the local path dispatched on the language alone and never consulted
+// `settings.Updaters`, so an updater disabled in configuration still ran here.
+func updaterNameForLanguage() map[langEntities.Language]string {
+	// The three Java flavours share one updater, which is why the name is a constant here
+	// rather than repeated: they are one entry in the configuration.
+	const updaterJava = "java"
+
+	return map[langEntities.Language]string{
+		langEntities.LanguageGo:         "golang",
+		langEntities.LanguageNode:       "javascript",
+		langEntities.LanguagePython:     "python",
+		langEntities.LanguageDart:       "dart",
+		langEntities.LanguageJava:       updaterJava,
+		langEntities.LanguageJavaGradle: updaterJava,
+		langEntities.LanguageJavaMaven:  updaterJava,
+		langEntities.LanguageCSharp:     "csharp",
+		langEntities.LanguageRuby:       "ruby",
+		langEntities.LanguageTerraform:  "terraform",
+		langEntities.LanguagePipeline:   "pipeline",
+		langEntities.LanguageDockerfile: "dockerfile",
+		// A YAML or unidentified project has no updater of its own, so there is no
+		// configuration entry that could turn one off.
+		langEntities.LanguageYAML:    "",
+		langEntities.LanguageUnknown: "",
+	}
+}
+
+// updaterEnabledForLanguage reports whether the configuration leaves this language's
+// updater on. A language with no updater name, or settings that never mention it, is left
+// enabled -- the default everywhere else.
+func updaterEnabledForLanguage(settings *entities.Settings, projType langEntities.Language) bool {
+	if settings == nil {
+		return true
+	}
+
+	name, known := updaterNameForLanguage()[projType]
+	if !known || name == "" {
+		return true
+	}
+
+	config, configured := settings.Updaters[name]
+	if !configured {
+		return true
+	}
+
+	return config.IsEnabled()
+}
 
 // localUpgradeHandlers returns a map from langforge Language to local upgrade handler.
 func localUpgradeHandlers() map[langEntities.Language]localUpgradeHandler {
@@ -469,49 +536,37 @@ func parseRemoteURL(rawURL string) (*remoteInfo, error) {
 	}, nil
 }
 
-// checkLocalRepoConfigSkip reads the per-repository .autoupdate.yaml from
-// disk and reports whether the user requested that this project be
-// skipped. A missing file is not an error; a malformed file is, because
-// the user explicitly asked autoupdate to read it and we should surface
-// problems instead of silently running anyway.
-func checkLocalRepoConfigSkip(repoDir string) (bool, error) {
-	cfg, err := support.LoadLocalRepoConfig(repoDir)
+// resolveLocalSettings reads the per-repository `.autoupdate.yaml` from disk once and
+// answers both questions it can settle: whether the project opted out, and what settings
+// this repository is updated under.
+//
+// A missing file is not an error. A malformed one is, because the user explicitly asked
+// autoupdate to read it, and running anyway on settings that silently ignored it would be
+// worse than stopping.
+func resolveLocalSettings(
+	repoDir string, base *entities.Settings,
+) (*entities.Settings, bool, error) {
+	config, err := support.LoadLocalRepoConfig(repoDir)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
-	if !cfg.IsSkipped() {
-		return false, nil
-	}
-	if cfg.Reason != "" {
-		logger.Infof("Skipping %s: %s requested skip (%s)",
-			repoDir, entities.RepoConfigFile, cfg.Reason)
-	} else {
-		logger.Infof("Skipping %s: %s requested skip", repoDir, entities.RepoConfigFile)
-	}
-	return true, nil
-}
 
-// isExcludedByGlobalList reports whether the parsed remote matches a
-// pattern in the user's global exclude_repos list. The check is a no-op
-// when no Settings were loaded (i.e. the user invoked local mode without
-// a config file), so per-repo .autoupdate.yaml remains the only source
-// of truth in that case.
-func isExcludedByGlobalList(settings *entities.Settings, remote *remoteInfo) bool {
-	if settings == nil || len(settings.ExcludeRepos) == 0 {
-		return false
+	if config.IsSkipped() {
+		if config.Reason != "" {
+			logger.Infof("Skipping %s: %s requested skip (%s)",
+				repoDir, entities.RepoConfigFile, config.Reason)
+		} else {
+			logger.Infof("Skipping %s: %s requested skip", repoDir, entities.RepoConfigFile)
+		}
+		return nil, true, nil
 	}
-	repo := entities.Repository{
-		Organization: remote.Org,
-		Project:      remote.Project,
-		Name:         remote.RepoName,
+
+	merged, err := entities.ApplyRepoOverlay(base, config)
+	if err != nil {
+		return nil, false, err
 	}
-	excluded, pattern := settings.IsRepoExcluded(repo)
-	if !excluded {
-		return false
-	}
-	logger.Infof("Skipping %s: matched exclude_repos pattern %q",
-		entities.RepoKey(repo), pattern)
-	return true
+
+	return merged, false, nil
 }
 
 func detectDefaultBranch(ctx context.Context, repoDir string) (string, error) {

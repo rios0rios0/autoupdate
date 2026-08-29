@@ -9,7 +9,7 @@ Always reference these instructions first and fallback to search or bash command
 ### Bootstrap, Build, and Test
 - Install dependencies: `go mod download` -- takes <1 second (after first download)
 - Build the binary: `make build` -- takes ~35 seconds first time, <1 second after. NEVER CANCEL. Set timeout to 60+ minutes.
-- Run tests: `go test -tags unit ./...` -- takes <1 second (cached), ~7 seconds clean. NEVER CANCEL. Set timeout to 30+ minutes.
+- Run tests: `go test ./...` -- takes <1 second (cached), ~10 seconds clean. NEVER CANCEL. Set timeout to 30+ minutes.
 - Format code: `go fmt ./...`
 - Static analysis: `go vet ./...`
 - Tidy dependencies: `go mod tidy`
@@ -46,7 +46,7 @@ Note: The CI/CD pipeline automatically uses these scripts via the reusable workf
 - Test run command help: `./bin/autoupdate run --help`
 
 ### Usage Modes
-- **Standalone (local) mode**: `./bin/autoupdate [path]` — updates dependencies in a local repository, detects project type, and creates a PR
+- **Single repository**: `./bin/autoupdate .` or `./bin/autoupdate [path]` — updates dependencies in a local repository, detects project type, and creates a PR. The `local` subcommand was removed in `1.0.0` and is kept hidden and deprecated so the bare word is not read as a path
 - **Batch (run) mode**: `./bin/autoupdate run` — reads config file, discovers repositories from all configured providers and orgs, and creates update PRs
 - **Self-update**: `./bin/autoupdate self-update` — downloads and installs the latest release from GitHub
 - **Version**: `./bin/autoupdate version` — prints the current build version
@@ -65,7 +65,7 @@ Note: The CI/CD pipeline automatically uses these scripts via the reusable workf
 ### Testing Scenarios
 After making changes, ALWAYS run through these validation steps:
 1. `make build` - must complete successfully
-2. `go test -tags unit ./...` - all tests must pass
+2. `go test ./...` - all tests must pass
 3. `./bin/autoupdate --help` - must show help text with available commands
 4. `./bin/autoupdate run --dry-run` - should process config and discover repos in dry-run mode
 5. `go fmt ./...` and `go vet ./...` - must pass clean
@@ -73,7 +73,7 @@ After making changes, ALWAYS run through these validation steps:
 ### Pre-commit Validation
 - Always run `go fmt ./...` before committing or CI will fail
 - Always run `go vet ./...` before committing
-- Always run `go test -tags unit ./...` to ensure no regressions
+- Always run `go test ./...` to ensure no regressions
 - For full linting validation, use the pipeline script: `/tmp/pipelines/global/scripts/GoLang/GoLangCI-Lint/run.sh`
 - CI pipeline uses the rios0rios0/pipelines repository scripts which will fail if code style or quality issues exist
 
@@ -114,8 +114,14 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 3. Register in `internal/infrastructure/repositories/container.go`
 
 ### Configuration System
-- Config auto-discovery searches: `.`, `.config`, `configs`, `$HOME`, `$HOME/.config` for `.autoupdate.{yml,yaml}` and `autoupdate.{yml,yaml}`
-- Override with `--config` flag or `-c`
+- **Configuration is layered.** Four sources, each overriding only the keys its document declares: built-in defaults (`configs/autoupdate.yaml`, embedded via `configs/embed.go`) → published defaults (the same file fetched from `entities.DefaultConfigURL`, best effort) → the operator's file (`--config`, else `~/` then `~/.config/`, names `.autoupdate.{yml,yaml}` and `autoupdate.{yml,yaml}`) → the target repository's own `.autoupdate.yaml`
+- `internal/domain/entities/config_layers.go` is the engine (`ConfigLayer`, `ApplyLayer`, `ApplyRepoOverlay`, `ResolveSettings`, `FinalizeSettings`); `configLoader` in `internal/infrastructure/controllers/config_helpers.go` assembles the first three (its `fetch` field is the seam that keeps the tests offline)
+- The mechanism is `yaml.v3` decoding into a *non-zero* struct: absent keys are never assigned, so absent-versus-`false` needs no pointer fields. Maps are the exception — each value decodes into a fresh zero element — so `Updaters` is blanked before the decode and re-merged with `MergeUpdatersConfig` afterwards
+- The working directory is never searched for the operator's configuration, and finding none is not an error: the built-in defaults are the base of every run (`resolveOperatorConfigPath` returns `""`)
+- Only the operator's layer is `ScopeOperator`. The other three decode through `RestrictedConfig`, which has **no field** for `providers`, any credential, `aggregate_branch_prefix` or `concurrency` — enforcement by schema, not by a check that has to run at the right moment
+- `ValidateSettings(settings, batch)`: the whole provider block is validated only when `batch` — `autoupdate .` takes its provider from the repository's own `origin` remote and never reads the list, and refusing a local run over an entry it will not touch costs it the updaters and exclusions too, since `LocalController` answers a failed load with nil settings. `exclude_repos` and the branch prefix are validated in both modes
+- `cleanup_stale_branches` is accepted from a restricted layer **only when it turns cleanup off** (`acceptSwitchOff`): `applySkipCleanupFlag` runs in the controller before the layer is folded, so an enable would override `--skip-cleanup`. `ApplyRepoOverlay` also guards nil settings
+- `aggregate_branch_prefix` is operator-only *and* validated (`entities.ValidateAggregateBranchPrefix`): it aims a destructive operation, so it must name a branch git accepts, contain a `/`, and not stop at one — `chore/` would match AutoBump's `chore/bump-*` branches
 - Supports multiple providers with organizations and tokens
 - Token resolution: inline values, `${ENV_VAR}` expansion, file paths
 - Updaters can be enabled/disabled with per-updater `auto_complete` and `target_branch`
@@ -123,8 +129,9 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - Stale branch cleanup: `cleanup_stale_branches` (opt-out, default enabled) and the persistent `--skip-cleanup` flag control it. `cleanupStaleAggregateBranches` in `internal/domain/commands/cleanup.go` runs in `processLocalUpdaters` after the clone and before `CreateBranchFromDefault`, deleting every remote branch carrying the aggregate prefix and closing its PR via `ForgeProvider.ClosePullRequest`. `entities.CleanupEnabled` resolves the toggle; `applySkipCleanupFlag` in `internal/infrastructure/controllers/config_helpers.go` lets the flag override the config
 - `aggregate_branch_prefix` (default `chore/autoupdate-`, via `entities.ResolveAggregateBranchPrefix`) feeds both `buildAggregateBranchName` and the cleanup filter, so the branch a run creates and the branches cleanup removes can never diverge
 - Repository exclusions:
-  - **Global**: `exclude_repos` in user config — right-anchored glob list matched against `<org>/<repo>` (or `<org>/<project>/<repo>` for ADO). Filtered by `filterRepositories` in `RunCommand`; honored in `LocalCommand` when settings load successfully.
-  - **Per-repo**: `.autoupdate.yaml` in the target repository's root with `skip: true` (and optional `reason`). Read via `support.LoadLocalRepoConfig` (local mode) and `support.LoadRemoteRepoConfig` (batch mode, fetched through `FileAccessProvider.GetFileContent`). Remote fetch failures fail open so a flaky API does not silently disable all updates.
+  - **Global**: `exclude_repos` in the operator's config — right-anchored glob list matched against `<org>/<repo>` (or `<org>/<project>/<repo>` for ADO).
+  - **Per-repo**: `.autoupdate.yaml` in the target repository's root. `skip: true` (with an optional `reason`) opts out entirely; the same file is *also* the project settings layer, pruned by `narrowToProjectSchema` before it is applied. Read via `support.LoadLocalRepoConfig` (local mode) and `support.LoadRemoteRepoConfig` (batch mode). Remote fetch and parse failures fail open so a flaky API does not silently disable all updates.
+  - `entities.ExcludesSelf` is the shared predicate. `filterRepositories` calls it organization-wide, and `loadRepoSettings`/`resolveLocalSettings` call it again once the repository's own file has been folded in — the only pass in which a repository's own `exclude_*` keys can act, since the first ran before that file existed to be read.
 
 ### Commit Signing
 When `commit.gpgsign=true` is set in git config, commits are automatically signed using GPG or SSH (based on `gpg.format`). The signing key is read from `user.signingkey`. GPG passphrase is read from `GPG_PASSPHRASE` env var.
@@ -161,7 +168,7 @@ Push transport is auto-detected from the origin remote URL:
 - Entries name trees the repo does not author (VCS metadata, `vendor`/`node_modules`, tool caches like `.terraform`/`.venv`/`.gradle`). `.git` is why the list exists: results feed `support.WriteFileChanges`, which writes back under the root. Editor state (`.idea`, `.vscode`) is deliberately absent — it is committed. Go module discovery filters further (`moduleDirsFromPaths` in `golang/modules.go` drops hidden/vendored/`testdata`) to stay in sync with the script's `find ... -not -path '*/.*/*'`.
 
 ### Testing Infrastructure
-- All unit tests are tagged with `//go:build unit` and must be run with `-tags unit`
+- Unit tests carry no build tag, so `go test ./...` runs them; `//go:build integration` is reserved for tests needing real infrastructure
 - Uses testify for assertions (`assert`/`require`) — prefer stubs over mocks
 - Test doubles in `test/domain/commanddoubles/` (stubs), `test/domain/entitybuilders/` (builders), and `test/infrastructure/repositorydoubles/` (stubs, spies, builders)
 - Uses `github.com/rios0rios0/testkit` for additional test helpers
