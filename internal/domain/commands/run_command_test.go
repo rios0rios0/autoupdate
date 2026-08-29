@@ -1755,7 +1755,7 @@ func TestRunCommandRunsRepoConfigSkip(t *testing.T) {
 	})
 }
 
-func TestIsSkippedByRepoConfig(t *testing.T) {
+func TestLoadRepoSettings(t *testing.T) {
 	t.Parallel()
 
 	repo := entities.Repository{Organization: "org", Name: "repo"}
@@ -1769,7 +1769,8 @@ func TestIsSkippedByRepoConfig(t *testing.T) {
 			BuildSpy()
 
 		// when
-		skipped := commands.IsSkippedByRepoConfig(context.Background(), spy, repo)
+		settings := commands.LoadRepoSettings(context.Background(), spy, repo, &entities.Settings{})
+		skipped := settings == nil
 
 		// then
 		assert.False(t, skipped)
@@ -1787,7 +1788,8 @@ func TestIsSkippedByRepoConfig(t *testing.T) {
 			BuildSpy()
 
 		// when
-		skipped := commands.IsSkippedByRepoConfig(context.Background(), spy, repo)
+		settings := commands.LoadRepoSettings(context.Background(), spy, repo, &entities.Settings{})
+		skipped := settings == nil
 
 		// then
 		assert.True(t, skipped)
@@ -1805,7 +1807,8 @@ func TestIsSkippedByRepoConfig(t *testing.T) {
 			BuildSpy()
 
 		// when
-		skipped := commands.IsSkippedByRepoConfig(context.Background(), spy, repo)
+		settings := commands.LoadRepoSettings(context.Background(), spy, repo, &entities.Settings{})
+		skipped := settings == nil
 
 		// then
 		assert.False(t, skipped)
@@ -1821,13 +1824,83 @@ func TestIsSkippedByRepoConfig(t *testing.T) {
 			BuildSpy()
 
 		// when
-		skipped := commands.IsSkippedByRepoConfig(context.Background(), spy, repo)
+		settings := commands.LoadRepoSettings(context.Background(), spy, repo, &entities.Settings{})
+		skipped := settings == nil
 
 		// then
 		assert.False(t, skipped)
 	})
-}
 
+	t.Run("should apply the repository's own updaters over the operator's", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		enabled := true
+		base := &entities.Settings{
+			Updaters: map[string]entities.UpdaterConfig{"golang": {Enabled: &enabled}},
+		}
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{entities.RepoConfigFile: true}).
+			WithFileContents(map[string]string{
+				entities.RepoConfigFile: "updaters:\n  golang:\n    enabled: false\n",
+			}).
+			BuildSpy()
+
+		// when
+		settings := commands.LoadRepoSettings(context.Background(), spy, repo, base)
+
+		// then
+		require.NotNil(t, settings)
+		assert.False(t, settings.Updaters["golang"].IsEnabled())
+		assert.True(t, base.Updaters["golang"].IsEnabled(),
+			"the settings the fan-out shares must be untouched")
+	})
+
+	t.Run("should ignore a provider block the repository declares", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		base := &entities.Settings{
+			Providers: []entities.ProviderConfig{
+				{Type: "github", Token: "operator-token", Organizations: []string{"my-org"}},
+			},
+		}
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{entities.RepoConfigFile: true}).
+			WithFileContents(map[string]string{
+				entities.RepoConfigFile: "providers:\n  - type: 'github'\n" +
+					"    token: 'repo-token'\n    organizations: ['attacker']\n",
+			}).
+			BuildSpy()
+
+		// when
+		settings := commands.LoadRepoSettings(context.Background(), spy, repo, base)
+
+		// then
+		require.NotNil(t, settings)
+		require.Len(t, settings.Providers, 1)
+		assert.Equal(t, "operator-token", settings.Providers[0].Token)
+	})
+
+	t.Run("should let a repository exclude itself", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- filterRepositories ran organization-wide before this file existed to be
+		// read, so this is the only pass in which a repository's own exclude_repos can act
+		spy := doubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{entities.RepoConfigFile: true}).
+			WithFileContents(map[string]string{
+				entities.RepoConfigFile: "exclude_repos: ['org/repo']\n",
+			}).
+			BuildSpy()
+
+		// when
+		settings := commands.LoadRepoSettings(context.Background(), spy, repo, &entities.Settings{})
+
+		// then
+		assert.Nil(t, settings)
+	})
+}
 func TestBuildAggregateBranchName(t *testing.T) {
 	t.Parallel()
 

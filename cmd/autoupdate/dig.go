@@ -6,38 +6,32 @@ import (
 	"go.uber.org/dig"
 )
 
-func injectAppContext() *internal.AppInternal {
-	container := dig.New()
-
-	// Register all providers
-	if err := internal.RegisterProviders(container); err != nil {
-		panic(err)
-	}
-
-	// Invoke to get AppInternal
-	var appInternal *internal.AppInternal
-	if err := container.Invoke(func(ai *internal.AppInternal) {
-		appInternal = ai
-	}); err != nil {
-		panic(err)
-	}
-
-	return appInternal
-}
-
-func injectLocalController() *controllers.LocalController {
+// injectApp builds the object graph once and hands back both roots the CLI needs: the
+// aggregated controllers that become subcommands, and the controller behind the root
+// command's positional-path form.
+//
+// One container, not two. The pair that used to be here each ran RegisterProviders on their
+// own dig.Container, so anything meant to be a singleton existed twice -- and `local` being
+// both a subcommand and the root form was the only reason to keep them apart.
+func injectApp() (*internal.AppInternal, *controllers.LocalController) {
 	container := dig.New()
 
 	if err := internal.RegisterProviders(container); err != nil {
 		panic(err)
 	}
 
-	var localController *controllers.LocalController
-	if err := container.Invoke(func(lc *controllers.LocalController) {
-		localController = lc
+	var (
+		appInternal     *internal.AppInternal
+		localController *controllers.LocalController
+	)
+	if err := container.Invoke(func(
+		app *internal.AppInternal, local *controllers.LocalController,
+	) {
+		appInternal = app
+		localController = local
 	}); err != nil {
 		panic(err)
 	}
 
-	return localController
+	return appInternal, localController
 }

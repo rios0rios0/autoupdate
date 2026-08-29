@@ -4,12 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"path"
 	"strings"
 
 	configEntities "github.com/rios0rios0/gitforge/pkg/config/domain/entities"
-	"gopkg.in/yaml.v3"
 )
 
 // DefaultConfigURL is the URL to the default autoupdate configuration file.
@@ -93,61 +91,15 @@ func (c UpdaterConfig) IsAutoComplete() bool {
 	return c.AutoComplete != nil && *c.AutoComplete
 }
 
-// NewSettings reads and parses a configuration file, expanding environment variables
-// and resolving token file paths.
-func NewSettings(path string) (*Settings, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file %q: %w", path, err)
-	}
-
-	var settings Settings
-	if unmarshalErr := yaml.Unmarshal(data, &settings); unmarshalErr != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", unmarshalErr)
-	}
-
-	// Resolve tokens (env vars and file paths)
-	for i := range settings.Providers {
-		settings.Providers[i].Token = settings.Providers[i].ResolveToken()
-	}
-
-	// Resolve global token fields using the same ${ENV_VAR} expansion and
-	// file path resolution as provider tokens (via gitforge's ResolveToken).
-	settings.GpgKeyPassphrase = configEntities.ResolveToken(settings.GpgKeyPassphrase)
-	settings.GitHubAccessToken = configEntities.ResolveToken(settings.GitHubAccessToken)
-	settings.GitLabAccessToken = configEntities.ResolveToken(settings.GitLabAccessToken)
-	settings.AzureDevOpsAccessToken = configEntities.ResolveToken(settings.AzureDevOpsAccessToken)
-
-	settings.GitLabCIJobToken = os.Getenv("CI_JOB_TOKEN")
-
-	if settings.GpgKeyPassphrase == "" {
-		settings.GpgKeyPassphrase = os.Getenv("GPG_PASSPHRASE")
-	}
-
-	if validateErr := ValidateSettings(&settings); validateErr != nil {
-		return nil, validateErr
-	}
-
-	return &settings, nil
-}
-
-// DecodeSettings decodes YAML data into a Settings struct.
-// When strict is true, unknown fields cause an error (user config).
-// When strict is false, unknown fields are ignored (default config).
-func DecodeSettings(data []byte, strict bool) (*Settings, error) {
-	var settings Settings
-	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
-	decoder.KnownFields(strict)
-	if err := decoder.Decode(&settings); err != nil {
-		return nil, fmt.Errorf("failed to decode settings: %w", err)
-	}
-	return &settings, nil
-}
-
-// ValidateSettings checks for required configuration values.
-func ValidateSettings(settings *Settings) error {
-	if len(settings.Providers) == 0 {
-		return errors.New("at least one provider must be configured")
+// ValidateSettings checks the finished configuration -- the result of folding every layer.
+//
+// batch selects which rules apply. `autoupdate run` needs a configured provider to have
+// anything to discover; `autoupdate .` takes its provider from the repository's own
+// `origin` remote and has never needed one, so demanding one there would refuse a run that
+// works.
+func ValidateSettings(settings *Settings, batch bool) error {
+	if batch && len(settings.Providers) == 0 {
+		return ErrNoProvidersConfigured
 	}
 
 	for i, p := range settings.Providers {
@@ -177,6 +129,123 @@ func ValidateSettings(settings *Settings) error {
 			return fmt.Errorf("exclude_repos[%d] %q: invalid glob pattern: %w",
 				i, pattern, err)
 		}
+	}
+
+	return ValidateAggregateBranchPrefix(settings.AggregateBranchPrefix)
+}
+
+// ErrNoProvidersConfigured is returned when `autoupdate run` has nothing to discover.
+var ErrNoProvidersConfigured = errors.New("at least one provider must be configured")
+
+// ErrAggregateBranchPrefixInvalid is returned for a prefix that cannot safely be used.
+var ErrAggregateBranchPrefixInvalid = errors.New("invalid aggregate branch prefix")
+
+// protectedBranchNames are the branches an aggregate prefix must not be able to reach. A
+// prefix matches by string prefix, so "main" would match "main" itself and every branch
+// under a "main..." name with it.
+//
+//nolint:gochecknoglobals // read-only lookup table
+var protectedBranchNames = map[string]struct{}{
+	"main": {}, "master": {}, "develop": {}, "head": {}, "trunk": {},
+}
+
+// invalidPrefixRunes are the characters git refuses in a ref name. A prefix that cannot
+// name a branch can only misbehave: it will never match one AutoUpdate created, and the
+// operator will believe cleanup is running when it is matching nothing.
+const invalidPrefixRunes = " \t~^:?*[\\"
+
+// ValidateAggregateBranchPrefix checks a configured prefix before anything uses it.
+//
+// The prefix is not only what new branches are named after -- it is the argument to a
+// destructive operation. Stale-branch cleanup deletes every remote branch that starts with
+// it and closes the pull request attached to each, so a prefix wider than the operator
+// meant does not produce a confusing branch name, it deletes other people's work. An
+// operator's typo is as capable of that as a hostile repository would be, which is why this
+// runs over their own file too.
+//
+// A failure is an error rather than a fallback to the default: quietly substituting the
+// default would mean cleanup ran against branches the operator never named.
+func ValidateAggregateBranchPrefix(prefix string) error {
+	if prefix == "" {
+		// Unset means DefaultAggregateBranchPrefix, which is valid by construction and
+		// covered by this function's tests.
+		return nil
+	}
+
+	trimmed := strings.TrimSpace(prefix)
+	if trimmed == "" {
+		return fmt.Errorf(
+			"%w: an empty prefix matches every branch in the repository",
+			ErrAggregateBranchPrefixInvalid,
+		)
+	}
+	if trimmed != prefix {
+		return fmt.Errorf(
+			"%w %q: leading or trailing whitespace cannot be part of a branch name",
+			ErrAggregateBranchPrefixInvalid, prefix,
+		)
+	}
+
+	if err := validatePrefixShape(prefix); err != nil {
+		return err
+	}
+
+	if _, protected := protectedBranchNames[strings.ToLower(prefix)]; protected {
+		return fmt.Errorf(
+			"%w %q: that is a protected branch name, and cleanup deletes what the prefix matches",
+			ErrAggregateBranchPrefixInvalid, prefix,
+		)
+	}
+
+	return nil
+}
+
+// validatePrefixShape enforces what the prefix has to look like: a name git accepts, and a
+// namespace it cannot escape from.
+func validatePrefixShape(prefix string) error {
+	if strings.ContainsAny(prefix, invalidPrefixRunes) ||
+		strings.Contains(prefix, "..") || strings.Contains(prefix, "//") ||
+		strings.HasPrefix(prefix, "-") || strings.HasPrefix(prefix, "/") ||
+		strings.HasSuffix(prefix, ".lock") || prefix == "@" {
+		return fmt.Errorf(
+			"%w %q: it is not a name git will accept for a branch",
+			ErrAggregateBranchPrefixInvalid, prefix,
+		)
+	}
+
+	for _, r := range prefix {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf(
+				"%w: control characters cannot be part of a branch name",
+				ErrAggregateBranchPrefixInvalid,
+			)
+		}
+	}
+
+	if strings.HasPrefix(prefix, "refs/") {
+		return fmt.Errorf(
+			"%w %q: cleanup matches short branch names, so a refs/ prefix silently matches "+
+				"nothing and leaves cleanup looking enabled while it does nothing; use %q",
+			ErrAggregateBranchPrefixInvalid, prefix, DefaultAggregateBranchPrefix,
+		)
+	}
+
+	slash := strings.LastIndex(prefix, "/")
+	if slash < 0 {
+		return fmt.Errorf(
+			"%w %q: it must contain a %q so the match cannot escape into the repository's "+
+				"ordinary branch names; the default is %q",
+			ErrAggregateBranchPrefixInvalid, prefix, "/", DefaultAggregateBranchPrefix,
+		)
+	}
+	if slash == len(prefix)-1 {
+		return fmt.Errorf(
+			"%w %q: a bare namespace matches everything under it -- %q would match every "+
+				"other tool's branches in the same namespace, AutoBump's release branches "+
+				"included, and cleanup deletes what it matches. Name the branches too, as "+
+				"%q does",
+			ErrAggregateBranchPrefixInvalid, prefix, prefix, DefaultAggregateBranchPrefix,
+		)
 	}
 
 	return nil

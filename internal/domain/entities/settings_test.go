@@ -1,7 +1,7 @@
 package entities_test
 
 import (
-	"os"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -97,137 +97,6 @@ func TestIsAutoComplete(t *testing.T) {
 	})
 }
 
-func TestNewSettings(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should return error for non-existent file", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		path := "/tmp/non-existent-config-file.yaml"
-
-		// when
-		_, err := entities.NewSettings(path)
-
-		// then
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to read config file")
-	})
-
-	t.Run("should return error for invalid YAML", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		tmpFile := t.TempDir() + "/bad.yaml"
-		require.NoError(t, os.WriteFile(tmpFile, []byte("{invalid yaml: [}"), 0o600))
-
-		// when
-		_, err := entities.NewSettings(tmpFile)
-
-		// then
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to parse config file")
-	})
-
-	t.Run("should return error for invalid settings", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		tmpFile := t.TempDir() + "/empty.yaml"
-		require.NoError(t, os.WriteFile(tmpFile, []byte("exclude_forks: true\n"), 0o600))
-
-		// when
-		_, err := entities.NewSettings(tmpFile)
-
-		// then
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "at least one provider")
-	})
-}
-
-func TestDecodeSettings(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should decode valid YAML in lenient mode", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		data := []byte(`
-providers:
-  - type: github
-    token: my-token
-    organizations:
-      - my-org
-updaters:
-  terraform:
-    enabled: true
-`)
-
-		// when
-		settings, err := entities.DecodeSettings(data, false)
-
-		// then
-		require.NoError(t, err)
-		assert.Len(t, settings.Providers, 1)
-		assert.Equal(t, "github", settings.Providers[0].Type)
-		assert.True(t, settings.Updaters["terraform"].IsEnabled())
-	})
-
-	t.Run("should return error for unknown fields in strict mode", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		data := []byte(`
-providers:
-  - type: github
-    token: my-token
-    organizations:
-      - my-org
-unknown_field: value
-`)
-
-		// when
-		_, err := entities.DecodeSettings(data, true)
-
-		// then
-		assert.Error(t, err)
-	})
-
-	t.Run("should ignore unknown fields in lenient mode", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		data := []byte(`
-providers:
-  - type: github
-    token: my-token
-    organizations:
-      - my-org
-unknown_field: value
-`)
-
-		// when
-		settings, err := entities.DecodeSettings(data, false)
-
-		// then
-		require.NoError(t, err)
-		assert.Len(t, settings.Providers, 1)
-	})
-
-	t.Run("should return error for invalid YAML", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		data := []byte(`{invalid yaml: [}`)
-
-		// when
-		_, err := entities.DecodeSettings(data, false)
-
-		// then
-		assert.Error(t, err)
-	})
-}
-
 func TestValidateSettings(t *testing.T) {
 	t.Parallel()
 
@@ -242,7 +111,7 @@ func TestValidateSettings(t *testing.T) {
 		}
 
 		// when
-		err := entities.ValidateSettings(settings)
+		err := entities.ValidateSettings(settings, true)
 
 		// then
 		assert.NoError(t, err)
@@ -255,7 +124,7 @@ func TestValidateSettings(t *testing.T) {
 		settings := &entities.Settings{}
 
 		// when
-		err := entities.ValidateSettings(settings)
+		err := entities.ValidateSettings(settings, true)
 
 		// then
 		require.Error(t, err)
@@ -273,7 +142,7 @@ func TestValidateSettings(t *testing.T) {
 		}
 
 		// when
-		err := entities.ValidateSettings(settings)
+		err := entities.ValidateSettings(settings, true)
 
 		// then
 		require.Error(t, err)
@@ -291,7 +160,7 @@ func TestValidateSettings(t *testing.T) {
 		}
 
 		// when
-		err := entities.ValidateSettings(settings)
+		err := entities.ValidateSettings(settings, true)
 
 		// then
 		require.Error(t, err)
@@ -309,7 +178,7 @@ func TestValidateSettings(t *testing.T) {
 		}
 
 		// when
-		err := entities.ValidateSettings(settings)
+		err := entities.ValidateSettings(settings, true)
 
 		// then
 		require.Error(t, err)
@@ -333,7 +202,7 @@ func TestValidateSettings(t *testing.T) {
 		}
 
 		// when
-		err := entities.ValidateSettings(settings)
+		err := entities.ValidateSettings(settings, true)
 
 		// then
 		assert.NoError(t, err)
@@ -351,7 +220,7 @@ func TestValidateSettings(t *testing.T) {
 		}
 
 		// when
-		err := entities.ValidateSettings(settings)
+		err := entities.ValidateSettings(settings, true)
 
 		// then
 		assert.NoError(t, err)
@@ -369,7 +238,7 @@ func TestValidateSettings(t *testing.T) {
 		}
 
 		// when
-		err := entities.ValidateSettings(settings)
+		err := entities.ValidateSettings(settings, true)
 
 		// then
 		require.Error(t, err)
@@ -550,5 +419,72 @@ func TestMergeUpdatersConfig(t *testing.T) {
 		assert.True(t, result["terraform"].IsAutoComplete())
 		assert.True(t, result["golang"].IsAutoComplete())
 		assert.Equal(t, "main", result["golang"].TargetBranch)
+	})
+}
+
+func TestValidateAggregateBranchPrefix(t *testing.T) {
+	t.Parallel()
+
+	// The prefix is not only what new branches are named after -- it is the argument to a
+	// destructive operation. Stale-branch cleanup deletes every remote branch starting with
+	// it and closes the pull request attached to each, so a prefix wider than the operator
+	// meant does not produce a confusing branch name, it deletes other people's work. An
+	// operator's typo is as capable of that as a hostile repository would be.
+	accepted := []string{
+		"",                  // unset means the default, which is valid by construction
+		"chore/autoupdate-", // AutoUpdate's own
+		"chore/bump-",       // AutoBump's, in the same namespace
+		"deps/autoupdate-",
+		"a/b",
+	}
+	for _, prefix := range accepted {
+		t.Run("should accept "+strconv.Quote(prefix), func(t *testing.T) {
+			t.Parallel()
+
+			// when
+			err := entities.ValidateAggregateBranchPrefix(prefix)
+
+			// then
+			assert.NoError(t, err)
+		})
+	}
+
+	rejected := map[string]string{
+		"an empty prefix matches every branch":          "   ",
+		"a bare name can escape the namespace":          "autoupdate-",
+		"a protected branch name":                       "main",
+		"another protected branch name":                 "MASTER",
+		"a bare namespace sweeps every tool's branches": "chore/",
+		"a refs/ prefix silently matches nothing":       "refs/heads/autoupdate-",
+		"a name git will not accept":                    "chore/autoupdate ",
+		"a double slash":                                "chore//autoupdate-",
+		"a parent traversal":                            "chore/../autoupdate-",
+		"a leading dash":                                "-chore/autoupdate-",
+		"a leading slash":                               "/chore/autoupdate-",
+		"a .lock suffix":                                "chore/autoupdate.lock",
+		"a glob character":                              "chore/autoupdate-*",
+		"a control character":                           "chore/autoupdate-\x01",
+	}
+	for reason, prefix := range rejected {
+		t.Run("should reject "+reason, func(t *testing.T) {
+			t.Parallel()
+
+			// when
+			err := entities.ValidateAggregateBranchPrefix(prefix)
+
+			// then
+			require.ErrorIs(t, err, entities.ErrAggregateBranchPrefixInvalid,
+				"prefix %q must be rejected", prefix)
+		})
+	}
+
+	t.Run("should accept the default prefix", func(t *testing.T) {
+		t.Parallel()
+
+		// when
+		err := entities.ValidateAggregateBranchPrefix(entities.DefaultAggregateBranchPrefix)
+
+		// then
+		assert.NoError(t, err, "the default must satisfy the rules it is offered as the fix for")
 	})
 }

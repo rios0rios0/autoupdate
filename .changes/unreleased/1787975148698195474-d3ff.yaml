@@ -1,0 +1,3 @@
+kind: 'Added'
+body: 'made a target repository''s `.autoupdate.yaml` a settings file as well as an opt-out marker. `skip` and `reason` mean exactly what they meant; alongside them it may now set `updaters`, `exclude_repos`, `exclude_forks`, `exclude_archived` and `cleanup_stale_branches`, so a project can say how it wants to be updated rather than only refusing. The exclusion keys finally do something from inside a repository: `entities.ExcludesSelf` gives them a second pass after the file has been read, which is the only point at which a project can exclude itself — the organization-wide filter runs before that file exists to be fetched.'
+time: '2026-08-29T03:45:48.698152864Z'

@@ -1,0 +1,3 @@
+kind: 'Changed'
+body: 'dropped the `unit` build tag from every test. It hid the whole suite from plain `go test ./...`, from IDE runs and from the linter while buying nothing, since an untagged file compiles under a `-tags` build too.'
+time: '2026-08-29T03:46:00.503447534Z'

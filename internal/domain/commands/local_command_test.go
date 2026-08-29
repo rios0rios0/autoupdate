@@ -484,7 +484,7 @@ func TestParseGitRemote(t *testing.T) {
 	})
 }
 
-func TestCheckLocalRepoConfigSkip(t *testing.T) {
+func TestResolveLocalSettings(t *testing.T) {
 	t.Parallel()
 
 	t.Run("should return false when .autoupdate.yaml does not exist", func(t *testing.T) {
@@ -494,7 +494,7 @@ func TestCheckLocalRepoConfigSkip(t *testing.T) {
 		dir := t.TempDir()
 
 		// when
-		skipped, err := commands.CheckLocalRepoConfigSkip(dir)
+		_, skipped, err := commands.ResolveLocalSettings(dir, &entities.Settings{})
 
 		// then
 		require.NoError(t, err)
@@ -513,7 +513,7 @@ func TestCheckLocalRepoConfigSkip(t *testing.T) {
 		))
 
 		// when
-		skipped, err := commands.CheckLocalRepoConfigSkip(dir)
+		_, skipped, err := commands.ResolveLocalSettings(dir, &entities.Settings{})
 
 		// then
 		require.NoError(t, err)
@@ -532,7 +532,7 @@ func TestCheckLocalRepoConfigSkip(t *testing.T) {
 		))
 
 		// when
-		skipped, err := commands.CheckLocalRepoConfigSkip(dir)
+		_, skipped, err := commands.ResolveLocalSettings(dir, &entities.Settings{})
 
 		// then
 		require.NoError(t, err)
@@ -551,24 +551,28 @@ func TestCheckLocalRepoConfigSkip(t *testing.T) {
 		))
 
 		// when
-		_, err := commands.CheckLocalRepoConfigSkip(dir)
+		_, _, err := commands.ResolveLocalSettings(dir, &entities.Settings{})
 
 		// then
 		require.Error(t, err)
 	})
 }
 
-func TestIsExcludedByGlobalList(t *testing.T) {
+func TestLocalSelfExclusion(t *testing.T) {
 	t.Parallel()
 
-	github := &commands.RemoteInfo{Org: "rios0rios0", RepoName: "autoupdate"}
-	ado := &commands.RemoteInfo{Org: "ContosoSecurity", Project: "frontend", RepoName: "opensearch-dashboards"}
+	// Local mode resolves the repository from its own origin remote and then asks the same
+	// question run mode does, through the same function.
+	github := entities.Repository{Organization: "rios0rios0", Name: "autoupdate"}
+	ado := entities.Repository{
+		Organization: "ContosoSecurity", Project: "frontend", Name: "opensearch-dashboards",
+	}
 
 	t.Run("should return false when settings is nil", func(t *testing.T) {
 		t.Parallel()
 
 		// given/when
-		excluded := commands.IsExcludedByGlobalList(nil, github)
+		excluded, _ := entities.ExcludesSelf(nil, github)
 
 		// then
 		assert.False(t, excluded)
@@ -581,7 +585,7 @@ func TestIsExcludedByGlobalList(t *testing.T) {
 		settings := &entities.Settings{}
 
 		// when
-		excluded := commands.IsExcludedByGlobalList(settings, github)
+		excluded, _ := entities.ExcludesSelf(settings, github)
 
 		// then
 		assert.False(t, excluded)
@@ -594,7 +598,7 @@ func TestIsExcludedByGlobalList(t *testing.T) {
 		settings := &entities.Settings{ExcludeRepos: []string{"rios0rios0/autoupdate"}}
 
 		// when
-		excluded := commands.IsExcludedByGlobalList(settings, github)
+		excluded, _ := entities.ExcludesSelf(settings, github)
 
 		// then
 		assert.True(t, excluded)
@@ -609,7 +613,7 @@ func TestIsExcludedByGlobalList(t *testing.T) {
 		}}
 
 		// when
-		excluded := commands.IsExcludedByGlobalList(settings, ado)
+		excluded, _ := entities.ExcludesSelf(settings, ado)
 
 		// then
 		assert.True(t, excluded)
@@ -622,7 +626,7 @@ func TestIsExcludedByGlobalList(t *testing.T) {
 		settings := &entities.Settings{ExcludeRepos: []string{"opensearch-dashboards"}}
 
 		// when
-		excluded := commands.IsExcludedByGlobalList(settings, ado)
+		excluded, _ := entities.ExcludesSelf(settings, ado)
 
 		// then
 		assert.True(t, excluded)

@@ -1,49 +1,28 @@
-# autoupdate configuration
-# Tokens can be set inline, via environment variable references (${VAR}),
-# or as a path to a file containing the token.
+# AutoUpdate's built-in defaults.
+#
+# This is the first of the four configuration layers, and the only one that is always
+# present: it is compiled into the binary with `go:embed`, and the same file is served
+# from `main` so an installed binary can pick up a change without a release.
+#
+#   built-in defaults -> published defaults -> your ~/.autoupdate.yaml -> the target repository's .autoupdate.yaml
+#
+# Each layer overrides only the keys it declares, so everything below is a starting point
+# rather than a decision. It is NOT a template to copy: it deliberately carries no
+# credentials, no `providers` and no `aggregate_branch_prefix`, because those are yours to
+# set and this file is merged into every run. Start from
+# `configs/autoupdate.example.yaml` instead.
 
-providers:
-  - type: github
-    token: "${GITHUB_TOKEN}"
-    organizations:
-      - "my-org"
-
-  # - type: azuredevops
-  #   token: "${AZURE_DEVOPS_PAT}"
-  #   organizations:
-  #     - "https://dev.azure.com/MyOrg"
-
-  # - type: gitlab
-  #   token: "${GITLAB_TOKEN}"
-  #   organizations:
-  #     - "my-group"
-
-# Delete the dated branches left over by earlier runs, closing any pull request
-# attached to them, before creating the branch for the current run. The aggregate
-# branch carries the run date, so without this an unattended daily run leaves one
-# abandoned branch per day for as long as nobody merges.
-# Enabled by default; uncomment the line below to keep those branches instead,
-# or pass --skip-cleanup to disable it for a single run.
+# (optional) delete the dated branches left over by earlier runs, closing any pull request
+# attached to them, before creating the branch for the current run. Enabled by default.
 #cleanup_stale_branches: false
 
-# Prefix of the consolidated branch each run creates; the run date is appended to
-# it. The same prefix decides which branches the cleanup above removes.
-#aggregate_branch_prefix: 'chore/autoupdate-'
+# (optional) number of repositories processed in parallel within an organization.
+# Omit it (or set 0) for the built-in default of 4; 1 processes them sequentially.
+#concurrency: 4
 
-# Number of repositories to process in parallel within an organization.
-# Repository processing is I/O-bound (clone + remote API calls), so a small
-# fan-out shortens large-organization runs significantly. Omit it (or set 0)
-# to use the built-in default of 4; set 1 to process repositories sequentially.
-# The --concurrency CLI flag, when provided, overrides this value.
-# concurrency: 4
-
-# Skip specific repositories globally. Patterns are right-anchored
-# against <org>/<repo> (or <org>/<project>/<repo> on Azure DevOps), and
-# support `path.Match`-style globs (`*`, `?`, `[...]`) that do not cross
-# "/". A bare name matches the trailing segment of the key.
-# exclude_repos:
-#   - 'my-org/legacy-monorepo'
-#   - '*/sandbox'
+# (optional) skip forked or archived repositories.
+#exclude_forks: true
+#exclude_archived: true
 
 # All updaters are enabled by default with auto_complete disabled.
 # Users only need to override specific fields; omitted fields keep these defaults.

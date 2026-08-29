@@ -2,18 +2,20 @@ package controllers
 
 import (
 	"fmt"
+	"os"
 
-	configHelpers "github.com/rios0rios0/gitforge/pkg/config/domain/helpers"
-	downloadHelpers "github.com/rios0rios0/gitforge/pkg/config/infrastructure/helpers"
 	logger "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/rios0rios0/autoupdate/configs"
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	configHelpers "github.com/rios0rios0/gitforge/pkg/config/domain/helpers"
+	downloadHelpers "github.com/rios0rios0/gitforge/pkg/config/infrastructure/helpers"
 )
 
-// applySkipCleanupFlag turns off stale aggregate-branch cleanup when --skip-cleanup is
-// set. The flag is a per-run override, so it wins over the configuration file; without it
-// the configured value stands, and cleanup stays enabled when nothing is configured.
+// applySkipCleanupFlag turns off stale branch cleanup when --skip-cleanup is set.
+// The flag is a per-run override, so it wins over the configuration file; without it the
+// configured value stands, and cleanup stays enabled when nothing is configured at all.
 func applySkipCleanupFlag(cmd *cobra.Command, settings *entities.Settings) {
 	skipCleanup, _ := cmd.Flags().GetBool("skip-cleanup")
 	if !skipCleanup {
@@ -25,89 +27,137 @@ func applySkipCleanupFlag(cmd *cobra.Command, settings *entities.Settings) {
 	logger.Info("Stale branch cleanup is disabled for this run by --skip-cleanup")
 }
 
-// downloadDefaultConfig fetches and decodes the default autoupdate configuration.
-func downloadDefaultConfig() (*entities.Settings, error) {
-	data, err := downloadHelpers.DownloadFile(entities.DefaultConfigURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to download default config: %w", err)
-	}
-	cfg, err := entities.DecodeSettings(data, false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode default config: %w", err)
-	}
-	return cfg, nil
-}
-
-// resolveConfigPath decides which configuration file to read: an explicitly supplied path wins,
-// otherwise the operator's home directory is searched first and on its own.
+// resolveOperatorConfigPath decides which file holds the operator's configuration: the one
+// named with --config, or the one in their home directory.
 //
-// The wider search that follows looks in the working directory before the home one, and
-// autoupdate is run against a local repository as `autoupdate .` -- with that repository as the
-// working directory. A target repository may carry its own `.autoupdate.yaml`, which shares this
-// file name but not this schema: it is a `skip`/`reason` opt-out (entities.RepoConfig), not the
-// global settings. Finding it here loads an opt-out marker as the whole configuration -- no
-// projects, no updaters, no tokens -- and the run then continues on downloaded defaults rather
-// than reporting that it read the wrong file.
+// An empty path with a nil error means the operator keeps no configuration, and that is no
+// longer an error: the built-in defaults are the base of every run, so there is nothing
+// left to fall back to.
 //
-// Split out from findReadAndValidateConfig so this decision can be tested on its own: the rest
-// of that function reads the file and reaches the network for the default config.
-func resolveConfigPath(configPath string) (string, error) {
+// The working directory is deliberately not searched. AutoUpdate runs against a local
+// repository as `autoupdate .`, with that repository as the working directory, and a target
+// repository may carry its own `.autoupdate.yaml` -- same file name, narrower schema.
+// Reading it as the operator's configuration substitutes a project's settings for an
+// operator's: it would be decoded strictly although a project file is allowed to be
+// partial, its `providers` and credential keys would be honoured where the project layer
+// bans them, and no providers, updaters or tokens would come out the other side.
+func resolveOperatorConfigPath(configPath string) string {
 	if configPath != "" {
-		return configPath, nil
+		return configPath
 	}
+
+	logger.Debug("No config file specified, searching the operator's home directory")
 
 	path, err := configHelpers.FindGlobalConfigFile("autoupdate")
-	if err == nil {
-		return path, nil
-	}
-
-	// Kept so an operator who holds no config in their home directory sees no change: they have
-	// no operator-level settings to lose.
-	path, err = configHelpers.FindConfigFile("autoupdate")
 	if err != nil {
-		return "", fmt.Errorf(
-			"no config file found: %w\nSpecify one with --config or create autoupdate.yaml",
+		logger.Infof(
+			"No configuration found in the home directory (%v); running on AutoUpdate's "+
+				"built-in defaults. Name your own with --config if you keep it elsewhere",
 			err,
 		)
+		return ""
 	}
 
-	return path, nil
+	logger.Infof("Using config file: %s", path)
+
+	return path
 }
 
-// findReadAndValidateConfig finds, reads, validates the config file,
-// and merges updater defaults from the remote default config.
-func findReadAndValidateConfig(configPath string) (*entities.Settings, error) {
-	configPath, err := resolveConfigPath(configPath)
+// configLoader assembles the configuration layers and folds them.
+//
+// fetch is a field rather than a direct call so that a test can supply an offline one.
+// Everything below it takes bytes, so the layering itself is testable without a network at
+// all -- which the old shape was not.
+type configLoader struct {
+	fetch func(url string) ([]byte, error)
+}
+
+// newConfigLoader returns the loader the application uses.
+func newConfigLoader() configLoader {
+	return configLoader{fetch: downloadHelpers.DownloadFile}
+}
+
+// layers returns the three operator-facing configuration layers, in override order.
+//
+// The target repository's own `.autoupdate.yaml` is the fourth and is not here: in `run`
+// mode it is fetched per repository over the provider API, and in local mode it is read
+// from the repository on disk.
+func (l configLoader) layers(configPath string) ([]entities.ConfigLayer, error) {
+	//nolint:exhaustruct // each layer sets only the fields that distinguish it
+	layers := []entities.ConfigLayer{
+		{
+			Name:   entities.LayerBuiltInDefaults,
+			Data:   configs.Default,
+			Scope:  entities.ScopeRestricted,
+			Strict: true,
+		},
+	}
+
+	// The published defaults are the same document served from `main`, so a change reaches
+	// an installed binary without a release. They are restricted and optional: bytes
+	// fetched over the network have no business naming a token, a provider or a branch
+	// prefix, and an unreachable GitHub must not stop a run.
+	if data, err := l.fetch(entities.DefaultConfigURL); err == nil {
+		//nolint:exhaustruct // Strict stays false: `main` may be newer than this binary
+		layers = append(layers, entities.ConfigLayer{
+			Name:     entities.LayerPublishedDefaults,
+			Origin:   entities.DefaultConfigURL,
+			Data:     data,
+			Scope:    entities.ScopeRestricted,
+			Optional: true,
+		})
+	} else {
+		logger.Debugf(
+			"Could not fetch the published defaults (%v); running on the built-in ones", err,
+		)
+	}
+
+	operatorConfigPath := resolveOperatorConfigPath(configPath)
+	if operatorConfigPath == "" {
+		return layers, nil
+	}
+
+	data, err := os.ReadFile(operatorConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to read the %s (%s): %w", entities.LayerOperatorConfig, operatorConfigPath, err,
+		)
+	}
+
+	//nolint:exhaustruct // Optional stays false: a file the operator named must be read
+	layers = append(layers, entities.ConfigLayer{
+		Name:   entities.LayerOperatorConfig,
+		Origin: operatorConfigPath,
+		Data:   data,
+		Scope:  entities.ScopeOperator,
+		Strict: true,
+	})
+
+	return layers, nil
+}
+
+// resolve folds the operator-facing layers, resolves the secrets and validates the result.
+func (l configLoader) resolve(configPath string, batch bool) (*entities.Settings, error) {
+	layers, err := l.layers(configPath)
 	if err != nil {
 		return nil, err
 	}
 
-	logger.Infof("Using config file: %s", configPath)
-
-	settings, err := entities.NewSettings(configPath)
+	settings, err := entities.ResolveSettings(layers)
 	if err != nil {
 		return nil, err
 	}
 
-	defaultConfig, defaultErr := downloadDefaultConfig()
-	if defaultErr != nil {
-		logger.Warnf("Could not download default config: %v", defaultErr)
-	}
-
-	switch {
-	case settings.Updaters == nil && defaultErr != nil:
-		logger.Warn(
-			"Missing updaters key and could not download defaults; all updaters will run with zero-value config",
-		)
-		settings.Updaters = make(map[string]entities.UpdaterConfig)
-	case settings.Updaters == nil && defaultConfig != nil:
-		logger.Info("Missing updaters key, using the default configuration")
-		settings.Updaters = defaultConfig.Updaters
-	case defaultConfig != nil:
-		settings.Updaters = entities.MergeUpdatersConfig(
-			defaultConfig.Updaters, settings.Updaters,
-		)
+	if err = entities.ValidateSettings(settings, batch); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	return settings, nil
+}
+
+// findReadAndValidateConfig resolves the configuration a command runs on. batch selects the
+// validation rules: `autoupdate run` needs a configured provider to have anything to
+// discover, `autoupdate .` does not.
+func findReadAndValidateConfig(configPath string, batch bool) (*entities.Settings, error) {
+	return newConfigLoader().resolve(configPath, batch)
 }

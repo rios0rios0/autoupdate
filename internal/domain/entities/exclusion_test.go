@@ -263,3 +263,81 @@ func TestSettingsIsRepoExcluded(t *testing.T) {
 		assert.Equal(t, "x/y", pattern)
 	})
 }
+
+func TestExcludesSelf(t *testing.T) {
+	t.Parallel()
+
+	// filterRepositories runs these same predicates organization-wide, before any
+	// repository's own file has been read. This is the second pass the project layer
+	// earns -- and the only place a repository's own exclude_* keys can mean anything.
+	t.Run("should exclude a fork when the settings say so", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{ExcludeForks: true}
+		repo := entities.Repository{Organization: "org", Name: "repo", IsFork: true}
+
+		// when
+		excluded, rule := entities.ExcludesSelf(settings, repo)
+
+		// then
+		assert.True(t, excluded)
+		assert.Equal(t, "exclude_forks", rule)
+	})
+
+	t.Run("should exclude an archived repository when the settings say so", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{ExcludeArchived: true}
+		repo := entities.Repository{Organization: "org", Name: "repo", IsArchived: true}
+
+		// when
+		excluded, rule := entities.ExcludesSelf(settings, repo)
+
+		// then
+		assert.True(t, excluded)
+		assert.Equal(t, "exclude_archived", rule)
+	})
+
+	t.Run("should name the pattern that matched", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{ExcludeRepos: []string{"*/sandbox"}}
+		repo := entities.Repository{Organization: "org", Name: "sandbox"}
+
+		// when
+		excluded, rule := entities.ExcludesSelf(settings, repo)
+
+		// then
+		assert.True(t, excluded)
+		assert.Contains(t, rule, "*/sandbox")
+	})
+
+	t.Run("should not exclude a repository nothing matches", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		settings := &entities.Settings{ExcludeForks: true, ExcludeArchived: true}
+		repo := entities.Repository{Organization: "org", Name: "repo"}
+
+		// when
+		excluded, rule := entities.ExcludesSelf(settings, repo)
+
+		// then
+		assert.False(t, excluded)
+		assert.Empty(t, rule)
+	})
+
+	t.Run("should tolerate nil settings", func(t *testing.T) {
+		t.Parallel()
+
+		// when
+		excluded, rule := entities.ExcludesSelf(nil, entities.Repository{Name: "repo"})
+
+		// then
+		assert.False(t, excluded)
+		assert.Empty(t, rule)
+	})
+}

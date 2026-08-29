@@ -27,16 +27,18 @@ func RegisterProviders(container *dig.Container) error {
 	return nil
 }
 
-// NewControllers aggregates all controllers into a slice for the AppInternal.
+// NewControllers aggregates the controllers that become subcommands.
+//
+// LocalController is not among them: it backs the root command's positional-path form and
+// is injected there directly, so registering it here would recreate the `local` subcommand
+// this release removed.
 func NewControllers(
 	runController *RunController,
-	localController *LocalController,
 	selfUpdateController *SelfUpdateController,
 	versionController *VersionController,
 ) *[]entities.Controller {
 	return &[]entities.Controller{
 		runController,
-		localController,
 		selfUpdateController,
 		versionController,
 	}

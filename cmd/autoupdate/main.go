@@ -14,7 +14,6 @@ import (
 var version = "dev"
 
 func buildRootCommand(localController *controllers.LocalController) *cobra.Command {
-	bind := localController.GetBind()
 	//nolint:exhaustruct // Minimal Command initialization with required fields only
 	cmd := &cobra.Command{
 		Use:   "autoupdate [path]",
@@ -27,7 +26,7 @@ and creates Pull Requests to upgrade them.
 Supports GitHub, GitLab, and Azure DevOps as Git hosting providers.
 
 Usage modes:
-  autoupdate .              Update the current local repository (standalone mode)
+  autoupdate .              Update the current local repository
   autoupdate /path/to/repo  Update a specific local repository
   autoupdate run            Batch mode using a config file (cronjob)`,
 		Args: cobra.MaximumNArgs(1),
@@ -52,11 +51,14 @@ Usage modes:
 	cmd.PersistentFlags().Bool("skip-cleanup", false,
 		"Keep the dated branches from previous runs instead of deleting them and closing their PRs")
 
-	_ = bind // suppress unused warning
 	return cmd
 }
 
-func addSubcommands(rootCmd *cobra.Command, appContext *internal.AppInternal) {
+func addSubcommands(
+	rootCmd *cobra.Command,
+	appContext *internal.AppInternal,
+	localController *controllers.LocalController,
+) {
 	for _, controller := range appContext.GetControllers() {
 		bind := controller.GetBind()
 		ctrl := controller // capture for closure
@@ -80,6 +82,24 @@ func addSubcommands(rootCmd *cobra.Command, appContext *internal.AppInternal) {
 
 		rootCmd.AddCommand(subCmd)
 	}
+
+	// `local` is gone, but leaving nothing in its place is worse than a deprecation notice:
+	// the bare word would fall through to the root command's positional argument and be
+	// treated as a path, so `autoupdate local` would report that ./local does not exist
+	// rather than that the command was removed.
+	//nolint:exhaustruct // Minimal Command initialization with required fields only
+	localCmd := &cobra.Command{
+		Use:    "local",
+		Short:  "Deprecated: use 'autoupdate [path]' instead",
+		Hidden: true,
+		Args:   cobra.MaximumNArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			logger.Warn("'local' was removed in 1.0.0, use 'autoupdate [path]' instead")
+			localController.Execute(cmd, args)
+		},
+	}
+
+	rootCmd.AddCommand(localCmd)
 }
 
 func main() {
@@ -96,12 +116,11 @@ func main() {
 	commands.AutoupdateVersion = version //nolint:reassign // intentional cross-package assignment of build-time version
 
 	// Inject controllers via DIG
-	localController := injectLocalController()
+	appContext, localController := injectApp()
 	cobraRoot := buildRootCommand(localController)
 
 	// Add all subcommands
-	appContext := injectAppContext()
-	addSubcommands(cobraRoot, appContext)
+	addSubcommands(cobraRoot, appContext, localController)
 
 	if err := cobraRoot.Execute(); err != nil {
 		logger.Fatalf("Error executing 'autoupdate': %s", err)

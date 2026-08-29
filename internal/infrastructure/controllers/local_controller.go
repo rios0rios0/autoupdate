@@ -7,10 +7,14 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/commands"
-	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 )
 
-// LocalController handles the root command with a path argument (standalone local mode).
+// LocalController backs the root command's positional-path form: `autoupdate .` and
+// `autoupdate /path/to/repo`.
+//
+// It deliberately does not implement entities.Controller. That interface is what
+// addSubcommands turns into a subcommand, and there is no `local` subcommand any more --
+// registering one would give the same behaviour two spellings.
 type LocalController struct {
 	command commands.Local
 }
@@ -18,16 +22,6 @@ type LocalController struct {
 // NewLocalController creates a new LocalController.
 func NewLocalController(command commands.Local) *LocalController {
 	return &LocalController{command: command}
-}
-
-// GetBind returns the Cobra command metadata for the local controller.
-func (it *LocalController) GetBind() entities.ControllerBind {
-	return entities.ControllerBind{
-		Use:   "local",
-		Short: "Update dependencies in a local repository",
-		Long: `Update dependencies in a local Git repository.
-Detects the project type, upgrades dependencies, and creates a pull request.`,
-	}
 }
 
 // Execute runs the local update mode.
@@ -44,7 +38,7 @@ func (it *LocalController) Execute(cmd *cobra.Command, args []string) {
 		repoDir = args[0]
 	}
 
-	settings, configErr := findReadAndValidateConfig(configPath)
+	settings, configErr := findReadAndValidateConfig(configPath, false)
 	if configErr != nil {
 		logger.Debugf("No usable autoupdate config for local mode: %v", configErr)
 		settings = nil

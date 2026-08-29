@@ -1,0 +1,101 @@
+# Example AutoUpdate configuration.
+#
+# Copy this to `~/.autoupdate.yaml` (or `~/.config/autoupdate.yaml`) and fill in the parts
+# you need. This file is an example only: nothing reads it, and it is neither embedded in
+# the binary nor fetched at runtime.
+#
+# Configuration is layered. Each layer overrides only the keys it declares:
+#
+#   1. built-in defaults      compiled into the binary (configs/autoupdate.yaml)
+#   2. published defaults     the same file fetched from `main`, best effort
+#   3. your configuration     this file -- `--config <path>`, else ~/ or ~/.config/
+#   4. the target repository   a `.autoupdate.yaml` in the repository being updated
+#
+# Layer 3 is the only one that may set credentials, `providers` or
+# `aggregate_branch_prefix`. A target repository's file is a set of overrides, never a
+# stand-in for yours, so those keys are ignored (with a warning) when they arrive from
+# layer 1, 2 or 4.
+
+# ---------------------------------------------------------------------------
+# Providers and credentials -- layer 3 only
+# ---------------------------------------------------------------------------
+
+# Where to discover repositories. Tokens can be set inline, via an environment variable
+# reference (${VAR}), or as a path to a file containing the token.
+providers:
+  - type: 'github'
+    token: '${GITHUB_TOKEN}'
+    organizations:
+      - 'my-org'
+
+  # - type: 'azuredevops'
+  #   token: '${AZURE_DEVOPS_PAT}'
+  #   organizations:
+  #     - 'https://dev.azure.com/MyOrg'
+
+  # - type: 'gitlab'
+  #   token: '${GITLAB_TOKEN}'
+  #   organizations:
+  #     - 'my-group'
+
+# (optional) tokens used when opening the pull requests, if they differ from the
+# discovery tokens above.
+#github_access_token: '${GITHUB_TOKEN}'
+#gitlab_access_token: '${GITLAB_TOKEN}'
+#azure_devops_access_token: '${AZURE_DEVOPS_PAT}'
+
+# (optional) GPG key used to sign the commits.
+#gpg_key_path: '/home/user/.gnupg/autoupdate.asc'
+#gpg_key_passphrase: '/home/user/.gnupg/autoupdate-passphrase.txt'
+
+# ---------------------------------------------------------------------------
+# Behaviour -- settable in any layer unless noted
+# ---------------------------------------------------------------------------
+
+# (optional) delete the dated branches left over by earlier runs, closing any pull request
+# attached to them, before creating the branch for the current run. The aggregate branch
+# carries the run date, so without this an unattended daily run leaves one abandoned
+# branch per day for as long as nobody merges. Enabled by default; `--skip-cleanup`
+# disables it for a single run.
+#cleanup_stale_branches: false
+
+# (optional, layer 3 only) prefix of the consolidated branch each run creates; the run
+# date is appended to it. The same prefix decides which branches the cleanup above
+# DELETES, which is why it is yours alone to set and why it is validated: it must name a
+# branch, must contain a '/', and must not stop at one -- 'chore/' would match every
+# 'chore/*' branch in the repository, including AutoBump's release branches.
+#aggregate_branch_prefix: 'chore/autoupdate-'
+
+# (optional, layer 3 only) number of repositories processed in parallel within an
+# organization. Repository processing is I/O-bound (clone + remote API calls), so a small
+# fan-out shortens large-organization runs significantly. Omit it (or set 0) for the
+# built-in default of 4; set 1 to process repositories sequentially. The --concurrency
+# flag overrides this value. A target repository may state it, but the fan-out is decided
+# before that file is read, so it is reported and ignored there.
+#concurrency: 4
+
+# (optional) skip forked or archived repositories.
+#exclude_forks: true
+#exclude_archived: true
+
+# (optional) skip specific repositories. Patterns are right-anchored against <org>/<repo>
+# (or <org>/<project>/<repo> on Azure DevOps) and support `path.Match`-style globs
+# (`*`, `?`, `[...]`) that do not cross "/". A bare name matches the trailing segment.
+# A target repository may use this to exclude itself.
+#exclude_repos:
+#  - 'my-org/legacy-monorepo'
+#  - '*/sandbox'
+
+# ---------------------------------------------------------------------------
+# Updaters
+# ---------------------------------------------------------------------------
+
+# All updaters are enabled by default with auto_complete disabled. Only the fields you
+# name are overridden; the rest keep the built-in defaults, and the whole section can be
+# omitted.
+#updaters:
+#  golang:
+#    enabled: false
+#  javascript:
+#    auto_complete: true
+#    target_branch: 'develop'

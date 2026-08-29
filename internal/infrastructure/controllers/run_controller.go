@@ -47,7 +47,7 @@ func (it *RunController) Execute(cmd *cobra.Command, _ []string) {
 	updaterFilter, _ := cmd.Flags().GetString("updater")
 	concurrency, _ := cmd.Flags().GetInt("concurrency")
 
-	settings, err := findReadAndValidateConfig(configPath)
+	settings, err := findReadAndValidateConfig(configPath, true)
 	if err != nil {
 		logger.Errorf("failed to load config: %v", err)
 		return
