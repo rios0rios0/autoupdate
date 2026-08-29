@@ -1,4 +1,0 @@
-kind: 'Removed'
-body: 'removed the `local` subcommand. `autoupdate .` and `autoupdate /path` are the single-repository form, and `autoupdate` with no arguments still prints help. `autoupdate local` is kept hidden and deprecated rather than deleted outright: without it the bare word would fall through to the root command''s positional argument and be read as a path, so the error would say `./local` does not exist rather than that the command is gone.'
-breaking: true
-time: '2026-08-29T03:45:48.700683544Z'

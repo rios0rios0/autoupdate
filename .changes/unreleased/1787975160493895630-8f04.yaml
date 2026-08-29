@@ -1,4 +1,0 @@
-kind: 'Changed'
-body: 'started reporting unknown keys in the operator''s configuration instead of ignoring them. The file used to be decoded leniently, so a typo was silent. Worth knowing if you copied a configuration across from AutoBump: it tags `gitlab_ci_job_token` as a real key while AutoUpdate reads that value from the environment and does not accept it in the file at all.'
-breaking: true
-time: '2026-08-29T03:46:00.493845509Z'
