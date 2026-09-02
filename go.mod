@@ -1,6 +1,6 @@
 module github.com/rios0rios0/autoupdate
 
-go 1.27.0
+go 1.27.1
 
 require (
 	github.com/go-git/go-git/v5 v5.19.2
@@ -8,7 +8,7 @@ require (
 	github.com/rios0rios0/cliforge v0.4.2
 	github.com/rios0rios0/gitforge v1.0.1-0.20260827000225-8c05a4730240
 	github.com/rios0rios0/langforge v1.1.2
-	github.com/rios0rios0/testkit v0.3.1
+	github.com/rios0rios0/testkit v0.3.2
 	github.com/sirupsen/logrus v1.10.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
