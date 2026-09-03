@@ -94,6 +94,7 @@ jobs:
 			// when
 			upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 				t.Context(), root, nil, testCase.latest,
+				true,
 			)
 
 			// then
@@ -134,6 +135,7 @@ python-version: '3.11'
 		// when
 		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, nil, latestVersions,
+			true,
 		)
 
 		// then
@@ -172,6 +174,7 @@ python-version: '3.11'
 		// when
 		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, nil, latestVersions,
+			true,
 		)
 
 		// then
@@ -202,6 +205,7 @@ python-version: '3.11'
 		// when
 		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, nil, latestVersions,
+			true,
 		)
 
 		// then
@@ -233,6 +237,7 @@ python-version: '3.11'
 		// when
 		upgrades, _ := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, nil, latestVersions,
+			true,
 		)
 
 		// then
@@ -269,6 +274,7 @@ python-version: '3.11'
 		// when
 		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, nil, latestVersions,
+			true,
 		)
 
 		// then
@@ -304,6 +310,7 @@ python-version: '3.11'
 			// when
 			upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 				t.Context(), root, nil, latestVersions,
+				true,
 			)
 
 			// then
@@ -342,6 +349,7 @@ python-version: '3.11'
 		// when
 		upgrades, _ := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, nil, latestVersions,
+			true,
 		)
 
 		// then each task is upgraded under its own language, and no Node.js
@@ -381,6 +389,7 @@ python-version: '3.11'
 		// when
 		upgrades, _ := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, nil, latestVersions,
+			true,
 		)
 
 		// then

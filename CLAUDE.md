@@ -278,13 +278,23 @@ repository, so an incompatible major arrives as a red check on a branch rather t
 broken main. That is a more accurate signal than a version-number heuristic, which cannot
 tell a rename from a rewrite.
 
-Only `java` and `golang` read it, from `UpdateOptions.AllowMajorUpdates`. The other eight
-accept the key through the config layers and then ignore it, because they delegate to a
-native tool with its own policy -- Dart's `pub upgrade --major-versions` crosses majors
-whatever this says. Turning it off does **not** hold those ecosystems back, and the
-user-facing docs say so; wiring the rest is open work.
+Seven updaters read it: `java` and `golang` through the scripts they emit, and `dart`,
+`terraform`, `pipeline`, `csharp` and `ruby` through `support.AcceptsUpgrade`, which is
+`IsNewerVersion` plus the major question so the two are asked together at every call site
+rather than each ecosystem re-deriving the second one.
 
-The two that do act on it:
+Three do not, and the reasons differ. `javascript`, `python` and the gem half of `ruby`
+delegate to a package manager that already resolves inside the declared ranges, so there is
+nothing to gate -- making them *cross* majors would be a new capability (`--latest`,
+`--unconstrained`), not a wiring job. `dockerfile` refuses every major unconditionally in
+`registry.go`, so honouring the key there would mean *relaxing* a rule that predates it;
+that is a behaviour decision rather than a gap, and is left alone deliberately.
+
+Dart was the one that actively contradicted the key: `pub upgrade --major-versions` is
+precisely a request to raise constraints across majors, and it was passed unconditionally,
+so a repository setting `allow_major_updates: false` had its constraints raised anyway.
+
+How the two script-emitting ones act on it:
 `java` passes it through as `-DallowMajorUpdates` on both versions-maven-plugin goals, and
 `golang` emits `support.GoMajorGuardScript()` **only when it is false** -- an unused bash
 function in a generated script is a thing a reader has to rule out. The allowed branch is

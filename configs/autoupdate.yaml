@@ -28,9 +28,10 @@
 # Pre-releases are excluded regardless of this setting: taking a beta is how CVEs get
 # reintroduced, not remediated.
 #
-# Honoured by the `java` and `golang` updaters. The others upgrade with their native tool's
-# default behaviour and are unaffected -- Dart runs `pub upgrade --major-versions`, which
-# crosses majors whatever this says. Turning it off does not hold those back.
+# Honoured by java, golang, dart, terraform, pipeline, csharp and ruby (its .ruby-version
+# pin). javascript, python and the gem half of ruby delegate to a package manager that
+# already resolves inside the declared ranges, so there is nothing for this to gate there,
+# and dockerfile refuses majors unconditionally and does not read it yet.
 #allow_major_updates: false
 
 # (optional) number of repositories processed in parallel within an organization.

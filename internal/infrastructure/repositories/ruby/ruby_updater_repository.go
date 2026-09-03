@@ -90,7 +90,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		logger.Infof("[ruby] Latest stable Ruby version: %s", latestRbVersion)
 	}
 
-	vCtx := resolveVersionContext(ctx, provider, repo, latestRbVersion)
+	vCtx := resolveVersionContext(ctx, provider, repo, latestRbVersion, opts.AllowMajorUpdates)
 
 	// Check if PR already exists
 	exists, prCheckErr := provider.PullRequestExists(ctx, repo, vCtx.BranchName)
@@ -218,12 +218,12 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	_ repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[ruby] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
 	// resolveLocalVersionContext (from local.go) handles fetching + comparison
-	vCtx := resolveLocalVersionContext(ctx, repoDir)
+	vCtx := resolveLocalVersionContext(ctx, repoDir, opts.AllowMajorUpdates)
 
 	script := buildBatchRubyScript()
 	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
@@ -350,6 +350,7 @@ func resolveVersionContext(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	latestRbVersion string,
+	allowMajorUpdates bool,
 ) *versionContext {
 	needsVersionUpgrade := false
 
@@ -357,7 +358,9 @@ func resolveVersionContext(
 		content, err := provider.GetFileContent(ctx, repo, ".ruby-version")
 		if err == nil {
 			currentVersion := parseRubyVersionFile(content)
-			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestRbVersion)
+			needsVersionUpgrade = support.AcceptsUpgrade(
+				currentVersion, latestRbVersion, allowMajorUpdates,
+			)
 			logger.Infof(
 				"[ruby] Current .ruby-version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,

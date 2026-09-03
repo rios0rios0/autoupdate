@@ -28,8 +28,9 @@ func ResolveVersionContext(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	latestVersion string,
+	allowMajorUpdates bool,
 ) *versionContext {
-	return resolveVersionContext(ctx, provider, repo, latestVersion)
+	return resolveVersionContext(ctx, provider, repo, latestVersion, allowMajorUpdates)
 }
 
 // VersionContext is exported for testing.

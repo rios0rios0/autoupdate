@@ -74,8 +74,8 @@ func ExtractRepoName(source string) string {
 }
 
 // IsNewerVersion is exported for testing.
-func IsNewerVersion(current, newVersion string) bool {
-	return isNewerVersion(current, newVersion)
+func IsNewerVersion(current, newVersion string, allowMajorUpdates bool) bool {
+	return isNewerVersion(current, newVersion, allowMajorUpdates)
 }
 
 // NormalizeVersion is exported for testing.
@@ -191,8 +191,9 @@ func DetermineUpgrades(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	allDeps []DepWithContent,
+	allowMajorUpdates bool,
 ) []UpgradeTask {
-	return u.determineUpgrades(ctx, provider, repo, allDeps)
+	return u.determineUpgrades(ctx, provider, repo, allDeps, allowMajorUpdates)
 }
 
 // CreateUpgradePR is exported for testing.

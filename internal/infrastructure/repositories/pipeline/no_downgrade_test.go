@@ -38,7 +38,7 @@ func scanPipeline(t *testing.T, pipeline string, latest map[string]string) []pip
 	require.NoError(t, os.WriteFile(path, []byte(pipeline), 0o600))
 	provider := repositorydoubles.NewSpyProviderRepositoryBuilder().BuildSpy()
 
-	upgrades, _ := pipelineUpdater.LocalScanAndDetermineUpgrades(t.Context(), repoDir, provider, latest)
+	upgrades, _ := pipelineUpdater.LocalScanAndDetermineUpgrades(t.Context(), repoDir, provider, latest, true)
 
 	return upgrades
 }

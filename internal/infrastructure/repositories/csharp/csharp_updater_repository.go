@@ -95,7 +95,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		logger.Infof("[csharp] Latest stable .NET SDK version: %s", latestDotnetVersion)
 	}
 
-	vCtx := resolveVersionContext(ctx, provider, repo, latestDotnetVersion)
+	vCtx := resolveVersionContext(ctx, provider, repo, latestDotnetVersion, opts.AllowMajorUpdates)
 
 	// Check if PR already exists
 	exists, prCheckErr := provider.PullRequestExists(ctx, repo, vCtx.BranchName)
@@ -229,12 +229,12 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	_ repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[csharp] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
 	// resolveLocalVersionContext handles fetching + comparison
-	vCtx := resolveLocalVersionContext(ctx, repoDir)
+	vCtx := resolveLocalVersionContext(ctx, repoDir, opts.AllowMajorUpdates)
 
 	dotnetBinary, binErr := findDotnetBinary()
 	if binErr != nil {
@@ -371,6 +371,7 @@ func resolveVersionContext(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	latestDotnetVersion string,
+	allowMajorUpdates bool,
 ) *versionContext {
 	needsVersionUpgrade := false
 
@@ -378,7 +379,9 @@ func resolveVersionContext(
 		content, err := provider.GetFileContent(ctx, repo, "global.json")
 		if err == nil {
 			currentVersion := parseGlobalJSON(content)
-			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestDotnetVersion)
+			needsVersionUpgrade = support.AcceptsUpgrade(
+				currentVersion, latestDotnetVersion, allowMajorUpdates,
+			)
 			logger.Infof(
 				"[csharp] Current global.json SDK version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -400,7 +403,9 @@ func resolveVersionContext(
 
 // resolveLocalVersionContext fetches the latest .NET SDK version and compares
 // it against the local global.json to build a versionContext.
-func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionContext {
+func resolveLocalVersionContext(
+	ctx context.Context, repoDir string, allowMajorUpdates bool,
+) *versionContext {
 	fetcher := NewHTTPDotnetVersionFetcher(&http.Client{Timeout: dotnetVersionTimeout})
 	latestDotnetVersion, err := fetcher.FetchLatestVersion(ctx)
 	if err != nil {
@@ -415,7 +420,9 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionCon
 		globalJSONContent, readErr := os.ReadFile(filepath.Join(repoDir, "global.json"))
 		if readErr == nil {
 			currentVersion := parseGlobalJSON(string(globalJSONContent))
-			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestDotnetVersion)
+			needsVersionUpgrade = support.AcceptsUpgrade(
+				currentVersion, latestDotnetVersion, allowMajorUpdates,
+			)
 			logger.Infof(
 				"[csharp] Current global.json SDK version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,

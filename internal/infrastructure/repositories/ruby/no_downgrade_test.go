@@ -98,7 +98,7 @@ func TestRubyVersionContextIsNeverADowngrade(t *testing.T) {
 		provider := repositorydoubles.SpyProviderWithFile(".ruby-version", "3.5.0\n")
 
 		// when
-		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, downgradeRepo, "3.4.1")
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, downgradeRepo, "3.4.1", true)
 
 		// then
 		assert.False(t, vCtx.NeedsVersionUpgrade)
@@ -112,7 +112,7 @@ func TestRubyVersionContextIsNeverADowngrade(t *testing.T) {
 		provider := repositorydoubles.SpyProviderWithFile(".ruby-version", "3.2.2\n")
 
 		// when
-		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, downgradeRepo, "3.4.1")
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, downgradeRepo, "3.4.1", true)
 
 		// then
 		assert.True(t, vCtx.NeedsVersionUpgrade)

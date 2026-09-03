@@ -137,7 +137,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6")
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -159,7 +159,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6")
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -177,7 +177,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6")
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -198,7 +198,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "")
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "", true)
 
 		// then
 		require.NotNil(t, vCtx)

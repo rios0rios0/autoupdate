@@ -174,8 +174,11 @@ func LocalScanAndDetermineUpgrades(
 	repoDir string,
 	provider repositories.ProviderRepository,
 	latestVersions map[string]string,
+	allowMajorUpdates bool,
 ) ([]UpgradeTask, map[string]string) {
-	return localScanAndDetermineUpgrades(ctx, repoDir, provider, latestVersions)
+	return localScanAndDetermineUpgrades(
+		ctx, repoDir, provider, latestVersions, allowMajorUpdates,
+	)
 }
 
 // CreateUpgradePR is exported for testing.

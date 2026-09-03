@@ -24,6 +24,8 @@ type LocalUpgradeOptions struct {
 	AuthToken    string
 	ProviderName string                    // git provider name (e.g. "azuredevops", "github", "gitlab")
 	PushAuth     gitlocal.PushAuthResolver // resolves auth methods for git push
+	// AllowMajorUpdates is resolved by entities.MajorUpdatesAllowed.
+	AllowMajorUpdates bool
 }
 
 // LocalResult holds the outcome of a local upgrade operation.
@@ -160,6 +162,8 @@ func runLanguageUpgradeScript(
 		Changelog:    changelog,
 		AuthToken:    opts.AuthToken,
 		ProviderName: opts.ProviderName,
+
+		AllowMajorUpdates: opts.AllowMajorUpdates,
 	}
 
 	return cmdrunner.RunScript(ctx, localCmdRunner, cmdrunner.ScriptRun{
@@ -182,6 +186,10 @@ type localUpgradeParams struct {
 	Changelog    support.StagedChangelog
 	AuthToken    string
 	ProviderName string
+	// AllowMajorUpdates decides whether pub is asked for --major-versions.
+	// The zero value is the restrictive case; resolve it with
+	// entities.MajorUpdatesAllowed at the call site.
+	AllowMajorUpdates bool
 }
 
 // buildLocalUpgradeScript builds a bash script that performs only the pub
@@ -189,13 +197,14 @@ type localUpgradeParams struct {
 // staging, committing, pushing) are handled by LocalGitContext, and the .fvmrc
 // pin is rewritten in Go.
 func buildLocalUpgradeScript(params localUpgradeParams) string {
+	allowMajorUpdates := params.AllowMajorUpdates
 	var sb strings.Builder
 
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 
 	writeLocalAuth(&sb, params)
-	writeDartUpgradeCommands(&sb)
+	writeDartUpgradeCommands(&sb, allowMajorUpdates)
 	sb.WriteString(support.ChangelogUpdateScript())
 
 	return sb.String()

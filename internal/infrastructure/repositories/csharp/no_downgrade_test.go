@@ -82,7 +82,7 @@ func TestDotnetVersionContextIsNeverADowngrade(t *testing.T) {
 			provider := repositorydoubles.SpyProviderWithFile("global.json", globalJSONWith(testCase.pinned))
 
 			// when
-			vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, dotnetDowngradeRepo, "8.0.404")
+			vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, dotnetDowngradeRepo, "8.0.404", true)
 
 			// then
 			assert.Equal(t, testCase.want, vCtx.NeedsVersionUpgrade)

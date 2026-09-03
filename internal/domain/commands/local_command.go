@@ -379,6 +379,8 @@ func runDartLocalUpgrade(
 		AuthToken:    token,
 		ProviderName: providerType,
 		PushAuth:     registry,
+
+		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 	})
 	if err != nil {
 		return nil, err
