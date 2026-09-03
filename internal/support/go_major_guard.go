@@ -37,7 +37,15 @@ package support
 //
 // It calls autoupdate_version_is_newer, so a caller must emit
 // VersionGuardScript() as well -- which the Go updater already does.
+// It is assembled from three fragments only to keep each function readable; the
+// emitted script is one unit and callers always get all of it.
 func GoMajorGuardScript() string {
+	return goModuleReaderScript() + goHoldMajorJumpsScript() + goReportUnheldScript()
+}
+
+// goModuleReaderScript emits the two pure readers the rest of the guard is built
+// on: one parses a go.mod, the other extracts a major.
+func goModuleReaderScript() string {
 	return `# autoupdate_go_module_versions <go.mod path>
 # Prints "path version" for every requirement, covering both the parenthesised
 # require block and single-line "require path version" forms. Trailing "// indirect"
@@ -67,7 +75,13 @@ autoupdate_go_module_versions() {
 autoupdate_go_major_of() {
     printf '%s' "$1" | sed -n 's/^v\([0-9][0-9]*\).*/\1/p'
 }
+`
+}
 
+// goHoldMajorJumpsScript emits the pass that puts back every requirement whose
+// major moved.
+func goHoldMajorJumpsScript() string {
+	return `
 # autoupdate_go_hold_major_jumps <go binary> <before snapshot> <go.mod path>
 # Puts back every requirement whose major version moved, leaving the rest of the
 # upgrade in place. A dependency that cannot be held is reported and the loop
@@ -114,7 +128,13 @@ autoupdate_go_hold_major_jumps() {
 
     autoupdate_go_report_unheld "$before_file" "$go_mod_path"
 }
+`
+}
 
+// goReportUnheldScript emits the reconciliation that runs afterwards, on the
+// go.mod that is actually going to be committed.
+func goReportUnheldScript() string {
+	return `
 # autoupdate_go_report_unheld <before snapshot> <go.mod path>
 # Re-reads go.mod after everything above has run and says what actually landed.
 #
@@ -168,6 +188,5 @@ autoupdate_go_report_unheld() {
 
     return "$unresolved"
 }
-
 `
 }
