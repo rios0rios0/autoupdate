@@ -296,17 +296,22 @@ major on its own. Each ecosystem needed a different one:
 | `javascript` (pnpm) | `pnpm update --latest` | `pnpm update` |
 | `javascript` (yarn) | `up '*'` / `upgrade --latest` | `yarn upgrade` |
 | `javascript` (npm) | `npm-check-updates -u` then install | `npm update` |
-| `ruby` (gems) | `bundle update` | `bundle update --minor` |
+| `ruby` (gems) | Gemfile widened, then `bundle update` | `bundle update --minor` |
 | `java` | `-DallowMajorUpdates=true` | `-DallowMajorUpdates=false` |
 
 Three of those deserve a note. **yarn** is decided at run time, because Berry replaced
 `upgrade` with `up` and only Classic understands `--latest`, and nothing on the Go side
 knows which is installed. **npm** has no built-in range-raiser at all, so `npm-check-updates`
 is fetched with `npx --yes` and a failure degrades to the plain `npm update` -- an offline
-runner gets a smaller upgrade rather than none. **ruby** is the one asymmetric case: bundler
-has no flag meaning "raise the Gemfile bounds", and rewriting a `~>` is a different act from
-resolving within it, so only the refusing direction is expressed -- `--minor` caps the bump
-that plain `bundle update` would otherwise take on an unconstrained gem.
+runner gets a smaller upgrade rather than none. **ruby** is the one that needs the manifest
+edited: bundler has no flag meaning "raise the Gemfile bounds", so `gem "rails", "~> 6.0"`
+would stay on 6.x for ever. `support.GemfileConstraintScript` converts the pessimistic
+operator to `>=`, keeping the floor the repository declared and dropping only the implicit
+ceiling, and runs *before* `bundle update` so the resolution sees the widened bounds. Exact
+pins and explicit `<` ceilings are left alone -- those are the repository saying no in as
+many words -- and only the `Gemfile` is touched, never a `.gemspec`, whose constraints
+describe what *consumers* must tolerate rather than what this application may resolve to.
+The refusing direction still uses bundler's own ceiling, `--minor`.
 
 **The refusal has to cross the Go/bash seam.** `csharp` and `ruby` decide in Go and rewrite
 the pin in bash, and the script's only gate is `autoupdate_version_is_newer`, which has no

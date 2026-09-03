@@ -359,6 +359,41 @@ func TestRubyGemMajorMode(t *testing.T) {
 		assert.NotContains(t, script, "--minor")
 	})
 
+	t.Run("should widen the Gemfile before resolving when allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- no bundler flag can raise the Gemfile's own bounds, so a
+		// `~> 6.0` would otherwise hold the gem on 6.x whatever the key says
+		var sb strings.Builder
+
+		// when
+		rbUpdater.WriteRubyUpgradeCommands(&sb, true)
+
+		// then -- and the widening has to precede the resolution, or the
+		// lockfile is resolved against the ceiling that was just removed
+		script := sb.String()
+		assert.Contains(t, script, "autoupdate_relax_gemfile_constraints Gemfile")
+		assert.Less(t,
+			strings.Index(script, "autoupdate_relax_gemfile_constraints Gemfile"),
+			strings.Index(script, "bundle update"),
+			"the Gemfile must be widened before bundle update runs")
+	})
+
+	t.Run("should not touch the Gemfile when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+
+		// when
+		rbUpdater.WriteRubyUpgradeCommands(&sb, false)
+
+		// then -- refusing is bundler's own ceiling, and needs no manifest edit
+		script := sb.String()
+		assert.NotContains(t, script, "autoupdate_relax_gemfile_constraints")
+		assert.Contains(t, script, "bundle update --minor")
+	})
+
 	t.Run("should cap bundler below a major when refused", func(t *testing.T) {
 		t.Parallel()
 

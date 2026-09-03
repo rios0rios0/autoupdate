@@ -520,9 +520,18 @@ func writeRubyUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 
 	// Update bundler and bundle update
 	sb.WriteString("# Update bundler and gem dependencies\n")
+	if allowMajorUpdates {
+		sb.WriteString(support.GemfileConstraintScript())
+	}
 	sb.WriteString("if [ -f \"Gemfile\" ]; then\n")
 	sb.WriteString("    echo \"Updating bundler...\"\n")
 	sb.WriteString("    gem update bundler 2>&1 || echo \"WARNING: gem update bundler had some errors\"\n\n")
+	if allowMajorUpdates {
+		// Before `bundle update`, so the resolution it runs already sees the
+		// widened bounds. Doing it after would leave the Gemfile edited and the
+		// lockfile resolved against the old ceiling, which is the worst of both.
+		sb.WriteString("    autoupdate_relax_gemfile_constraints Gemfile\n")
+	}
 	fmt.Fprintf(sb, "    echo \"Running bundle update%s...\"\n", bundleArgs)
 	fmt.Fprintf(sb,
 		"    bundle update%s 2>&1 || echo \"WARNING: bundle update had some errors\"\n",
