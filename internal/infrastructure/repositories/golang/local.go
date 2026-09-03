@@ -25,6 +25,9 @@ type LocalUpgradeOptions struct {
 	AuthToken    string
 	ProviderName string                    // git provider name (e.g. "azuredevops", "github", "gitlab")
 	PushAuth     gitlocal.PushAuthResolver // resolves auth methods for git push
+	// AllowMajorUpdates decides whether the major-version guard runs. Resolved by
+	// entities.MajorUpdatesAllowed, which defaults it to true.
+	AllowMajorUpdates bool
 }
 
 // LocalResult holds the outcome of a local upgrade operation.
@@ -217,6 +220,8 @@ func runLanguageUpgradeScript(
 		AuthToken:    opts.AuthToken,
 		ProviderName: opts.ProviderName,
 		HasConfigSH:  hasConfigSH,
+
+		AllowMajorUpdates: opts.AllowMajorUpdates,
 	}
 
 	script := buildLocalUpgradeScript(params)
@@ -266,6 +271,8 @@ type localUpgradeParams struct {
 	AuthToken    string
 	ProviderName string // git provider name (for credential setup)
 	HasConfigSH  bool   // whether the repo contains config.sh
+	// AllowMajorUpdates is carried through to writeGoUpgradeCommands.
+	AllowMajorUpdates bool
 }
 
 // buildLocalUpgradeScript builds a bash script that performs only the
@@ -291,7 +298,7 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	}
 
 	// Go upgrade commands (reuse existing)
-	writeGoUpgradeCommands(&sb)
+	writeGoUpgradeCommands(&sb, params.AllowMajorUpdates)
 
 	// NOTE: Dockerfile golang image tags are updated in Go (registry-verified)
 	// by updateDockerfileGolangTags after this script runs — never via a blind

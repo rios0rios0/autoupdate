@@ -66,8 +66,8 @@ func BuildUpgradeScript(params UpgradeParamsExported, repoDir string) string {
 }
 
 // BuildBatchJavaScript is exported for testing.
-func BuildBatchJavaScript(buildSys string) string {
-	return buildBatchJavaScript(buildSys)
+func BuildBatchJavaScript(buildSys string, allowMajorUpdates bool) string {
+	return buildBatchJavaScript(buildSys, allowMajorUpdates)
 }
 
 // WriteGitAuth is exported for testing.

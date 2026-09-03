@@ -16,6 +16,19 @@
 # attached to them, before creating the branch for the current run. Enabled by default.
 #cleanup_stale_branches: false
 
+# (optional) let an upgrade cross a major version boundary. Enabled by default.
+#
+# On by default because a dependency held back is a dependency whose CVEs are never
+# remediated, and the fix for a serious one is often only in the next major. What catches a
+# breaking change instead is the pipeline: the pull request builds, tests and lints the
+# repository, so an incompatible major arrives as a red check on a branch rather than as a
+# broken main -- a louder and more accurate signal than a version-number heuristic, which
+# cannot tell a rename from a rewrite.
+#
+# Pre-releases are excluded regardless of this setting: taking a beta is how CVEs get
+# reintroduced, not remediated.
+#allow_major_updates: false
+
 # (optional) number of repositories processed in parallel within an organization.
 # Omit it (or set 0) for the built-in default of 4; 1 processes them sequentially.
 #concurrency: 4

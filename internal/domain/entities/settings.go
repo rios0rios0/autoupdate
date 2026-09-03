@@ -38,6 +38,24 @@ type Settings struct {
 	// earlier runs are deleted, and their pull requests closed, before the branch
 	// for the current run is created. Nil (not set in config) defaults to true.
 	CleanupStaleBranches *bool `yaml:"cleanup_stale_branches"`
+	// AllowMajorUpdates controls whether an upgrade may cross a major version
+	// boundary. Nil (not set in config) defaults to **true**.
+	//
+	// On by default because a dependency held back is a dependency whose CVEs are
+	// never remediated, and the fix for a serious one is often only in the next
+	// major -- Spring Framework 6.2.x had six unpatched advisories whose only
+	// remedy was 7.0.x, and no 6.2 release ever carried it. Refusing the major
+	// there does not avoid risk, it accumulates it silently.
+	//
+	// What catches a breaking change instead is the pipeline: the pull request
+	// this opens builds, tests and lints the repository, so an incompatible major
+	// arrives as a red check on a branch rather than as a broken main. That is a
+	// louder and more accurate signal than a version-number heuristic, which
+	// cannot tell a rename from a rewrite.
+	//
+	// Set it to false for a repository that must not move majors unattended; the
+	// guard then holds each one at its previous version and reports it.
+	AllowMajorUpdates *bool `yaml:"allow_major_updates"`
 	// AggregateBranchPrefix overrides the prefix of the dated aggregate branch. The
 	// same value decides which branches the cleanup above removes.
 	AggregateBranchPrefix  string `yaml:"aggregate_branch_prefix"`
@@ -57,6 +75,15 @@ func CleanupEnabled(settings *Settings) bool {
 		return true
 	}
 	return *settings.CleanupStaleBranches
+}
+
+// MajorUpdatesAllowed reports whether an upgrade may cross a major version
+// boundary. Unset means allowed, for the reasons AllowMajorUpdates gives.
+func MajorUpdatesAllowed(settings *Settings) bool {
+	if settings == nil || settings.AllowMajorUpdates == nil {
+		return true
+	}
+	return *settings.AllowMajorUpdates
 }
 
 // ResolveAggregateBranchPrefix returns the configured aggregate branch prefix,

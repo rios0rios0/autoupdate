@@ -76,6 +76,9 @@ type localPRInfo struct {
 	PackageManager string // JavaScript package manager, or Python dependency manager
 	ProjectType    langEntities.Language
 	HasChanges     bool
+	// AllowMajorUpdates is carried here rather than read at render time because
+	// prContentGenerators is a static map with no access to the settings.
+	AllowMajorUpdates bool
 }
 
 // LocalCommand handles the standalone local mode: upgrades dependencies in
@@ -295,6 +298,8 @@ func runGoLocalUpgrade(
 		AuthToken:    token,
 		ProviderName: providerType,
 		PushAuth:     registry,
+
+		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 	})
 	if err != nil {
 		return nil, err
@@ -305,6 +310,8 @@ func runGoLocalUpgrade(
 		VersionUpdated: result.GoVersionUpdated,
 		ProjectType:    langEntities.LanguageGo,
 		HasChanges:     result.HasChanges,
+
+		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 	}, nil
 }
 
@@ -436,7 +443,7 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 				)
 			}
 			desc := goRepo.GenerateGoPRDescription(
-				info.LatestVersion, false, info.VersionUpdated,
+				info.LatestVersion, false, info.VersionUpdated, info.AllowMajorUpdates,
 			)
 			return title, desc
 		},

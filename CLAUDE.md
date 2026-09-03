@@ -260,6 +260,38 @@ and a release number from an unrelated channel is not a comparable replacement. 
 `dockerfile` and the Go Dockerfile tag rewriter (`golang/dockerfile_tags.go`) reach the same conclusion
 through `golang.org/x/mod/semver` directly, since they compare registry tags rather than pin files.
 
+### Majors Are Allowed by Default
+
+`allow_major_updates` (`entities.MajorUpdatesAllowed`, unset means **true**) decides whether
+an upgrade may cross a major version boundary. It is settable in any layer, including the
+target repository's own `.autoupdate.yaml` -- unlike `cleanup_stale_branches` it is accepted
+in *both* directions, because it starts nothing and destroys nothing: it decides which
+version a rewrite writes into a manifest, and a repository declining majors is declining
+upgrades for itself.
+
+On by default because a dependency held back is a dependency whose CVEs are never
+remediated, and the fix is often only in the next major -- Spring Framework 6.2.x carried
+six unpatched advisories whose only remedy was 7.0.x, and no 6.2 release ever shipped one.
+Refusing the major there does not avoid risk, it accumulates it silently. What catches a
+breaking change instead is the pipeline: the pull request builds, tests and lints the
+repository, so an incompatible major arrives as a red check on a branch rather than as a
+broken main. That is a more accurate signal than a version-number heuristic, which cannot
+tell a rename from a rewrite.
+
+The two updaters that can act on it read it from `UpdateOptions.AllowMajorUpdates`:
+`java` passes it through as `-DallowMajorUpdates` on both versions-maven-plugin goals, and
+`golang` emits `support.GoMajorGuardScript()` **only when it is false** -- an unused bash
+function in a generated script is a thing a reader has to rule out. The allowed branch is
+deliberately not an early return: the Go-directive re-apply and `go mod vendor` follow it
+and run either way.
+
+`UpdateOptions`'s zero value is therefore the *restrictive* case. Construct it through the
+run command, which resolves the flag, rather than by hand.
+
+**This does not relax the pre-release filter.** A pre-release is never a candidate whatever
+this is set to: `log4j2` `3.0.0-beta3` is how three CVEs were reintroduced, so betas work
+against the reason majors are allowed rather than for it.
+
 ### Only Finished Releases, and Only Within a Major
 
 "Newest" is two questions, and a version pin is only moved when both answer yes: is the

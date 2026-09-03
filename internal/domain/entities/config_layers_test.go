@@ -366,3 +366,55 @@ func TestResolveSettingsResolvesTokens(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ghp_from_env", result.GitHubAccessToken)
 }
+
+// TestAllowMajorUpdatesLayering covers where the key may be set, which is the
+// point of making it configurable at all.
+func TestAllowMajorUpdatesLayering(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should default to allowed with no layer setting it", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		layer := restrictedLayer("# nothing\n")
+
+		// when
+		settings, err := entities.ApplyLayer(&entities.Settings{}, layer) //nolint:exhaustruct // layers fill it
+
+		// then
+		require.NoError(t, err)
+		assert.True(t, entities.MajorUpdatesAllowed(settings))
+	})
+
+	t.Run("should let a repository refuse majors for itself", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- unlike cleanup_stale_branches this is accepted in both
+		// directions: it starts nothing and destroys nothing, and the repository
+		// being released is the party that knows whether it can take a major
+		layer := restrictedLayer("allow_major_updates: false\n")
+
+		// when
+		settings, err := entities.ApplyLayer(&entities.Settings{}, layer) //nolint:exhaustruct // layers fill it
+
+		// then
+		require.NoError(t, err)
+		assert.False(t, entities.MajorUpdatesAllowed(settings))
+	})
+
+	t.Run("should let a repository re-enable what the operator turned off", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		disabled := false
+		base := &entities.Settings{AllowMajorUpdates: &disabled} //nolint:exhaustruct // only this key
+		layer := restrictedLayer("allow_major_updates: true\n")
+
+		// when
+		settings, err := entities.ApplyLayer(base, layer)
+
+		// then
+		require.NoError(t, err)
+		assert.True(t, entities.MajorUpdatesAllowed(settings))
+	})
+}

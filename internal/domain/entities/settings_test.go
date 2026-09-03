@@ -537,3 +537,45 @@ func TestValidateAggregateBranchPrefix(t *testing.T) {
 		assert.NoError(t, err, "the default must satisfy the rules it is offered as the fix for")
 	})
 }
+
+func TestMajorUpdatesAllowed(t *testing.T) {
+	t.Parallel()
+
+	enabled, disabled := true, false
+
+	cases := []struct {
+		name     string
+		settings *entities.Settings
+		allowed  bool
+	}{
+		// The default is the interesting one: a dependency held back is a
+		// dependency whose CVEs are never remediated, so silence has to mean yes.
+		{"nil settings", nil, true},
+		{"key omitted", &entities.Settings{}, true}, //nolint:exhaustruct // that is the case
+		{
+			"explicitly enabled",
+			&entities.Settings{AllowMajorUpdates: &enabled}, //nolint:exhaustruct // only this key
+			true,
+		},
+		{
+			"explicitly disabled",
+			&entities.Settings{AllowMajorUpdates: &disabled}, //nolint:exhaustruct // only this key
+			false,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			settings := testCase.settings
+
+			// when
+			allowed := entities.MajorUpdatesAllowed(settings)
+
+			// then
+			assert.Equal(t, testCase.allowed, allowed)
+		})
+	}
+}

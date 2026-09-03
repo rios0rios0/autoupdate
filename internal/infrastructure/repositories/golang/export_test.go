@@ -53,8 +53,8 @@ func WriteCommitAndPush(sb *strings.Builder) {
 }
 
 // WriteGoUpgradeCommands is exported for testing.
-func WriteGoUpgradeCommands(sb *strings.Builder) {
-	writeGoUpgradeCommands(sb)
+func WriteGoUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
+	writeGoUpgradeCommands(sb, allowMajorUpdates)
 }
 
 // ResolveVersionContext is exported for testing.
@@ -86,8 +86,8 @@ func BuildEnv(params upgradeParams, repoDir, goBinary string) []string {
 }
 
 // BuildLocalGoScript is exported for testing.
-func BuildLocalGoScript(providerName string, hasConfigSH bool) string {
-	return buildLocalGoScript(providerName, hasConfigSH)
+func BuildLocalGoScript(providerName string, hasConfigSH, allowMajorUpdates bool) string {
+	return buildLocalGoScript(providerName, hasConfigSH, allowMajorUpdates)
 }
 
 // UpgradeParams is exported for testing.

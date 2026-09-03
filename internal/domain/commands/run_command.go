@@ -348,8 +348,9 @@ func (it *RunCommand) collectApplicableUpdaters(
 		logger.Infof("[%s] Detected in %s/%s", u.Name(), repo.Organization, repo.Name)
 
 		opts := entities.UpdateOptions{
-			DryRun:  runOpts.DryRun,
-			Verbose: runOpts.Verbose,
+			DryRun:            runOpts.DryRun,
+			Verbose:           runOpts.Verbose,
+			AllowMajorUpdates: entities.MajorUpdatesAllowed(settings),
 		}
 		if updaterCfg, ok := settings.Updaters[u.Name()]; ok {
 			opts.AutoComplete = updaterCfg.IsAutoComplete()

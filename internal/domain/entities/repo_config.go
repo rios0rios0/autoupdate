@@ -68,6 +68,7 @@ var projectLayerKeys = map[string]struct{}{
 	"skip": {}, "reason": {},
 	"updaters": {}, "exclude_repos": {},
 	"cleanup_stale_branches": {},
+	"allow_major_updates":    {},
 	"exclude_forks":          {}, "exclude_archived": {},
 }
 
