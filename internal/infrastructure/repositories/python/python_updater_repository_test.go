@@ -1310,6 +1310,69 @@ func TestRunLanguageUpgradeScript(t *testing.T) { //nolint:paralleltest // mutat
 	})
 }
 
+// TestRunLanguageUpgradeScriptMajorMode covers the seam between the resolved
+// setting and the script that acts on it. LocalUpgradeOptions carries the
+// value in, and the only way to see that it arrived is to read the script the
+// runner is handed: the script-building tests construct localUpgradeParams by
+// hand, so they cannot catch a caller that forgets the field -- which is the
+// shape of defect this guards against, a struct field with no producer being
+// silently the restrictive value.
+func TestRunLanguageUpgradeScriptMajorMode(t *testing.T) { //nolint:paralleltest // mutates package-level localCmdRunner
+	cases := []struct {
+		name       string
+		allowMajor bool
+		contains   string
+		absent     string
+	}{
+		{
+			name:       "should pass --unconstrained to pdm when majors are allowed",
+			allowMajor: true,
+			contains:   "pdm update --update-all --no-sync -G :all --unconstrained",
+		},
+		{
+			name:       "should withhold --unconstrained when majors are refused",
+			allowMajor: false,
+			contains:   "pdm update --update-all --no-sync -G :all 2>&1",
+			absent:     "--unconstrained",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// given -- a PDM project, whose upgrade command is the one that
+			// changes shape with the setting
+			spy := repositorydoubles.NewSpyScriptRunner("Done.\n")
+			restore := pyUpdater.SetLocalCmdRunner(spy)
+			defer restore()
+
+			repoDir := t.TempDir()
+			require.NoError(t, os.WriteFile(
+				filepath.Join(repoDir, "pyproject.toml"),
+				[]byte("[project]\nname = \"demo\"\n"),
+				0o600,
+			))
+			require.NoError(t, os.WriteFile(filepath.Join(repoDir, "pdm.lock"), []byte(""), 0o600))
+
+			vCtx := &pyUpdater.VersionContext{BranchName: "chore/upgrade-python-deps"}
+			opts := pyUpdater.LocalUpgradeOptions{
+				ProviderName:      "github",
+				AllowMajorUpdates: testCase.allowMajor,
+			}
+
+			// when
+			_, err := pyUpdater.RunLanguageUpgradeScript(t.Context(), repoDir, vCtx, opts)
+
+			// then
+			require.NoError(t, err)
+			require.Len(t, spy.Scripts, 1)
+			assert.Contains(t, spy.Scripts[0], testCase.contains)
+			if testCase.absent != "" {
+				assert.NotContains(t, spy.Scripts[0], testCase.absent)
+			}
+		})
+	}
+}
+
 func TestPyprojectUsesPDM(t *testing.T) {
 	t.Parallel()
 

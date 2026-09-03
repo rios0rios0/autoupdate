@@ -1577,3 +1577,60 @@ func TestJSMajorMode(t *testing.T) {
 		assert.Contains(t, script, "npm update")
 	})
 }
+
+// TestRunLanguageUpgradeScriptMajorMode covers the seam between the resolved
+// setting and the script that acts on it. LocalUpgradeOptions carries the
+// value in, and the only way to see that it arrived is to read the script the
+// runner is handed: the script-building tests construct localUpgradeParams by
+// hand, so they cannot catch a caller that forgets the field -- which is the
+// shape of defect this guards against, a struct field with no producer being
+// silently the restrictive value.
+func TestRunLanguageUpgradeScriptMajorMode(t *testing.T) { //nolint:paralleltest // mutates package-level localCmdRunner
+	cases := []struct {
+		name       string
+		allowMajor bool
+		contains   string
+		absent     string
+	}{
+		{
+			name:       "should raise the ranges with pnpm update --latest when majors are allowed",
+			allowMajor: true,
+			contains:   "pnpm update --latest",
+		},
+		{
+			name:       "should keep pnpm update inside the declared ranges when majors are refused",
+			allowMajor: false,
+			contains:   "pnpm update 2>&1",
+			absent:     "--latest",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// given
+			spy := repositorydoubles.NewSpyScriptRunner("Done.\n")
+			restore := jsUpdater.SetLocalCmdRunner(spy)
+			defer restore()
+
+			repoDir := t.TempDir()
+			vCtx := &jsUpdater.VersionContext{BranchName: "chore/upgrade-js-deps"}
+			opts := jsUpdater.LocalUpgradeOptions{
+				ProviderName:      "github",
+				AllowMajorUpdates: testCase.allowMajor,
+			}
+
+			// when
+			_, err := jsUpdater.RunLanguageUpgradeScript(
+				t.Context(), repoDir, vCtx, "pnpm", opts, support.StagedChangelog{},
+			)
+
+			// then
+			require.NoError(t, err)
+			require.Len(t, spy.Scripts, 1)
+			assert.Contains(t, spy.Scripts[0], testCase.contains)
+			if testCase.absent != "" {
+				assert.NotContains(t, spy.Scripts[0], testCase.absent)
+			}
+		})
+	}
+}

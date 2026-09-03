@@ -239,6 +239,8 @@ func runLanguageUpgradeScript(
 		AuthToken:      opts.AuthToken,
 		ProviderName:   opts.ProviderName,
 		PackageManager: pkgMgr,
+
+		AllowMajorUpdates: opts.AllowMajorUpdates,
 	}
 
 	return cmdrunner.RunScript(ctx, localCmdRunner, cmdrunner.ScriptRun{

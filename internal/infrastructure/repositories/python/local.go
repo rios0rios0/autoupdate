@@ -202,6 +202,8 @@ func runLanguageUpgradeScript(
 		ProviderName:  opts.ProviderName,
 		Project:       project,
 		PythonBinary:  pythonBinary,
+
+		AllowMajorUpdates: opts.AllowMajorUpdates,
 	}
 
 	return cmdrunner.RunScript(ctx, localCmdRunner, cmdrunner.ScriptRun{
