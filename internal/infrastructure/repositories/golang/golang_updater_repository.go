@@ -146,7 +146,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	result, hasConfigSH, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx)
+	result, hasConfigSH, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, opts.AllowMajorUpdates)
 	if upgradeErr != nil {
 		return nil, upgradeErr
 	}
@@ -159,9 +159,6 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 	return openPullRequest(ctx, provider, repo, opts, vCtx, result, hasConfigSH)
 }
 
-// ApplyUpdates implements repositories.LocalUpdater for the clone-based pipeline.
-// It runs Go upgrade commands on the already-cloned repository, updates
-// Dockerfiles and CHANGELOG, and returns PR metadata.
 // rewriteDockerfileGoTags rewrites the golang base-image tags in Go, verifying
 // each target tag exists on Docker Hub and falling back to the closest published
 // one, instead of blindly writing the go.dev version -- which may not have a
@@ -183,6 +180,9 @@ func rewriteDockerfileGoTags(ctx context.Context, repoDir, goVersion string) {
 	}
 }
 
+// ApplyUpdates implements repositories.LocalUpdater for the clone-based pipeline.
+// It runs Go upgrade commands on the already-cloned repository, updates
+// Dockerfiles and CHANGELOG, and returns PR metadata.
 func (u *UpdaterRepository) ApplyUpdates(
 	ctx context.Context,
 	repoDir string,
@@ -364,6 +364,7 @@ func cloneAndUpgrade(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
+	allowMajorUpdates bool,
 ) (*upgradeResult, bool, error) {
 	hasConfigSH := provider.HasFile(ctx, repo, "config.sh")
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
@@ -381,6 +382,8 @@ func cloneAndUpgrade(
 		HasConfigSH:   hasConfigSH,
 		ProviderName:  provider.Name(),
 		Changelog:     changelog,
+
+		AllowMajorUpdates: allowMajorUpdates,
 	})
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to upgrade: %w", err)
@@ -516,8 +519,12 @@ type upgradeParams struct {
 	// clone; an empty value leaves the repository's changelog untouched.
 	Changelog support.StagedChangelog
 	// AllowMajorUpdates decides whether the major-version guard is emitted and
-	// called at all. See entities.Settings.AllowMajorUpdates for why it defaults
-	// to true.
+	// called at all.
+	//
+	// The zero value is the *restrictive* case, as on entities.UpdateOptions:
+	// resolve it with entities.MajorUpdatesAllowed at the call site rather than
+	// relying on a default here. cloneAndUpgrade carries opts.AllowMajorUpdates
+	// through for exactly that reason.
 	AllowMajorUpdates bool
 }
 

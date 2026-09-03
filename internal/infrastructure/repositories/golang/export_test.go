@@ -214,3 +214,11 @@ func UpdateDockerfileGolangTags(
 func ChangelogEntries(vCtx *versionContext) []string {
 	return changelogEntries(vCtx)
 }
+
+// BuildRemoteScriptForMajorMode is exported for testing the remote (clone-based)
+// path's handling of allow_major_updates. It sets only the field that mode
+// depends on, because that is the one the path previously failed to carry.
+func BuildRemoteScriptForMajorMode(allowMajorUpdates bool) string {
+	//nolint:exhaustruct // only the major-mode field is under test here
+	return buildUpgradeScript(upgradeParams{AllowMajorUpdates: allowMajorUpdates}, "", "")
+}

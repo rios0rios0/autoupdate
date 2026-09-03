@@ -648,3 +648,33 @@ func TestWriteGoUpgradeCommandsMajorMode(t *testing.T) {
 		}
 	})
 }
+
+// TestRemoteScriptMajorMode guards the regression review found: the remote path
+// consumed upgradeParams.AllowMajorUpdates but its only constructor never set
+// it, so the guard ran even when the resolved setting said majors were allowed —
+// while the PR description, rendered from the resolved value, said the opposite.
+func TestRemoteScriptMajorMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should carry the allowed mode into the remote script", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := goUpdater.BuildRemoteScriptForMajorMode(true)
+
+		// then
+		assert.NotContains(t, script, "autoupdate_go_hold_major_jumps")
+		assert.Contains(t, script, "Major version upgrades are allowed")
+	})
+
+	t.Run("should carry the refused mode into the remote script", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := goUpdater.BuildRemoteScriptForMajorMode(false)
+
+		// then
+		assert.Contains(t, script, "autoupdate_go_hold_major_jumps()")
+		assert.NotContains(t, script, "Major version upgrades are allowed")
+	})
+}

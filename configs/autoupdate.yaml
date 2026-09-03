@@ -27,6 +27,10 @@
 #
 # Pre-releases are excluded regardless of this setting: taking a beta is how CVEs get
 # reintroduced, not remediated.
+#
+# Honoured by the `java` and `golang` updaters. The others upgrade with their native tool's
+# default behaviour and are unaffected -- Dart runs `pub upgrade --major-versions`, which
+# crosses majors whatever this says. Turning it off does not hold those back.
 #allow_major_updates: false
 
 # (optional) number of repositories processed in parallel within an organization.

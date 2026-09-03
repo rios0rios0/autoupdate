@@ -650,9 +650,13 @@ func writeJavaUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 	sb.WriteString("        fi\n\n")
 	// Maven has no notion of a pre-release, so `3.0.0-beta3`, `7.1.0-M1` and
 	// `5.7-alpha1` are ordinary releases to it and both goals below treat them
-	// as candidates. MAVEN_VERSION_IGNORE supplies the missing concept, and
-	// -DallowMajorUpdates=false keeps a security pin on its own major line
-	// rather than letting a new major arrive unreviewed inside a routine bump.
+	// as candidates. MAVEN_VERSION_IGNORE supplies the missing concept.
+	//
+	// The major-version flag is a separate question and a configurable one: both
+	// goals take -DallowMajorUpdates from MAVEN_ALLOW_MAJOR below, which carries
+	// the resolved allow_major_updates -- on unless a layer turns it off. The
+	// pre-release filtering is independent of it and applies in both modes, since
+	// taking a beta is how CVEs get reintroduced rather than remediated.
 	// Single-quoted, and every flag passed as its own argument rather than through
 	// an accumulator variable. The ignore value is a list of regexes carrying `.*`
 	// and `(?i)`, which an unquoted expansion would subject to word splitting and
