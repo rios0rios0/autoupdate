@@ -266,12 +266,18 @@ through `golang.org/x/mod/semver` directly, since they compare registry tags rat
 candidate *finished*, and is it on the *same major line*. `support.IsNewerVersion` answers
 neither -- it orders versions, and `3.0.0-beta3` really does outrank `2.26.1`.
 
-**Pre-releases.** `support.IsPrereleaseVersion` (`internal/support/prerelease.go`) holds the
-vocabulary -- alpha, beta, milestone, cr, rc, preview, pre, dev, snapshot -- and
-`support.MavenVersionIgnore()` compiles the same list into the regexes passed as
-`-Dmaven.version.ignore`. One list, because the two must agree: a qualifier the Go side
-filtered and the Maven side did not would be written into a `pom.xml` while being kept out of
-the changelog entry, so the pull request would claim an upgrade the file does not carry.
+**Pre-releases.** `prereleaseQualifiers` (`internal/support/prerelease.go`) holds the
+vocabulary -- alpha, beta, milestone, cr, rc, preview, pre, dev, snapshot. Both
+`prereleaseShape`, which `support.IsPrereleaseVersion` matches, and
+`support.MavenVersionIgnore()`, which supplies `-Dmaven.version.ignore`, are *derived* from
+that slice rather than restating it, so neither can drift by being edited alone.
+
+`IsPrereleaseVersion` has **no production caller**, and nothing in the Go path filters
+pre-releases: `go get -u` already declines them, and the Java path delegates the decision to
+Maven. It exists so the vocabulary has one readable, directly testable definition, and so
+`TestMavenVersionIgnore` can check the Maven regexes against something other than a
+restatement of themselves. Do not read it as a filter that runs, and do not add a caller on
+the assumption one is missing.
 
 Maven is where this bites. It has no concept of a pre-release at all: `3.0.0-beta3`,
 `7.1.0-M1`, `5.5-beta2` and `5.7-alpha1` are ordinary releases to it, `allowSnapshots=false`
@@ -295,9 +301,24 @@ still declares, and an indirect dependency nobody had named stopped the module c
 The guard snapshots the requirements before the upgrade and compares after `go mod tidy` --
 not before, because tidy can settle a requirement on a different version than `go get` first
 wrote. Anything whose major moved is put back with `go get <path>@<old>`; everything else in
-the run is kept, so the pull request still carries every safe upgrade. Both halves are
-exercised in `internal/support/`, the bash one against a stub `go` binary that records what it
-was asked for.
+the run is kept, so the pull request still carries every safe upgrade.
+
+`autoupdate_go_report_unheld` then re-reads `go.mod` and reconciles against the before
+snapshot, because the hold is two commands away from the state that gets committed and both
+outcomes it used to miss are worse than the jump. A `go get <old>` can *fail* -- precisely
+when an upgraded dependency now requires the major being held -- and the jump would ship under
+a description saying it was held. And a successful hold cascades: `go get <path>@<older>`
+downgrades everything that required the higher version, which can drag an unrelated
+requirement below where the run started. That second one is the failure this page already
+names under "Version Pins Only Move Forwards", reached by a new route.
+
+It reports rather than restores -- restoring is another `go get`, which cascades the same way
+-- and returns non-zero when anything is unresolved, so the caller branches rather than
+letting `set -e` abort before the safe part of the upgrade is committed. The PR description
+says the run *checked and held*, never that every hold succeeded, because the Go side that
+writes it has no access to the script's result. Both halves are exercised in
+`internal/support/`, the bash one against a stub `go` binary that records what it was asked
+for.
 
 ### Digest-Pinned Base Images
 
