@@ -37,7 +37,7 @@ const milestonePattern = `[Mm]\d+`
 // is legal in a `pom.xml`. Anchoring on the qualifier rather than on the
 // punctuation is what lets one expression read all of them.
 //
-// gochecknoglobals whitelists a regexp.MustCompile result, which is why this
+// gochecknoglobals whitelists a [regexp.MustCompile] result, which is why this
 // carries no exemption and versionShape in version.go carries none either.
 var prereleaseShape = regexp.MustCompile(
 	`(?i)^[vV]?\d+(?:\.\d+)*[-_.]?(?:` +
