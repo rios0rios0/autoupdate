@@ -256,7 +256,9 @@ func localScanAndDetermineUpgrades(
 		fileUpgrades := findUpgradesInFile(content, relPath, ci, latestVersions, allowMajorUpdates)
 
 		if ci == ciGitHubActions && provider != nil {
-			actionUpgrades := findActionUpgradesInFile(ctx, provider, content, relPath, tagCache)
+			actionUpgrades := findActionUpgradesInFile(
+				ctx, provider, content, relPath, tagCache, allowMajorUpdates,
+			)
 			fileUpgrades = append(fileUpgrades, actionUpgrades...)
 		}
 
@@ -337,7 +339,9 @@ func scanAndDetermineUpgrades(
 		fileUpgrades := findUpgradesInFile(content, f.Path, ci, latestVersions, allowMajorUpdates)
 
 		if ci == ciGitHubActions {
-			actionUpgrades := findActionUpgradesInFile(ctx, provider, content, f.Path, tagCache)
+			actionUpgrades := findActionUpgradesInFile(
+				ctx, provider, content, f.Path, tagCache, allowMajorUpdates,
+			)
 			fileUpgrades = append(fileUpgrades, actionUpgrades...)
 		}
 
@@ -659,13 +663,23 @@ func resolveActionTags(
 
 // determineActionUpgrade compares the current action ref against available tags
 // and returns an upgrade if one is available.
-func determineActionUpgrade(ref actionRef, tags []string) *actionUpgrade {
+func determineActionUpgrade(
+	ref actionRef, tags []string, allowMajorUpdates bool,
+) *actionUpgrade {
 	if len(tags) == 0 {
 		return nil
 	}
 
 	switch ref.RefStyle {
 	case refStyleMajor:
+		// A `@v4` -> `@v5` rewrite is unambiguously a major bump, and for many
+		// repositories action refs are the majority of what this updater
+		// changes -- so leaving it ungated would make the key close to inert
+		// here while the docs list pipeline among those honouring it.
+		if !allowMajorUpdates {
+			return nil
+		}
+
 		return findMajorUpgrade(ref, tags)
 	case refStyleSemver:
 		return findSemverUpgrade(ref, tags)
@@ -762,13 +776,14 @@ func findActionUpgradesInFile(
 	provider repositories.ProviderRepository,
 	content, filePath string,
 	cache actionTagCache,
+	allowMajorUpdates bool,
 ) []upgradeTask {
 	refs := scanFileForActions(content, filePath)
 	var tasks []upgradeTask
 
 	for _, ref := range refs {
 		tags := resolveActionTags(ctx, provider, ref.Owner, ref.Repo, cache)
-		up := determineActionUpgrade(ref, tags)
+		up := determineActionUpgrade(ref, tags, allowMajorUpdates)
 		if up == nil {
 			continue
 		}

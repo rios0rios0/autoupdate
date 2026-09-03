@@ -166,7 +166,7 @@ func cloneAndUpgrade(
 		CloneURL:      cloneURL,
 		DefaultBranch: defaultBranch,
 		BranchName:    vCtx.BranchName,
-		DotnetVersion: vCtx.LatestVersion,
+		DotnetVersion: dotnetVersionFor(vCtx),
 		AuthToken:     provider.AuthToken(),
 		ProviderName:  provider.Name(),
 		Changelog:     changelog,
@@ -251,8 +251,8 @@ func (u *UpdaterRepository) ApplyUpdates(
 	cmd := exec.CommandContext(ctx, "bash", scriptPath)
 	cmd.Dir = repoDir
 	env := append(os.Environ(), "DOTNET_BINARY="+dotnetBinary)
-	if vCtx.LatestVersion != "" {
-		env = append(env, "DOTNET_VERSION="+vCtx.LatestVersion)
+	if pinVersion := dotnetVersionFor(vCtx); pinVersion != "" {
+		env = append(env, "DOTNET_VERSION="+pinVersion)
 	}
 	cmd.Env = env
 
@@ -735,4 +735,25 @@ func GeneratePRDescription(dotnetVersion string, dotnetVersionUpdated bool) stri
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()
+}
+
+// dotnetVersionFor returns the version the generated script may write into the pin, which
+// is the empty string whenever this run declined the upgrade.
+//
+// The decision is made in Go and the rewrite happens in bash, and the script's
+// own gate -- autoupdate_version_is_newer -- has no major-version concept. So
+// the refusal has to be expressed by withholding the value rather than by
+// trusting the script to re-derive it: otherwise `allow_major_updates: false`
+// leaves NeedsVersionUpgrade false (no branch name, commit message, changelog
+// entry or PR title mentioning a version bump) while the script rewrites the pin
+// across the major anyway. That is worse than not gating at all, because the two
+// halves used to agree.
+//
+// The same shape as dart's sdkVersionFor, for the same reason.
+func dotnetVersionFor(vCtx *versionContext) string {
+	if vCtx.NeedsVersionUpgrade {
+		return vCtx.LatestVersion
+	}
+
+	return ""
 }

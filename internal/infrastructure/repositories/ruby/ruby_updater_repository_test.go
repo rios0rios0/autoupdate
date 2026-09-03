@@ -372,3 +372,49 @@ func TestRubyGemMajorMode(t *testing.T) {
 		assert.Contains(t, sb.String(), "bundle update --minor")
 	})
 }
+
+// TestResolveVersionContextMajorMode covers the `.ruby-version` pin under a
+// refusal, and that the refusal reaches the script that rewrites the file.
+//
+// The pin is rewritten by support.VersionPinUpdateScript from
+// TARGET_RUBY_VERSION, and the script's only gate is
+// `autoupdate_version_is_newer`, which has no major-version concept. Withholding
+// the value is how the refusal crosses the Go/bash seam.
+func TestResolveVersionContextMajorMode(t *testing.T) {
+	t.Parallel()
+
+	newProvider := func() *repositorydoubles.SpyProviderRepository {
+		return repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{".ruby-version": true}).
+			WithFileContents(map[string]string{".ruby-version": "3.2.0\n"}).
+			BuildSpy()
+	}
+	repo := entities.Repository{
+		Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main",
+	}
+
+	t.Run("should hold a major bump when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when -- 3.2.0 pinned, 4.0.0 offered
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), newProvider(), repo, "4.0.0", false)
+
+		// then
+		require.NotNil(t, vCtx)
+		assert.False(t, vCtx.NeedsVersionUpgrade)
+		assert.Empty(t, rbUpdater.RubyVersionFor(vCtx),
+			"a refused version must not reach the script that rewrites .ruby-version")
+	})
+
+	t.Run("should take a minor bump when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), newProvider(), repo, "3.3.6", false)
+
+		// then
+		require.NotNil(t, vCtx)
+		assert.True(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "3.3.6", rbUpdater.RubyVersionFor(vCtx))
+	})
+}

@@ -479,7 +479,7 @@ func TestGeneratePRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		desc := dartUpdater.GeneratePRDescription("3.47.0", "flutter", true)
+		desc := dartUpdater.GeneratePRDescription("3.47.0", "flutter", true, true)
 
 		// then
 		assert.Contains(t, desc, "3.47.0")
@@ -491,7 +491,7 @@ func TestGeneratePRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		desc := dartUpdater.GeneratePRDescription("", "dart", false)
+		desc := dartUpdater.GeneratePRDescription("", "dart", false, true)
 
 		// then
 		assert.NotContains(t, desc, ".fvmrc")

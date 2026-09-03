@@ -147,3 +147,8 @@ func RunLanguageUpgradeScript(
 ) (string, error) {
 	return runLanguageUpgradeScript(ctx, repoDir, vCtx, opts)
 }
+
+// RubyVersionFor is exported for testing.
+func RubyVersionFor(vCtx *versionContext) string {
+	return rubyVersionFor(vCtx)
+}

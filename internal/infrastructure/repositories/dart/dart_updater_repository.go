@@ -168,7 +168,9 @@ func (u *UpdaterRepository) ApplyUpdates(
 		BranchName:    vCtx.BranchName,
 		CommitMessage: commitMsg,
 		PRTitle:       commitMsg,
-		PRDescription: GeneratePRDescription(vCtx.LatestVersion, vCtx.Toolchain, sdkUpdated),
+		PRDescription: GeneratePRDescription(
+			vCtx.LatestVersion, vCtx.Toolchain, sdkUpdated, opts.AllowMajorUpdates,
+		),
 	}, nil
 }
 
@@ -428,7 +430,9 @@ func openPullRequest(
 		SourceBranch: refsHeadsPrefix + vCtx.BranchName,
 		TargetBranch: targetBranch,
 		Title:        commitMessage(vCtx, result.SDKUpdated),
-		Description:  GeneratePRDescription(vCtx.LatestVersion, vCtx.Toolchain, result.SDKUpdated),
+		Description: GeneratePRDescription(
+			vCtx.LatestVersion, vCtx.Toolchain, result.SDKUpdated, opts.AllowMajorUpdates,
+		),
 		AutoComplete: opts.AutoComplete,
 	})
 	if createErr != nil {
@@ -601,7 +605,9 @@ func buildEnv(params upgradeParams, repoDir string) []string {
 
 // GeneratePRDescription builds a markdown PR description for a pub dependency
 // upgrade. Exported so that the local-mode CLI handler can reuse the format.
-func GeneratePRDescription(sdkVersion, toolchain string, sdkUpdated bool) string {
+func GeneratePRDescription(
+	sdkVersion, toolchain string, sdkUpdated, allowMajorUpdates bool,
+) string {
 	if toolchain == "" {
 		toolchain = toolchainDart
 	}
@@ -620,13 +626,23 @@ func GeneratePRDescription(sdkVersion, toolchain string, sdkUpdated bool) string
 	if sdkUpdated {
 		sb.WriteString("- Updated `" + FvmConfigFile + "` to `" + sdkVersion + "`\n")
 	}
-	sb.WriteString("- Ran `" + toolchain + " pub upgrade --major-versions`, which raises the constraints in " +
-		"`pubspec.yaml` to the latest resolvable versions rather than only re-resolving `pubspec.lock`\n")
+	// The wording has to follow the flag the script was actually given. Saying
+	// constraints were raised over a diff that only moved `pubspec.lock` sends a
+	// reviewer looking for changes that are not there.
+	if allowMajorUpdates {
+		sb.WriteString("- Ran `" + toolchain + " pub upgrade --major-versions`, which raises the constraints in " +
+			"`pubspec.yaml` to the latest resolvable versions rather than only re-resolving `pubspec.lock`\n")
+	} else {
+		sb.WriteString("- Ran `" + toolchain + " pub upgrade`, which re-resolves `pubspec.lock` within the " +
+			"constraints `pubspec.yaml` already declares (`allow_major_updates` is off for this repository)\n")
+	}
 	sb.WriteString("- Ran `" + toolchain + " pub get` to refresh `pubspec.lock`\n")
 	sb.WriteString("\n### Review Checklist\n\n")
 	sb.WriteString("- [ ] Verify `" + toolchain + " analyze` passes\n")
 	sb.WriteString("- [ ] Verify tests pass\n")
-	sb.WriteString("- [ ] Review the constraint changes in `pubspec.yaml` for breaking major bumps\n")
+	if allowMajorUpdates {
+		sb.WriteString("- [ ] Review the constraint changes in `pubspec.yaml` for breaking major bumps\n")
+	}
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()

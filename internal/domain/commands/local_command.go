@@ -398,6 +398,8 @@ func runDartLocalUpgrade(
 		PackageManager: result.Toolchain,
 		ProjectType:    langEntities.LanguageDart,
 		HasChanges:     result.HasChanges,
+
+		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 	}, nil
 }
 
@@ -489,6 +491,7 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 			}
 			desc := dartRepo.GeneratePRDescription(
 				info.LatestVersion, info.PackageManager, info.VersionUpdated,
+				info.AllowMajorUpdates,
 			)
 			return title, desc
 		},

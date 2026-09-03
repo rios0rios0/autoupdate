@@ -126,3 +126,8 @@ func ResolveLocalVersionContext(
 ) *versionContext {
 	return resolveLocalVersionContext(ctx, repoDir, allowMajorUpdates)
 }
+
+// DotnetVersionFor is exported for testing.
+func DotnetVersionFor(vCtx *versionContext) string {
+	return dotnetVersionFor(vCtx)
+}

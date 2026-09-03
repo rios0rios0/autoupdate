@@ -308,6 +308,24 @@ has no flag meaning "raise the Gemfile bounds", and rewriting a `~>` is a differ
 resolving within it, so only the refusing direction is expressed -- `--minor` caps the bump
 that plain `bundle update` would otherwise take on an unconstrained gem.
 
+**The refusal has to cross the Go/bash seam.** `csharp` and `ruby` decide in Go and rewrite
+the pin in bash, and the script's only gate is `autoupdate_version_is_newer`, which has no
+major-version concept. So the refusal is expressed by *withholding the value* --
+`dotnetVersionFor` and `rubyVersionFor` return "" unless `NeedsVersionUpgrade`, the shape
+dart's `sdkVersionFor` already used. Gating only the Go half is worse than not gating at
+all: the branch name, commit message, changelog entry and PR title all come from
+`NeedsVersionUpgrade`, so the pin would still cross the major and nothing would name it.
+
+**A conditional flag needs a conditional description.** `dart`'s PR body claimed constraints
+were raised across majors and asked the reviewer to check `pubspec.yaml` for breaking bumps;
+with majors refused only `pubspec.lock` moves, so both were false. `GeneratePRDescription`
+branches on the resolved value, as `GenerateGoPRDescription` does.
+
+**`pipeline` gates action refs as well as language pins.** `uses: actions/checkout@v4` ->
+`@v5` is unambiguously the bump the key exists to hold, and for many repositories action
+refs are the majority of what this updater changes -- gating only the language pin would
+have left the key close to inert here.
+
 `dockerfile` moved furthest. It refused every major *unconditionally*, which made it the
 only updater whose answer no configuration could change: a Dockerfile on `node:20` stayed
 on 20 for ever. With majors allowed its two version-distance rules fall away together --

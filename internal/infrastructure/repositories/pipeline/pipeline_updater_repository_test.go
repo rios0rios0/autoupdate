@@ -1455,7 +1455,7 @@ func TestDetermineActionUpgrade(t *testing.T) {
 		tags := []string{"v5.0.0", "v4.2.0", "v4.1.0", "v3.0.0"}
 
 		// when
-		up := pipeline.DetermineActionUpgrade(ref, tags)
+		up := pipeline.DetermineActionUpgrade(ref, tags, true)
 
 		// then
 		require.NotNil(t, up)
@@ -1473,7 +1473,7 @@ func TestDetermineActionUpgrade(t *testing.T) {
 		tags := []string{"v5.0.0", "v4.2.0"}
 
 		// when
-		up := pipeline.DetermineActionUpgrade(ref, tags)
+		up := pipeline.DetermineActionUpgrade(ref, tags, true)
 
 		// then
 		assert.Nil(t, up)
@@ -1490,7 +1490,7 @@ func TestDetermineActionUpgrade(t *testing.T) {
 		tags := []string{"v6.0.0", "v5.3.0", "v5.2.0", "v5.1.0"}
 
 		// when
-		up := pipeline.DetermineActionUpgrade(ref, tags)
+		up := pipeline.DetermineActionUpgrade(ref, tags, true)
 
 		// then
 		require.NotNil(t, up)
@@ -1508,7 +1508,7 @@ func TestDetermineActionUpgrade(t *testing.T) {
 		tags := []string{"v6.0.0", "v5.3.0"}
 
 		// when
-		up := pipeline.DetermineActionUpgrade(ref, tags)
+		up := pipeline.DetermineActionUpgrade(ref, tags, true)
 
 		// then
 		assert.Nil(t, up)
@@ -1524,7 +1524,7 @@ func TestDetermineActionUpgrade(t *testing.T) {
 		}
 
 		// when
-		up := pipeline.DetermineActionUpgrade(ref, nil)
+		up := pipeline.DetermineActionUpgrade(ref, nil, true)
 
 		// then
 		assert.Nil(t, up)
@@ -1550,6 +1550,7 @@ func TestFindActionUpgradesInFile(t *testing.T) {
 		// when
 		tasks := pipeline.FindActionUpgradesInFile(
 			t.Context(), provider, content, ".github/workflows/ci.yml", cache,
+			true,
 		)
 
 		// then
@@ -1576,9 +1577,11 @@ func TestFindActionUpgradesInFile(t *testing.T) {
 		// when
 		_ = pipeline.FindActionUpgradesInFile(
 			t.Context(), provider, content, ".github/workflows/ci.yml", cache,
+			true,
 		)
 		_ = pipeline.FindActionUpgradesInFile(
 			t.Context(), provider, content, ".github/workflows/other.yml", cache,
+			true,
 		)
 
 		// then
@@ -1606,6 +1609,7 @@ func TestFindActionUpgradesInFile(t *testing.T) {
 		// when
 		tasks := pipeline.FindActionUpgradesInFile(
 			t.Context(), provider, content, ".github/workflows/ci.yml", cache,
+			true,
 		)
 
 		// then
@@ -1886,5 +1890,59 @@ func TestGeneratePRDescription(t *testing.T) {
 		// then
 		assert.Contains(t, result, "**6**")
 		assert.NotContains(t, result, "| Language |")
+	})
+}
+
+// TestDetermineActionUpgradeMajorMode covers GitHub Action refs, which were the
+// gap: language pins gated on the key while `uses: actions/checkout@v4` -> `@v5`
+// went through regardless. For many repositories action refs are the majority of
+// what this updater changes, so the key looked close to inert here.
+func TestDetermineActionUpgradeMajorMode(t *testing.T) {
+	t.Parallel()
+
+	majorRef := pipeline.ActionRef{
+		Owner: "actions", Repo: "checkout", CurrentRef: "v4",
+		RefStyle: pipeline.RefStyleMajor,
+	}
+	tags := []string{"v5.0.0", "v4.2.0", "v4.1.0", "v3.0.0"}
+
+	t.Run("should bump a major-style ref when majors are allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		up := pipeline.DetermineActionUpgrade(majorRef, tags, true)
+
+		// then
+		require.NotNil(t, up)
+		assert.Equal(t, "v5", pipeline.ActionUpgradeNewRef(up))
+	})
+
+	t.Run("should hold a major-style ref when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		up := pipeline.DetermineActionUpgrade(majorRef, tags, false)
+
+		// then -- a `@v4` -> `@v5` rewrite is unambiguously the bump the key
+		// exists to hold
+		assert.Nil(t, up)
+	})
+
+	t.Run("should still take a semver-style patch when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- the refusal is about crossing a major, not about stopping
+		// this updater from working
+		semverRef := pipeline.ActionRef{
+			Owner: "actions", Repo: "checkout", CurrentRef: "v4.1.0",
+			RefStyle: pipeline.RefStyleSemver,
+		}
+
+		// when
+		up := pipeline.DetermineActionUpgrade(semverRef, tags, false)
+
+		// then
+		require.NotNil(t, up)
+		assert.Equal(t, "v4.2.0", pipeline.ActionUpgradeNewRef(up))
 	})
 }
