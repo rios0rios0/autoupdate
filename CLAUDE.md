@@ -278,23 +278,45 @@ repository, so an incompatible major arrives as a red check on a branch rather t
 broken main. That is a more accurate signal than a version-number heuristic, which cannot
 tell a rename from a rewrite.
 
-Seven updaters read it: `java` and `golang` through the scripts they emit, and `dart`,
-`terraform`, `pipeline`, `csharp` and `ruby` through `support.AcceptsUpgrade`, which is
+Every updater reads it, but what it *means* splits in two.
+
+The ones that pick a version in Go -- `golang`, `terraform`, `pipeline`, `csharp`, `ruby`'s
+`.ruby-version` pin and `dockerfile` -- go through `support.AcceptsUpgrade`, which is
 `IsNewerVersion` plus the major question so the two are asked together at every call site
 rather than each ecosystem re-deriving the second one.
 
-Three do not, and the reasons differ. `javascript`, `python` and the gem half of `ruby`
-delegate to a package manager that already resolves inside the declared ranges, so there is
-nothing to gate -- making them *cross* majors would be a new capability (`--latest`,
-`--unconstrained`), not a wiring job. `dockerfile` refuses every major unconditionally in
-`registry.go`, so honouring the key there would mean *relaxing* a rule that predates it;
-that is a behaviour decision rather than a gap, and is left alone deliberately.
+The ones that shell out to a package manager select a flag instead, because the plain
+command resolves *inside* the ranges the manifest already declares and so can never cross a
+major on its own. Each ecosystem needed a different one:
 
-Dart was the one that actively contradicted the key: `pub upgrade --major-versions` is
-precisely a request to raise constraints across majors, and it was passed unconditionally,
-so a repository setting `allow_major_updates: false` had its constraints raised anyway.
+| Updater | Majors allowed | Majors refused |
+|---|---|---|
+| `dart` | `pub upgrade --major-versions` | `pub upgrade` |
+| `python` (PDM) | `pdm update --unconstrained` | `pdm update` |
+| `javascript` (pnpm) | `pnpm update --latest` | `pnpm update` |
+| `javascript` (yarn) | `up '*'` / `upgrade --latest` | `yarn upgrade` |
+| `javascript` (npm) | `npm-check-updates -u` then install | `npm update` |
+| `ruby` (gems) | `bundle update` | `bundle update --minor` |
+| `java` | `-DallowMajorUpdates=true` | `-DallowMajorUpdates=false` |
 
-How the two script-emitting ones act on it:
+Three of those deserve a note. **yarn** is decided at run time, because Berry replaced
+`upgrade` with `up` and only Classic understands `--latest`, and nothing on the Go side
+knows which is installed. **npm** has no built-in range-raiser at all, so `npm-check-updates`
+is fetched with `npx --yes` and a failure degrades to the plain `npm update` -- an offline
+runner gets a smaller upgrade rather than none. **ruby** is the one asymmetric case: bundler
+has no flag meaning "raise the Gemfile bounds", and rewriting a `~>` is a different act from
+resolving within it, so only the refusing direction is expressed -- `--minor` caps the bump
+that plain `bundle update` would otherwise take on an unconstrained gem.
+
+`dockerfile` moved furthest. It refused every major *unconditionally*, which made it the
+only updater whose answer no configuration could change: a Dockerfile on `node:20` stayed
+on 20 for ever. With majors allowed its two version-distance rules fall away together --
+crossing a major implies crossing a minor, so keeping the patch-pin minor rule would leave a
+three-part pin unable to move and the setting quietly inert for it. Suffix and precision
+still have to match, because those encode what the Dockerfile chose rather than how far
+behind it is.
+
+How the script-emitting Go and Java updaters act on it:
 `java` passes it through as `-DallowMajorUpdates` on both versions-maven-plugin goals, and
 `golang` emits `support.GoMajorGuardScript()` **only when it is false** -- an unused bash
 function in a generated script is a thing a reader has to rule out. The allowed branch is

@@ -189,6 +189,8 @@ func runLanguageUpgradeScript(
 		Changelog:    changelog,
 		AuthToken:    opts.AuthToken,
 		ProviderName: opts.ProviderName,
+
+		AllowMajorUpdates: opts.AllowMajorUpdates,
 	}
 
 	return cmdrunner.RunScript(ctx, localCmdRunner, cmdrunner.ScriptRun{
@@ -211,6 +213,8 @@ type localUpgradeParams struct {
 	Changelog    support.StagedChangelog
 	AuthToken    string
 	ProviderName string
+	// AllowMajorUpdates caps the bundler bump; see writeRubyUpgradeCommands.
+	AllowMajorUpdates bool
 }
 
 // buildLocalUpgradeScript builds a bash script that performs only the
@@ -228,7 +232,7 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	writeLocalAuth(&sb, params)
 
 	// Ruby upgrade commands (reuse remote-mode helpers)
-	writeRubyUpgradeCommands(&sb)
+	writeRubyUpgradeCommands(&sb, params.AllowMajorUpdates)
 
 	// Update Dockerfile ruby image tags
 	writeDockerfileUpdate(&sb)

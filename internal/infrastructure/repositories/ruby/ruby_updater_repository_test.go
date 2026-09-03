@@ -239,7 +239,7 @@ func TestBuildBatchRubyScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := rbUpdater.BuildBatchRubyScript()
+		script := rbUpdater.BuildBatchRubyScript(true)
 
 		// then
 		assert.True(t, strings.HasPrefix(script, "#!/bin/bash\n"))
@@ -266,7 +266,7 @@ func TestBuildUpgradeScript(t *testing.T) {
 		}
 
 		// when
-		script := rbUpdater.BuildUpgradeScript(params, "/tmp/repo")
+		script := rbUpdater.BuildUpgradeScript(params, "/tmp/repo", true)
 
 		// then
 		assert.True(t, strings.HasPrefix(script, "#!/bin/bash\n"))
@@ -333,5 +333,42 @@ func TestWriteGitAuth(t *testing.T) {
 		result := sb.String()
 		assert.Contains(t, result, "oauth2")
 		assert.Contains(t, result, "gitlab.com")
+	})
+}
+
+// TestRubyGemMajorMode covers the bundler ceiling. Bundler has no flag meaning
+// "raise the Gemfile bounds", and this deliberately does not rewrite one — but
+// it does have a cap on the bump it will take, which is the direction that was
+// missing: an unconstrained `gem "rails"` crossed majors whatever the key said.
+func TestRubyGemMajorMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should let bundler take a major when allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+
+		// when
+		rbUpdater.WriteRubyUpgradeCommands(&sb, true)
+
+		// then -- --major is bundler's default, so it is left off rather than
+		// spelled out
+		script := sb.String()
+		assert.Contains(t, script, "bundle update 2>&1")
+		assert.NotContains(t, script, "--minor")
+	})
+
+	t.Run("should cap bundler below a major when refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+
+		// when
+		rbUpdater.WriteRubyUpgradeCommands(&sb, false)
+
+		// then
+		assert.Contains(t, sb.String(), "bundle update --minor")
 	})
 }

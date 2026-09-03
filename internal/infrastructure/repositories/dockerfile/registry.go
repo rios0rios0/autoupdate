@@ -157,13 +157,21 @@ func parseTag(tag string) (string, string, int, bool) {
 
 // findBestUpgrade finds the highest compatible tag for a given current reference.
 // It matches tags with the same suffix and upgrades within the same major version.
-func findBestUpgrade(current *parsedImageRef, availableTags []string) string {
+// findBestUpgrade picks the newest tag that is a valid replacement for current.
+//
+// allowMajorUpdates is threaded through rather than assumed. This updater used to
+// refuse every major unconditionally, which made it the strictest of the ten and
+// the only one whose answer no configuration could change: a Dockerfile on
+// `node:20` stayed on 20 for ever, including past its end of life.
+func findBestUpgrade(
+	current *parsedImageRef, availableTags []string, allowMajorUpdates bool,
+) string {
 	var bestVersion string
 	var bestTag string
 	curNorm := normalizeToSemver(current.Version)
 
 	for _, tag := range availableTags {
-		version, ok := compatibleUpgradeVersion(tag, current, curNorm)
+		version, ok := compatibleUpgradeVersion(tag, current, curNorm, allowMajorUpdates)
 		if !ok {
 			continue
 		}
@@ -180,7 +188,20 @@ func findBestUpgrade(current *parsedImageRef, availableTags []string) string {
 
 // compatibleUpgradeVersion checks if a tag is a valid upgrade candidate for the current image.
 // Returns the version string and true if compatible, empty and false otherwise.
-func compatibleUpgradeVersion(tag string, current *parsedImageRef, curNorm string) (string, bool) {
+//
+// The suffix and precision must always match: `python:3.13-slim` may only become
+// another `-slim` tag written to the same number of parts, because those encode
+// what the Dockerfile chose rather than how far behind it is.
+//
+// The version *distance* rules are what allowMajorUpdates governs. With majors
+// refused the tag must stay on the same major, and a patch-pinned reference
+// (three parts) must also stay on the same minor -- the pre-existing behaviour,
+// kept exactly. With majors allowed both fall away: crossing a major implies
+// crossing a minor, so keeping the second rule would leave a three-part pin
+// unable to move at all and the setting quietly inert for it.
+func compatibleUpgradeVersion(
+	tag string, current *parsedImageRef, curNorm string, allowMajorUpdates bool,
+) (string, bool) {
 	version, tagSuffix, tagPrecision, ok := parseTag(tag)
 	if !ok || tagSuffix != current.Suffix || tagPrecision != current.Precision {
 		return "", false
@@ -191,7 +212,15 @@ func compatibleUpgradeVersion(tag string, current *parsedImageRef, curNorm strin
 		return "", false
 	}
 
-	if semver.Compare(newNorm, curNorm) <= 0 || semver.Major(newNorm) != semver.Major(curNorm) {
+	if semver.Compare(newNorm, curNorm) <= 0 {
+		return "", false
+	}
+
+	if allowMajorUpdates {
+		return version, true
+	}
+
+	if semver.Major(newNorm) != semver.Major(curNorm) {
 		return "", false
 	}
 

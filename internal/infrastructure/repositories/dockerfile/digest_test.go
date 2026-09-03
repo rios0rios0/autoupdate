@@ -83,7 +83,7 @@ func TestDetermineUpgradesWithDigest(t *testing.T) {
 		}
 
 		// when
-		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 		// then
 		require.Len(t, upgrades, 1)
@@ -107,7 +107,7 @@ func TestDetermineUpgradesWithDigest(t *testing.T) {
 			}
 
 			// when
-			upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+			upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 			// then
 			assert.Empty(t, upgrades)
@@ -128,7 +128,7 @@ func TestDetermineUpgradesWithDigest(t *testing.T) {
 		}
 
 		// when
-		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 		// then
 		require.Len(t, upgrades, 1)
@@ -151,7 +151,7 @@ func TestApplyUpgradesWithDigest(t *testing.T) {
 		allRefs := []dockerfile.ImageRef{
 			dockerfile.NewImageRefWithDigest(content, "Dockerfile", "python", "3.13-slim", oldDigest),
 		}
-		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 		// when
 		changes := dockerfile.ApplyUpgrades(upgrades, allRefs)
@@ -175,7 +175,7 @@ func TestApplyUpgradesWithDigest(t *testing.T) {
 			dockerfile.NewImageRefWithDigest(content, "Dockerfile", "python", "3.13-slim", oldDigest),
 			dockerfile.NewImageRefFromContent(content, "Dockerfile", "python", "python", "3.13-slim"),
 		}
-		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 		// when
 		changes := dockerfile.ApplyUpgrades(upgrades, allRefs)
@@ -206,7 +206,7 @@ func TestApplyUpgradesWithDigest(t *testing.T) {
 			dockerfile.NewImageRefWithDigest(content, "Dockerfile", "python", "3.13-slim", oldDigest),
 			dockerfile.NewImageRefFromContent(content, "Dockerfile", "python", "python", "3.13-slim"),
 		}
-		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 		// when
 		changes := dockerfile.ApplyUpgrades(upgrades, allRefs)
@@ -232,7 +232,7 @@ func TestApplyUpgradesWithDigest(t *testing.T) {
 		allRefs := []dockerfile.ImageRef{
 			dockerfile.NewImageRefFromContent(content, "Dockerfile", "python", "python", "3.1"),
 		}
-		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 		// when
 		changes := dockerfile.ApplyUpgrades(upgrades, allRefs)

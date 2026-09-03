@@ -44,7 +44,7 @@ func TestRubyVersionPinIsNeverDowngraded(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	rbUpdater.WriteRubyUpgradeCommands(&sb)
+	rbUpdater.WriteRubyUpgradeCommands(&sb, true)
 	opts := scriptrunner.Options{
 		Env:   map[string]string{"TARGET_RUBY_VERSION": "3.4.1"},
 		Stubs: []string{"gem", "bundle", "bundler", "ruby"},

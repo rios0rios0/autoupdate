@@ -77,7 +77,7 @@ func TestParseTag(t *testing.T) {
 func TestFindBestUpgrade(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should find patch upgrade within same minor", func(t *testing.T) {
+	t.Run("should stay within the same minor for a patch-pin when majors are refused", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -92,13 +92,13 @@ func TestFindBestUpgrade(t *testing.T) {
 		tags := []string{"1.25.8", "1.25.9", "1.26.0", "1.25.6", "latest"}
 
 		// when
-		best := dockerfile.FindBestUpgrade(current, tags)
+		best := dockerfile.FindBestUpgrade(current, tags, false)
 
 		// then
 		assert.Equal(t, "1.25.9", best)
 	})
 
-	t.Run("should find minor upgrade within same major for 2-part version", func(t *testing.T) {
+	t.Run("should stay within the same major for a 2-part tag when majors are refused", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -113,7 +113,7 @@ func TestFindBestUpgrade(t *testing.T) {
 		tags := []string{"1.26", "1.27", "2.0", "1.24", "latest"}
 
 		// when
-		best := dockerfile.FindBestUpgrade(current, tags)
+		best := dockerfile.FindBestUpgrade(current, tags, false)
 
 		// then
 		assert.Equal(t, "1.27", best)
@@ -134,13 +134,13 @@ func TestFindBestUpgrade(t *testing.T) {
 		tags := []string{"3.13", "3.13-slim-bullseye", "3.13-alpine", "3.12-slim-bullseye"}
 
 		// when
-		best := dockerfile.FindBestUpgrade(current, tags)
+		best := dockerfile.FindBestUpgrade(current, tags, true)
 
 		// then
 		assert.Equal(t, "3.13-slim-bullseye", best)
 	})
 
-	t.Run("should not cross major version boundary", func(t *testing.T) {
+	t.Run("should not cross a major boundary when majors are refused", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -155,7 +155,7 @@ func TestFindBestUpgrade(t *testing.T) {
 		tags := []string{"21", "22", "20", "19"}
 
 		// when
-		best := dockerfile.FindBestUpgrade(current, tags)
+		best := dockerfile.FindBestUpgrade(current, tags, false)
 
 		// then
 		assert.Empty(t, best)
@@ -176,13 +176,13 @@ func TestFindBestUpgrade(t *testing.T) {
 		tags := []string{"1.26.0", "1.25.9", "1.25.8"}
 
 		// when
-		best := dockerfile.FindBestUpgrade(current, tags)
+		best := dockerfile.FindBestUpgrade(current, tags, true)
 
 		// then
 		assert.Empty(t, best)
 	})
 
-	t.Run("should not cross minor version for patch-pinned versions", func(t *testing.T) {
+	t.Run("should not cross a minor for a patch-pin when majors are refused", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -197,7 +197,7 @@ func TestFindBestUpgrade(t *testing.T) {
 		tags := []string{"1.26.0", "1.25.8"}
 
 		// when
-		best := dockerfile.FindBestUpgrade(current, tags)
+		best := dockerfile.FindBestUpgrade(current, tags, false)
 
 		// then
 		assert.Equal(t, "1.25.8", best)
@@ -237,5 +237,65 @@ func TestParsedImageRefFullName(t *testing.T) {
 
 		// then
 		assert.Equal(t, "bitnami/redis", name)
+	})
+}
+
+// TestFindBestUpgradeMajorMode covers the mode this updater never had. It
+// refused every major unconditionally, which made it the strictest of the ten
+// and the only one whose answer no configuration could change — a Dockerfile on
+// `node:20` stayed on 20 for ever, including past its end of life.
+func TestFindBestUpgradeMajorMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should cross a major when allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		current := &dockerfile.ParsedImageRef{
+			Namespace: "", Image: "node", Tag: "20",
+			Version: "20", Suffix: "", Precision: 1,
+		}
+		tags := []string{"18", "20", "21", "22"}
+
+		// when
+		best := dockerfile.FindBestUpgrade(current, tags, true)
+
+		// then
+		assert.Equal(t, "22", best)
+	})
+
+	t.Run("should hold the major when refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		current := &dockerfile.ParsedImageRef{
+			Namespace: "", Image: "node", Tag: "20",
+			Version: "20", Suffix: "", Precision: 1,
+		}
+		tags := []string{"18", "20", "21", "22"}
+
+		// when
+		best := dockerfile.FindBestUpgrade(current, tags, false)
+
+		// then -- 20 is already the newest on its own major line
+		assert.Empty(t, best)
+	})
+
+	t.Run("should still match suffix and precision when majors are allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- the suffix encodes what the Dockerfile chose, not how far
+		// behind it is, so allowing majors must not start crossing variants
+		current := &dockerfile.ParsedImageRef{
+			Namespace: "", Image: "node", Tag: "20-alpine",
+			Version: "20", Suffix: "-alpine", Precision: 1,
+		}
+		tags := []string{"22", "22-slim", "22-alpine"}
+
+		// when
+		best := dockerfile.FindBestUpgrade(current, tags, true)
+
+		// then
+		assert.Equal(t, "22-alpine", best)
 	})
 }

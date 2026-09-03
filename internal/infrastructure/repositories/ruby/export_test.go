@@ -60,13 +60,13 @@ type UpgradeParamsExported = upgradeParams
 type UpgradeResultExported = upgradeResult
 
 // BuildUpgradeScript is exported for testing.
-func BuildUpgradeScript(params UpgradeParamsExported, repoDir string) string {
-	return buildUpgradeScript(params, repoDir)
+func BuildUpgradeScript(params UpgradeParamsExported, repoDir string, allowMajorUpdates bool) string {
+	return buildUpgradeScript(params, repoDir, allowMajorUpdates)
 }
 
 // BuildBatchRubyScript is exported for testing.
-func BuildBatchRubyScript() string {
-	return buildBatchRubyScript()
+func BuildBatchRubyScript(allowMajorUpdates bool) string {
+	return buildBatchRubyScript(allowMajorUpdates)
 }
 
 // WriteGitAuth is exported for testing.
@@ -75,8 +75,8 @@ func WriteGitAuth(sb *strings.Builder, params UpgradeParamsExported) {
 }
 
 // WriteRubyUpgradeCommands is exported for testing.
-func WriteRubyUpgradeCommands(sb *strings.Builder) {
-	writeRubyUpgradeCommands(sb)
+func WriteRubyUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
+	writeRubyUpgradeCommands(sb, allowMajorUpdates)
 }
 
 // BuildEnv is exported for testing.

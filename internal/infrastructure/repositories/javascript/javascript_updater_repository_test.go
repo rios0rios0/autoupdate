@@ -949,7 +949,7 @@ func TestBuildBatchJSScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := jsUpdater.BuildBatchJSScript()
+		script := jsUpdater.BuildBatchJSScript(true)
 
 		// then
 		assert.True(t, strings.HasPrefix(script, "#!/bin/bash\n"))
@@ -960,7 +960,7 @@ func TestBuildBatchJSScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := jsUpdater.BuildBatchJSScript()
+		script := jsUpdater.BuildBatchJSScript(true)
 
 		// then
 		assert.Contains(t, script, "NODE_VERSION")
@@ -1519,5 +1519,61 @@ func TestHandleDryRunLocal(t *testing.T) {
 		// then
 		require.NotNil(t, result)
 		assert.False(t, result.NodeVersionUpdated)
+	})
+}
+
+// TestJSMajorMode covers the range-raising variant. The plain forms all resolve
+// inside the ranges package.json declares, so before this the JavaScript updater
+// could never cross a major however the key was set.
+func TestJSMajorMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should raise ranges for every manager when allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := jsUpdater.BuildBatchJSScript(true)
+
+		// then
+		assert.Contains(t, script, "pnpm update --latest")
+		assert.Contains(t, script, "yarn upgrade --latest") // Classic
+		assert.Contains(t, script, "yarn up '*'")           // Berry
+		assert.Contains(t, script, "npx --yes npm-check-updates -u")
+	})
+
+	t.Run("should resolve inside declared ranges when refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := jsUpdater.BuildBatchJSScript(false)
+
+		// then
+		assert.Contains(t, script, "pnpm update")
+		assert.NotContains(t, script, "--latest")
+		assert.NotContains(t, script, "npm-check-updates")
+	})
+
+	t.Run("should pick the yarn form from the installed major", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- Berry replaced `upgrade` with `up` and only Classic knows
+		// --latest, and nothing on the Go side knows which is installed
+		script := jsUpdater.BuildBatchJSScript(true)
+
+		// when / then
+		assert.Contains(t, script, "yarn --version")
+		assert.Contains(t, script, `if [ "$YARN_MAJOR" = "1" ]`)
+	})
+
+	t.Run("should fall back to a plain update when ncu cannot be fetched", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- an offline runner should still get the safe upgrade rather
+		// than no upgrade
+		script := jsUpdater.BuildBatchJSScript(true)
+
+		// when / then
+		assert.Contains(t, script, "npm-check-updates unavailable, falling back to npm update")
+		assert.Contains(t, script, "npm update")
 	})
 }

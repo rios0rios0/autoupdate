@@ -14,8 +14,8 @@ func ParseTag(tag string) (string, string, int, bool) {
 }
 
 // FindBestUpgrade is exported for testing.
-func FindBestUpgrade(current *parsedImageRef, availableTags []string) string {
-	return findBestUpgrade(current, availableTags)
+func FindBestUpgrade(current *parsedImageRef, availableTags []string, allowMajorUpdates bool) string {
+	return findBestUpgrade(current, availableTags, allowMajorUpdates)
 }
 
 // ScanDockerfile is exported for testing. It returns dependencies found in a Dockerfile.
@@ -178,8 +178,8 @@ func UpgradeTaskDigest(task UpgradeTask) string {
 }
 
 // DetermineUpgrades is exported for testing.
-func DetermineUpgrades(ctx context.Context, allRefs []ImageRef) []UpgradeTask {
-	return determineUpgrades(ctx, allRefs)
+func DetermineUpgrades(ctx context.Context, allRefs []ImageRef, allowMajorUpdates bool) []UpgradeTask {
+	return determineUpgrades(ctx, allRefs, allowMajorUpdates)
 }
 
 // CreateUpgradePR is exported for testing.

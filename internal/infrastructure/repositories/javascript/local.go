@@ -25,6 +25,8 @@ type LocalUpgradeOptions struct {
 	AuthToken    string
 	ProviderName string                    // git provider name (e.g. "azuredevops", "github", "gitlab")
 	PushAuth     gitlocal.PushAuthResolver // resolves auth methods for git push
+	// AllowMajorUpdates is resolved by entities.MajorUpdatesAllowed.
+	AllowMajorUpdates bool
 }
 
 // LocalResult holds the outcome of a local upgrade operation.
@@ -260,6 +262,8 @@ type localUpgradeParams struct {
 	AuthToken      string
 	ProviderName   string
 	PackageManager string
+	// AllowMajorUpdates is carried through to writeJSUpgradeCommands.
+	AllowMajorUpdates bool
 }
 
 // buildLocalUpgradeScript builds a bash script that performs only the
@@ -276,8 +280,9 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	writeLocalAuth(&sb, params)
 
 	// JavaScript upgrade commands (reuse remote-mode helpers)
-	writeJSUpgradeCommands(&sb, upgradeParams{
-		PackageManager: params.PackageManager,
+	writeJSUpgradeCommands(&sb, upgradeParams{ //nolint:exhaustruct // only these reach the script
+		PackageManager:    params.PackageManager,
+		AllowMajorUpdates: params.AllowMajorUpdates,
 	})
 
 	// Update Dockerfile node image tags

@@ -304,7 +304,7 @@ func TestPipProjectKeepsItsPackageManager(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(true, false, false, false)
+		script := pyUpdater.BuildBatchPythonScript(true, false, false, false, true)
 
 		// then
 		assert.Contains(t, script, "pip install --upgrade -r requirements.txt")
@@ -315,7 +315,7 @@ func TestPipProjectKeepsItsPackageManager(t *testing.T) {
 		t.Parallel()
 
 		// given / when — PDM markers are present, the pyproject.toml is not
-		script := pyUpdater.BuildBatchPythonScript(true, false, true, false)
+		script := pyUpdater.BuildBatchPythonScript(true, false, true, false, true)
 
 		// then
 		assertNoPDMCommands(t, script)
@@ -327,7 +327,7 @@ func TestPipProjectKeepsItsPackageManager(t *testing.T) {
 		// given / when — a pyproject.toml naming PDM with no lock ever
 		// committed from it; a PDM run here would resolve a lock file from
 		// scratch and leave the requirements.txt the build installs untouched
-		script := pyUpdater.BuildBatchPythonScript(true, true, false, true)
+		script := pyUpdater.BuildBatchPythonScript(true, true, false, true, true)
 
 		// then
 		assert.Contains(t, script, "pip install --upgrade -r requirements.txt")
@@ -370,7 +370,7 @@ func TestPipProjectKeepsItsPackageManager(t *testing.T) {
 
 		// given / when
 		scripts := map[string]string{
-			"batch": pyUpdater.BuildBatchPythonScript(true, false, false, false),
+			"batch": pyUpdater.BuildBatchPythonScript(true, false, false, false, true),
 			"clone": pyUpdater.BuildUpgradeScript(
 				pyUpdater.UpgradeParamsExported{ProviderName: "github", Project: pipProject},
 				"/tmp/repo",
@@ -393,7 +393,7 @@ func TestPipProjectKeepsItsPackageManager(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true, false, true)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false, true, true)
 
 		// then
 		assert.Contains(t, script, "pdm update --update-all --no-sync")

@@ -28,10 +28,10 @@
 # Pre-releases are excluded regardless of this setting: taking a beta is how CVEs get
 # reintroduced, not remediated.
 #
-# Honoured by java, golang, dart, terraform, pipeline, csharp and ruby (its .ruby-version
-# pin). javascript, python and the gem half of ruby delegate to a package manager that
-# already resolves inside the declared ranges, so there is nothing for this to gate there,
-# and dockerfile refuses majors unconditionally and does not read it yet.
+# Honoured by every updater, though what it means differs by ecosystem: for the ones that
+# pick a version in Go it is a comparison, and for the ones that shell out it selects the
+# flag -- `pub upgrade --major-versions`, `pdm --unconstrained`, `pnpm update --latest`,
+# `npm-check-updates`, `bundle update --minor`.
 #allow_major_updates: false
 
 # (optional) number of repositories processed in parallel within an organization.

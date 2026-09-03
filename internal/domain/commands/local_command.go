@@ -327,6 +327,8 @@ func runPythonLocalUpgrade(
 		AuthToken:    token,
 		ProviderName: providerType,
 		PushAuth:     registry,
+
+		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 	})
 	if err != nil {
 		return nil, err
@@ -353,6 +355,8 @@ func runJSLocalUpgrade(
 		AuthToken:    token,
 		ProviderName: providerType,
 		PushAuth:     registry,
+
+		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 	})
 	if err != nil {
 		return nil, err

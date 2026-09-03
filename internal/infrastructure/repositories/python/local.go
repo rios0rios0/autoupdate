@@ -25,6 +25,8 @@ type LocalUpgradeOptions struct {
 	AuthToken    string
 	ProviderName string                    // git provider name (e.g. "azuredevops", "github", "gitlab")
 	PushAuth     gitlocal.PushAuthResolver // resolves auth methods for git push
+	// AllowMajorUpdates is resolved by entities.MajorUpdatesAllowed.
+	AllowMajorUpdates bool
 }
 
 // LocalResult holds the outcome of a local upgrade operation.
@@ -226,6 +228,8 @@ type localUpgradeParams struct {
 	// manager selected from them.
 	Project      pythonProject
 	PythonBinary string
+	// AllowMajorUpdates is carried through to writePythonUpgradeCommands.
+	AllowMajorUpdates bool
 }
 
 // buildLocalUpgradeScript builds a bash script that performs only the
@@ -243,7 +247,10 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	writeLocalAuth(&sb, params)
 
 	// Python upgrade commands (reuse remote-mode helpers)
-	writePythonUpgradeCommands(&sb, upgradeParams{Project: params.Project})
+	writePythonUpgradeCommands(&sb, upgradeParams{ //nolint:exhaustruct // only these reach the script
+		Project:           params.Project,
+		AllowMajorUpdates: params.AllowMajorUpdates,
+	})
 
 	// Keep generated build metadata out of the commit
 	writeEggInfoGitignore(&sb)
