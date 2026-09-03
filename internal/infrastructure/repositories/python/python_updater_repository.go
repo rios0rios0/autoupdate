@@ -121,7 +121,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx)
+	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, opts.AllowMajorUpdates)
 	if upgradeErr != nil {
 		return nil, upgradeErr
 	}
@@ -156,6 +156,7 @@ func cloneAndUpgrade(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
+	allowMajorUpdates bool,
 ) (*upgradeResult, error) {
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
 	defer changelog.Remove()
@@ -179,6 +180,8 @@ func cloneAndUpgrade(
 		Changelog:     changelog,
 		Project:       project,
 		PythonBinary:  pythonBinary,
+
+		AllowMajorUpdates: allowMajorUpdates,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade: %w", err)
@@ -239,7 +242,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	_ repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[python] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
@@ -253,7 +256,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, fmt.Errorf("python binary not found: %w", binErr)
 	}
 
-	script := buildBatchPythonScript(project)
+	script := buildBatchPythonScript(project, opts.AllowMajorUpdates)
 	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
 	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
 		return nil, fmt.Errorf("failed to write script: %w", writeErr)
@@ -319,13 +322,16 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 // buildBatchPythonScript generates a bash script with only language-specific
 // operations (no git clone, branch, commit, or push) for the batch pipeline.
-func buildBatchPythonScript(project pythonProject) string {
+func buildBatchPythonScript(project pythonProject, allowMajorUpdates bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 
-	writePythonUpgradeCommands(&sb, upgradeParams{Project: project})
+	writePythonUpgradeCommands(&sb, upgradeParams{ //nolint:exhaustruct // only these reach the script
+		Project:           project,
+		AllowMajorUpdates: allowMajorUpdates,
+	})
 	writeEggInfoGitignore(&sb)
 	writeDockerfileUpdate(&sb)
 
@@ -354,6 +360,9 @@ type upgradeParams struct {
 	// manager selected from them.
 	Project      pythonProject
 	PythonBinary string
+	// AllowMajorUpdates raises the bounds pyproject.toml declares rather than
+	// resolving inside them. The zero value is the restrictive case.
+	AllowMajorUpdates bool
 }
 
 type upgradeResult struct {
@@ -653,7 +662,7 @@ func writePythonUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 	// view of the PDM lock file, so running both would leave the lock stale
 	// while still producing the local-install artefacts pip leaves behind.
 	if params.Project.UsesPDM() {
-		writePDMUpgradeCommands(sb)
+		writePDMUpgradeCommands(sb, params.AllowMajorUpdates)
 		sb.WriteString("deactivate 2>/dev/null || true\n")
 		sb.WriteString("rm -rf \"$VENV_DIR\"\n\n")
 		return
@@ -746,15 +755,30 @@ func writeManifestRestore(sb *strings.Builder) {
 //
 // The `-G :all` form covers every optional-dependency group; projects that
 // declare none reject it, so the plain form is retried before giving up.
-func writePDMUpgradeCommands(sb *strings.Builder) {
+// writePDMUpgradeCommands emits the PDM upgrade.
+//
+// Without --unconstrained, `pdm update` resolves inside the constraints
+// pyproject.toml already declares, so a caret or tilde bound keeps the project
+// on its current major however allow_major_updates is set. --unconstrained is
+// PDM's own way of raising those bounds, which makes it the direct counterpart
+// of Dart's --major-versions and npm-check-updates.
+func writePDMUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
+	unconstrained := ""
+	if allowMajorUpdates {
+		unconstrained = " --unconstrained"
+	}
+
 	sb.WriteString("# Upgrade dependencies with PDM (project is PDM-managed)\n")
 	sb.WriteString("if ! command -v pdm > /dev/null 2>&1; then\n")
 	sb.WriteString("    echo \"Installing PDM into the temporary virtual environment...\"\n")
 	sb.WriteString("    pip install --upgrade pdm 2>&1 || echo \"WARNING: PDM installation had some errors\"\n")
 	sb.WriteString("fi\n")
-	sb.WriteString("echo \"Running pdm update...\"\n")
-	sb.WriteString("pdm update --update-all --no-sync -G :all 2>&1 \\\n")
-	sb.WriteString("    || pdm update --update-all --no-sync 2>&1 \\\n")
+	fmt.Fprintf(sb, "echo \"Running pdm update%s...\"\n", unconstrained)
+	// The -G :all form is tried first and falls back, so both variants carry the
+	// flag: dropping it from the fallback would silently downgrade the upgrade
+	// on exactly the projects where the first form fails.
+	fmt.Fprintf(sb, "pdm update --update-all --no-sync -G :all%s 2>&1 \\\n", unconstrained)
+	fmt.Fprintf(sb, "    || pdm update --update-all --no-sync%s 2>&1 \\\n", unconstrained)
 	sb.WriteString("    || echo \"WARNING: pdm update had some errors (continuing anyway)\"\n\n")
 }
 

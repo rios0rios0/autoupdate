@@ -120,8 +120,8 @@ func BuildEnv(params upgradeParams, repoDir string) []string {
 }
 
 // BuildBatchJSScript is exported for testing.
-func BuildBatchJSScript() string {
-	return buildBatchJSScript()
+func BuildBatchJSScript(allowMajorUpdates bool) string {
+	return buildBatchJSScript(allowMajorUpdates)
 }
 
 // LocalUpgradeParamsExported is exported for testing.

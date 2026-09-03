@@ -537,7 +537,7 @@ func TestIsNewerVersion(t *testing.T) {
 		newVersion := "2.0.0"
 
 		// when
-		result := terraform.IsNewerVersion(current, newVersion)
+		result := terraform.IsNewerVersion(current, newVersion, true)
 
 		// then
 		assert.True(t, result)
@@ -551,7 +551,7 @@ func TestIsNewerVersion(t *testing.T) {
 		newVersion := "1.0.0"
 
 		// when
-		result := terraform.IsNewerVersion(current, newVersion)
+		result := terraform.IsNewerVersion(current, newVersion, true)
 
 		// then
 		assert.False(t, result)
@@ -565,7 +565,7 @@ func TestIsNewerVersion(t *testing.T) {
 		newVersion := "1.0.0"
 
 		// when
-		result := terraform.IsNewerVersion(current, newVersion)
+		result := terraform.IsNewerVersion(current, newVersion, true)
 
 		// then
 		assert.False(t, result)
@@ -579,7 +579,7 @@ func TestIsNewerVersion(t *testing.T) {
 		newVersion := "v2.0.0"
 
 		// when
-		result := terraform.IsNewerVersion(current, newVersion)
+		result := terraform.IsNewerVersion(current, newVersion, true)
 
 		// then
 		assert.True(t, result)
@@ -593,7 +593,7 @@ func TestIsNewerVersion(t *testing.T) {
 		newVersion := "abc-20250101"
 
 		// when
-		result := terraform.IsNewerVersion(current, newVersion)
+		result := terraform.IsNewerVersion(current, newVersion, true)
 
 		// then
 		assert.True(t, result)
@@ -607,7 +607,7 @@ func TestIsNewerVersion(t *testing.T) {
 		newVersion := "main-snapshot"
 
 		// when
-		result := terraform.IsNewerVersion(current, newVersion)
+		result := terraform.IsNewerVersion(current, newVersion, true)
 
 		// then
 		assert.False(t, result)
@@ -1666,7 +1666,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		updater := &terraform.UpdaterRepository{}
 
 		// when
-		upgrades := terraform.DetermineUpgrades(t.Context(), updater, provider, repo, allDeps)
+		upgrades := terraform.DetermineUpgrades(t.Context(), updater, provider, repo, allDeps, true)
 
 		// then
 		require.Len(t, upgrades, 1)
@@ -1709,7 +1709,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		updater := &terraform.UpdaterRepository{}
 
 		// when
-		upgrades := terraform.DetermineUpgrades(t.Context(), updater, provider, repo, allDeps)
+		upgrades := terraform.DetermineUpgrades(t.Context(), updater, provider, repo, allDeps, true)
 
 		// then
 		assert.Empty(t, upgrades)
@@ -1739,7 +1739,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		updater := &terraform.UpdaterRepository{}
 
 		// when
-		upgrades := terraform.DetermineUpgrades(t.Context(), updater, provider, repo, allDeps)
+		upgrades := terraform.DetermineUpgrades(t.Context(), updater, provider, repo, allDeps, true)
 
 		// then
 		assert.Empty(t, upgrades)
@@ -1944,4 +1944,42 @@ func TestStripVersionPrefix(t *testing.T) {
 		// then
 		assert.Equal(t, "1.0.0", result)
 	})
+}
+
+// TestIsNewerVersionMajorMode covers the terraform selector, which took every
+// major unconditionally before the key reached it.
+func TestIsNewerVersionMajorMode(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		current    string
+		candidate  string
+		allowMajor bool
+		newer      bool
+	}{
+		{"minor bump is taken either way", "5.1.0", "5.9.0", true, true},
+		{"minor bump is taken when majors refused", "5.1.0", "5.9.0", false, true},
+		{"major bump taken when allowed", "5.9.0", "6.0.0", true, true},
+		{"major bump held when refused", "5.9.0", "6.0.0", false, false},
+		{"downgrade refused either way", "6.0.0", "5.9.0", true, false},
+		// A non-semver pair cannot answer the major question, so a repository
+		// that refuses majors refuses these too rather than guessing.
+		{"non-semver taken when majors allowed", "abc", "abd", true, true},
+		{"non-semver held when majors refused", "abc", "abd", false, false},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given / when
+			newer := terraform.IsNewerVersion(
+				testCase.current, testCase.candidate, testCase.allowMajor,
+			)
+
+			// then
+			assert.Equal(t, testCase.newer, newer)
+		})
+	}
 }

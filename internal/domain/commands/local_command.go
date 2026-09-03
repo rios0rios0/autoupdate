@@ -327,6 +327,8 @@ func runPythonLocalUpgrade(
 		AuthToken:    token,
 		ProviderName: providerType,
 		PushAuth:     registry,
+
+		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 	})
 	if err != nil {
 		return nil, err
@@ -353,6 +355,8 @@ func runJSLocalUpgrade(
 		AuthToken:    token,
 		ProviderName: providerType,
 		PushAuth:     registry,
+
+		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 	})
 	if err != nil {
 		return nil, err
@@ -379,6 +383,8 @@ func runDartLocalUpgrade(
 		AuthToken:    token,
 		ProviderName: providerType,
 		PushAuth:     registry,
+
+		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 	})
 	if err != nil {
 		return nil, err
@@ -392,6 +398,8 @@ func runDartLocalUpgrade(
 		PackageManager: result.Toolchain,
 		ProjectType:    langEntities.LanguageDart,
 		HasChanges:     result.HasChanges,
+
+		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 	}, nil
 }
 
@@ -483,6 +491,7 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 			}
 			desc := dartRepo.GeneratePRDescription(
 				info.LatestVersion, info.PackageManager, info.VersionUpdated,
+				info.AllowMajorUpdates,
 			)
 			return title, desc
 		},

@@ -150,7 +150,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, repo, "8.0.11")
+		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, repo, "8.0.11", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -171,7 +171,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, repo, "8.0.11")
+		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, repo, "8.0.11", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -189,7 +189,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, repo, "8.0.11")
+		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, repo, "8.0.11", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -210,7 +210,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, repo, "")
+		vCtx := csUpdater.ResolveVersionContext(t.Context(), provider, repo, "", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -339,5 +339,54 @@ func TestWriteGitAuth(t *testing.T) {
 		result := sb.String()
 		assert.Contains(t, result, "oauth2")
 		assert.Contains(t, result, "gitlab.com")
+	})
+}
+
+// TestResolveVersionContextMajorMode covers the .NET SDK pin under a refusal,
+// and — more importantly — that the refusal reaches the script.
+//
+// The decision is made here in Go and the rewrite happens in bash, whose only
+// gate is `autoupdate_version_is_newer` and which has no major-version concept.
+// So the refusal is expressed by withholding DOTNET_VERSION; a version that
+// leaks through would rewrite `global.json` across the major while the branch,
+// commit message and changelog all said no upgrade happened.
+func TestResolveVersionContextMajorMode(t *testing.T) {
+	t.Parallel()
+
+	newProvider := func() *repositorydoubles.SpyProviderRepository {
+		return repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"global.json": true}).
+			WithFileContents(map[string]string{
+				"global.json": `{"sdk":{"version":"6.0.25"}}`,
+			}).
+			BuildSpy()
+	}
+	repo := entities.Repository{
+		Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main",
+	}
+
+	t.Run("should hold a major bump when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when -- 6.0.25 pinned, 8.0.11 offered
+		vCtx := csUpdater.ResolveVersionContext(t.Context(), newProvider(), repo, "8.0.11", false)
+
+		// then
+		require.NotNil(t, vCtx)
+		assert.False(t, vCtx.NeedsVersionUpgrade)
+		assert.Empty(t, csUpdater.DotnetVersionFor(vCtx),
+			"a refused version must not reach the script that rewrites global.json")
+	})
+
+	t.Run("should take a minor bump when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		vCtx := csUpdater.ResolveVersionContext(t.Context(), newProvider(), repo, "6.0.30", false)
+
+		// then
+		require.NotNil(t, vCtx)
+		assert.True(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "6.0.30", csUpdater.DotnetVersionFor(vCtx))
 	})
 }

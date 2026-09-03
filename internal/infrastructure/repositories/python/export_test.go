@@ -64,9 +64,12 @@ func BuildUpgradeScript(params UpgradeParamsExported, repoDir string) string {
 }
 
 // BuildBatchPythonScript is exported for testing.
-func BuildBatchPythonScript(hasRequirements, hasPyproject, hasPDMLock, pyprojectDeclaresPDM bool) string {
+func BuildBatchPythonScript(
+	hasRequirements, hasPyproject, hasPDMLock, pyprojectDeclaresPDM, allowMajorUpdates bool,
+) string {
 	return buildBatchPythonScript(
 		NewPythonProject(hasRequirements, hasPyproject, hasPDMLock, pyprojectDeclaresPDM),
+		allowMajorUpdates,
 	)
 }
 

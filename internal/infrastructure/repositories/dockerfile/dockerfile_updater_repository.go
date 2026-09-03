@@ -99,7 +99,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	upgrades := determineUpgrades(ctx, allRefs)
+	upgrades := determineUpgrades(ctx, allRefs, opts.AllowMajorUpdates)
 	if len(upgrades) == 0 {
 		logger.Infof("[dockerfile] %s/%s: all Dockerfile base images up to date", repo.Organization, repo.Name)
 		return []entities.PullRequest{}, nil
@@ -128,7 +128,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	_ repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[dockerfile] Scanning local clone of %s/%s for Dockerfile base images",
 		repo.Organization, repo.Name)
@@ -138,7 +138,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	upgrades := determineUpgrades(ctx, allRefs)
+	upgrades := determineUpgrades(ctx, allRefs, opts.AllowMajorUpdates)
 	if len(upgrades) == 0 {
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
@@ -319,7 +319,9 @@ func scanDockerfile(content, filePath string) []imageRef {
 // It defaults to fetchTags and can be overridden in tests.
 var fetchTagsFunc = fetchTags //nolint:gochecknoglobals // test override for DI
 
-func determineUpgrades(ctx context.Context, allRefs []imageRef) []upgradeTask {
+func determineUpgrades(
+	ctx context.Context, allRefs []imageRef, allowMajorUpdates bool,
+) []upgradeTask {
 	// Cache tags per image to avoid redundant API calls
 	tagCache := make(map[string]*tagIndex)
 	var upgrades []upgradeTask
@@ -342,7 +344,7 @@ func determineUpgrades(ctx context.Context, allRefs []imageRef) []upgradeTask {
 			continue
 		}
 
-		bestTag := findBestUpgrade(ref.parsed, tags.names)
+		bestTag := findBestUpgrade(ref.parsed, tags.names, allowMajorUpdates)
 		if bestTag == "" || bestTag == ref.parsed.Tag {
 			continue
 		}

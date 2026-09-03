@@ -85,7 +85,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	upgrades := u.determineUpgrades(ctx, provider, repo, allDeps)
+	upgrades := u.determineUpgrades(ctx, provider, repo, allDeps, opts.AllowMajorUpdates)
 	if len(upgrades) == 0 {
 		logger.Infof(
 			"[terraform] %s/%s: all Terraform dependencies up to date",
@@ -121,7 +121,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[terraform] Scanning local clone of %s/%s for Terraform dependencies",
 		repo.Organization, repo.Name)
@@ -131,7 +131,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	upgrades := u.determineUpgrades(ctx, provider, repo, allDeps)
+	upgrades := u.determineUpgrades(ctx, provider, repo, allDeps, opts.AllowMajorUpdates)
 	if len(upgrades) == 0 {
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
@@ -274,6 +274,7 @@ func (u *UpdaterRepository) determineUpgrades(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	allDeps []depWithContent,
+	allowMajorUpdates bool,
 ) []upgradeTask {
 	moduleVersions := make(map[string]resolvedSource)
 	for _, dc := range allDeps {
@@ -299,7 +300,7 @@ func (u *UpdaterRepository) determineUpgrades(
 		if dc.Dependency.CurrentVer == latestVersion {
 			continue
 		}
-		if !isNewerVersion(dc.Dependency.CurrentVer, latestVersion) {
+		if !isNewerVersion(dc.Dependency.CurrentVer, latestVersion, allowMajorUpdates) {
 			continue
 		}
 		upgrades = append(upgrades, upgradeTask{
@@ -578,13 +579,27 @@ func extractRepoName(source string) string {
 
 // --- version helpers ---
 
-func isNewerVersion(current, newVersion string) bool {
+// isNewerVersion reports whether newVersion is an upgrade this run may take.
+//
+// allowMajorUpdates is threaded in rather than defaulted: a provider or module
+// constraint crossing a major is exactly what `allow_major_updates: false` is
+// for, and this is the only place terraform decides it.
+//
+// The non-semver fallback compares strings, which cannot answer the major
+// question at all, so a repository that refuses majors also refuses those --
+// leaving a pin alone is the safe direction when the comparison is unreliable.
+func isNewerVersion(current, newVersion string, allowMajorUpdates bool) bool {
 	cur := normalizeVersion(current)
 	nv := normalizeVersion(newVersion)
 	if semver.IsValid(cur) && semver.IsValid(nv) {
-		return semver.Compare(nv, cur) > 0
+		if semver.Compare(nv, cur) <= 0 {
+			return false
+		}
+
+		return allowMajorUpdates || semver.Major(nv) == semver.Major(cur)
 	}
-	return newVersion > current
+
+	return allowMajorUpdates && newVersion > current
 }
 
 func normalizeVersion(version string) string {

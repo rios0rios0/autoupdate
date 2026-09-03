@@ -920,7 +920,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		}
 
 		// when
-		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 		// then
 		require.Len(t, upgrades, 1)
@@ -941,7 +941,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		}
 
 		// when
-		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 		// then
 		assert.Empty(t, upgrades)
@@ -962,7 +962,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		}
 
 		// when
-		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 		// then
 		assert.Empty(t, upgrades)
@@ -986,7 +986,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		}
 
 		// when
-		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs)
+		upgrades := dockerfile.DetermineUpgrades(t.Context(), allRefs, true)
 
 		// then
 		require.Len(t, upgrades, 2)

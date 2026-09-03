@@ -120,7 +120,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	result, upgradeErr := cloneAndUpgrade(ctx, u.cmdRunner, provider, repo, vCtx)
+	result, upgradeErr := cloneAndUpgrade(ctx, u.cmdRunner, provider, repo, vCtx, opts.AllowMajorUpdates)
 	if upgradeErr != nil {
 		return nil, upgradeErr
 	}
@@ -140,7 +140,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	_ repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[dart] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
@@ -150,7 +150,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	// and parsing JSON with grep and sed is how a flavors block gets destroyed.
 	sdkUpdated := applyFvmPin(repoDir, vCtx)
 
-	outputStr, runErr := runUpgradeScript(ctx, u.cmdRunner, repoDir, vCtx)
+	outputStr, runErr := runUpgradeScript(ctx, u.cmdRunner, repoDir, vCtx, opts.AllowMajorUpdates)
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -168,7 +168,9 @@ func (u *UpdaterRepository) ApplyUpdates(
 		BranchName:    vCtx.BranchName,
 		CommitMessage: commitMsg,
 		PRTitle:       commitMsg,
-		PRDescription: GeneratePRDescription(vCtx.LatestVersion, vCtx.Toolchain, sdkUpdated),
+		PRDescription: GeneratePRDescription(
+			vCtx.LatestVersion, vCtx.Toolchain, sdkUpdated, opts.AllowMajorUpdates,
+		),
 	}, nil
 }
 
@@ -180,9 +182,10 @@ func runUpgradeScript(
 	runner cmdrunner.Runner,
 	repoDir string,
 	vCtx *versionContext,
+	allowMajorUpdates bool,
 ) (string, error) {
 	return cmdrunner.RunScript(ctx, runner, cmdrunner.ScriptRun{
-		Body:        buildBatchDartScript(),
+		Body:        buildBatchDartScript(allowMajorUpdates),
 		TempPattern: "autoupdate-dart-batch-*",
 		Dir:         repoDir,
 		Env:         append(os.Environ(), "PUB_EXECUTABLE="+vCtx.Toolchain),
@@ -207,13 +210,13 @@ func applyFvmPin(repoDir string, vCtx *versionContext) bool {
 
 // buildBatchDartScript generates a bash script with only the pub operations
 // (no git clone, branch, commit or push) for the batch pipeline.
-func buildBatchDartScript() string {
+func buildBatchDartScript(allowMajorUpdates bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 
-	writeDartUpgradeCommands(&sb)
+	writeDartUpgradeCommands(&sb, allowMajorUpdates)
 
 	return sb.String()
 }
@@ -240,6 +243,10 @@ type upgradeParams struct {
 	// Changelog is the staged changelog payload the script copies into
 	// the clone; an empty value leaves the repository's changelog untouched.
 	Changelog support.StagedChangelog
+	// AllowMajorUpdates decides whether pub is asked for --major-versions.
+	// The zero value is the restrictive case; resolve it with
+	// entities.MajorUpdatesAllowed at the call site.
+	AllowMajorUpdates bool
 }
 
 type upgradeResult struct {
@@ -372,6 +379,7 @@ func cloneAndUpgrade(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
+	allowMajorUpdates bool,
 ) (*upgradeResult, error) {
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx, vCtx.NeedsVersionUpgrade))
 	defer changelog.Remove()
@@ -385,6 +393,8 @@ func cloneAndUpgrade(
 		AuthToken:     provider.AuthToken(),
 		ProviderName:  provider.Name(),
 		Changelog:     changelog,
+
+		AllowMajorUpdates: allowMajorUpdates,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade: %w", err)
@@ -420,7 +430,9 @@ func openPullRequest(
 		SourceBranch: refsHeadsPrefix + vCtx.BranchName,
 		TargetBranch: targetBranch,
 		Title:        commitMessage(vCtx, result.SDKUpdated),
-		Description:  GeneratePRDescription(vCtx.LatestVersion, vCtx.Toolchain, result.SDKUpdated),
+		Description: GeneratePRDescription(
+			vCtx.LatestVersion, vCtx.Toolchain, result.SDKUpdated, opts.AllowMajorUpdates,
+		),
 		AutoComplete: opts.AutoComplete,
 	})
 	if createErr != nil {
@@ -461,6 +473,7 @@ func upgradeRepo(ctx context.Context, runner cmdrunner.Runner, params upgradePar
 }
 
 func buildUpgradeScript(params upgradeParams) string {
+	allowMajorUpdates := params.AllowMajorUpdates
 	var sb strings.Builder
 
 	sb.WriteString("#!/bin/bash\n")
@@ -483,7 +496,7 @@ func buildUpgradeScript(params upgradeParams) string {
 	sb.WriteString("git checkout -b \"$BRANCH_NAME\" 2>&1\n\n")
 
 	writeFvmPinUpdate(&sb)
-	writeDartUpgradeCommands(&sb)
+	writeDartUpgradeCommands(&sb, allowMajorUpdates)
 
 	// Copy in the staged changelog: an edited CHANGELOG.md, or a chlog
 	// fragment when the target repository uses that format.
@@ -522,7 +535,19 @@ func writeFvmPinUpdate(sb *strings.Builder) {
 // declared, while --major-versions raises those constraints in pubspec.yaml to
 // what pub reports as resolvable. Pub applies that rewrite through yaml_edit, so
 // the manifest's comments survive it.
-func writeDartUpgradeCommands(sb *strings.Builder) {
+//
+// That makes the flag the exact expression of `allow_major_updates` for Dart,
+// which is why this is the one ecosystem where the key previously did the
+// opposite of what it said: a repository setting it to false still had its
+// constraints raised across majors, because pub was asked to do precisely that.
+func writeDartUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
+	upgradeArgs := " --major-versions"
+	if !allowMajorUpdates {
+		// Without it pub re-resolves inside the declared constraints, which is
+		// what "hold this repository on its current major line" means here.
+		upgradeArgs = ""
+	}
+
 	sb.WriteString("# Upgrade pub dependencies\n")
 	sb.WriteString("PUB=\"${PUB_EXECUTABLE:-dart}\"\n")
 	// FVM installs the SDK per project, so when a repository pins one the
@@ -531,9 +556,10 @@ func writeDartUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("    PUB=\"fvm $PUB\"\n")
 	sb.WriteString("fi\n")
 	sb.WriteString("if [ -f \"pubspec.yaml\" ]; then\n")
-	sb.WriteString("    echo \"Running $PUB pub upgrade --major-versions...\"\n")
-	sb.WriteString(
-		"    $PUB pub upgrade --major-versions 2>&1 || echo \"WARNING: pub upgrade had some errors (continuing anyway)\"\n",
+	fmt.Fprintf(sb, "    echo \"Running $PUB pub upgrade%s...\"\n", upgradeArgs)
+	fmt.Fprintf(sb,
+		"    $PUB pub upgrade%s 2>&1 || echo \"WARNING: pub upgrade had some errors (continuing anyway)\"\n",
+		upgradeArgs,
 	)
 	sb.WriteString("    echo \"Running $PUB pub get...\"\n")
 	sb.WriteString("    $PUB pub get 2>&1 || echo \"WARNING: pub get had some errors (continuing anyway)\"\n")
@@ -579,7 +605,9 @@ func buildEnv(params upgradeParams, repoDir string) []string {
 
 // GeneratePRDescription builds a markdown PR description for a pub dependency
 // upgrade. Exported so that the local-mode CLI handler can reuse the format.
-func GeneratePRDescription(sdkVersion, toolchain string, sdkUpdated bool) string {
+func GeneratePRDescription(
+	sdkVersion, toolchain string, sdkUpdated, allowMajorUpdates bool,
+) string {
 	if toolchain == "" {
 		toolchain = toolchainDart
 	}
@@ -598,13 +626,23 @@ func GeneratePRDescription(sdkVersion, toolchain string, sdkUpdated bool) string
 	if sdkUpdated {
 		sb.WriteString("- Updated `" + FvmConfigFile + "` to `" + sdkVersion + "`\n")
 	}
-	sb.WriteString("- Ran `" + toolchain + " pub upgrade --major-versions`, which raises the constraints in " +
-		"`pubspec.yaml` to the latest resolvable versions rather than only re-resolving `pubspec.lock`\n")
+	// The wording has to follow the flag the script was actually given. Saying
+	// constraints were raised over a diff that only moved `pubspec.lock` sends a
+	// reviewer looking for changes that are not there.
+	if allowMajorUpdates {
+		sb.WriteString("- Ran `" + toolchain + " pub upgrade --major-versions`, which raises the constraints in " +
+			"`pubspec.yaml` to the latest resolvable versions rather than only re-resolving `pubspec.lock`\n")
+	} else {
+		sb.WriteString("- Ran `" + toolchain + " pub upgrade`, which re-resolves `pubspec.lock` within the " +
+			"constraints `pubspec.yaml` already declares (`allow_major_updates` is off for this repository)\n")
+	}
 	sb.WriteString("- Ran `" + toolchain + " pub get` to refresh `pubspec.lock`\n")
 	sb.WriteString("\n### Review Checklist\n\n")
 	sb.WriteString("- [ ] Verify `" + toolchain + " analyze` passes\n")
 	sb.WriteString("- [ ] Verify tests pass\n")
-	sb.WriteString("- [ ] Review the constraint changes in `pubspec.yaml` for breaking major bumps\n")
+	if allowMajorUpdates {
+		sb.WriteString("- [ ] Review the constraint changes in `pubspec.yaml` for breaking major bumps\n")
+	}
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()

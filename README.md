@@ -240,7 +240,7 @@ allow_major_updates: false   # this one reviews majors by hand
 | `updaters` | Per-updater `enabled`, `auto_complete`, `target_branch` |
 | `exclude_repos`, `exclude_forks`, `exclude_archived` | Let the repository exclude *itself* |
 | `cleanup_stale_branches` | Only `false`, to keep this project's dated branches. An enable here would arrive after `--skip-cleanup` had been applied and would override it |
-| `allow_major_updates` | Either direction. On by default; set `false` to hold this repository's **Java and Go** dependencies on their current major line. Other ecosystems upgrade with their native tool's default behaviour and are unaffected — Dart's `pub upgrade --major-versions` crosses majors regardless |
+| `allow_major_updates` | Either direction. On by default; set `false` to hold this repository on its current major line. Honoured by every updater |
 
 And the keys it may **not** set, which are reported and ignored when a repository tries:
 

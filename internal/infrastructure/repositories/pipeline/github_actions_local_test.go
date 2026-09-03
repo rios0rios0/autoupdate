@@ -78,6 +78,7 @@ jobs:
 		// when
 		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, provider, latestVersions,
+			true,
 		)
 		fileChanges := pipeline.ApplyUpgrades(upgrades, fileContents)
 		require.NoError(t, support.WriteFileChanges(root, fileChanges))
@@ -130,6 +131,7 @@ jobs:
 		// when
 		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, provider, map[string]string{"golang": "1.24.1"},
+			true,
 		)
 		fileChanges := pipeline.ApplyUpgrades(upgrades, fileContents)
 		require.NoError(t, support.WriteFileChanges(root, fileChanges))
@@ -168,6 +170,7 @@ jobs:
 		// when
 		upgrades, fileContents := pipeline.LocalScanAndDetermineUpgrades(
 			t.Context(), root, provider, map[string]string{"python": "3.13.1"},
+			true,
 		)
 		fileChanges := pipeline.ApplyUpgrades(upgrades, fileContents)
 		require.NoError(t, support.WriteFileChanges(root, fileChanges))

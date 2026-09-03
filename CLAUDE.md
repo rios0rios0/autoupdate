@@ -278,13 +278,63 @@ repository, so an incompatible major arrives as a red check on a branch rather t
 broken main. That is a more accurate signal than a version-number heuristic, which cannot
 tell a rename from a rewrite.
 
-Only `java` and `golang` read it, from `UpdateOptions.AllowMajorUpdates`. The other eight
-accept the key through the config layers and then ignore it, because they delegate to a
-native tool with its own policy -- Dart's `pub upgrade --major-versions` crosses majors
-whatever this says. Turning it off does **not** hold those ecosystems back, and the
-user-facing docs say so; wiring the rest is open work.
+Every updater reads it, but what it *means* splits in two.
 
-The two that do act on it:
+The ones that pick a version in Go -- `golang`, `terraform`, `pipeline`, `csharp`, `ruby`'s
+`.ruby-version` pin and `dockerfile` -- go through `support.AcceptsUpgrade`, which is
+`IsNewerVersion` plus the major question so the two are asked together at every call site
+rather than each ecosystem re-deriving the second one.
+
+The ones that shell out to a package manager select a flag instead, because the plain
+command resolves *inside* the ranges the manifest already declares and so can never cross a
+major on its own. Each ecosystem needed a different one:
+
+| Updater | Majors allowed | Majors refused |
+|---|---|---|
+| `dart` | `pub upgrade --major-versions` | `pub upgrade` |
+| `python` (PDM) | `pdm update --unconstrained` | `pdm update` |
+| `javascript` (pnpm) | `pnpm update --latest` | `pnpm update` |
+| `javascript` (yarn) | `up '*'` / `upgrade --latest` | `yarn upgrade` |
+| `javascript` (npm) | `npm-check-updates -u` then install | `npm update` |
+| `ruby` (gems) | `bundle update` | `bundle update --minor` |
+| `java` | `-DallowMajorUpdates=true` | `-DallowMajorUpdates=false` |
+
+Three of those deserve a note. **yarn** is decided at run time, because Berry replaced
+`upgrade` with `up` and only Classic understands `--latest`, and nothing on the Go side
+knows which is installed. **npm** has no built-in range-raiser at all, so `npm-check-updates`
+is fetched with `npx --yes` and a failure degrades to the plain `npm update` -- an offline
+runner gets a smaller upgrade rather than none. **ruby** is the one asymmetric case: bundler
+has no flag meaning "raise the Gemfile bounds", and rewriting a `~>` is a different act from
+resolving within it, so only the refusing direction is expressed -- `--minor` caps the bump
+that plain `bundle update` would otherwise take on an unconstrained gem.
+
+**The refusal has to cross the Go/bash seam.** `csharp` and `ruby` decide in Go and rewrite
+the pin in bash, and the script's only gate is `autoupdate_version_is_newer`, which has no
+major-version concept. So the refusal is expressed by *withholding the value* --
+`dotnetVersionFor` and `rubyVersionFor` return "" unless `NeedsVersionUpgrade`, the shape
+dart's `sdkVersionFor` already used. Gating only the Go half is worse than not gating at
+all: the branch name, commit message, changelog entry and PR title all come from
+`NeedsVersionUpgrade`, so the pin would still cross the major and nothing would name it.
+
+**A conditional flag needs a conditional description.** `dart`'s PR body claimed constraints
+were raised across majors and asked the reviewer to check `pubspec.yaml` for breaking bumps;
+with majors refused only `pubspec.lock` moves, so both were false. `GeneratePRDescription`
+branches on the resolved value, as `GenerateGoPRDescription` does.
+
+**`pipeline` gates action refs as well as language pins.** `uses: actions/checkout@v4` ->
+`@v5` is unambiguously the bump the key exists to hold, and for many repositories action
+refs are the majority of what this updater changes -- gating only the language pin would
+have left the key close to inert here.
+
+`dockerfile` moved furthest. It refused every major *unconditionally*, which made it the
+only updater whose answer no configuration could change: a Dockerfile on `node:20` stayed
+on 20 for ever. With majors allowed its two version-distance rules fall away together --
+crossing a major implies crossing a minor, so keeping the patch-pin minor rule would leave a
+three-part pin unable to move and the setting quietly inert for it. Suffix and precision
+still have to match, because those encode what the Dockerfile chose rather than how far
+behind it is.
+
+How the script-emitting Go and Java updaters act on it:
 `java` passes it through as `-DallowMajorUpdates` on both versions-maven-plugin goals, and
 `golang` emits `support.GoMajorGuardScript()` **only when it is false** -- an unused bash
 function in a generated script is a thing a reader has to rule out. The allowed branch is

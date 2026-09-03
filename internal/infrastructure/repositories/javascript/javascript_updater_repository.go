@@ -118,7 +118,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 	}
 
 	pkgMgr := detectPackageManager(ctx, provider, repo)
-	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, pkgMgr)
+	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, pkgMgr, opts.AllowMajorUpdates)
 	if upgradeErr != nil {
 		return nil, upgradeErr
 	}
@@ -154,6 +154,7 @@ func cloneAndUpgrade(
 	repo entities.Repository,
 	vCtx *versionContext,
 	pkgMgr string,
+	allowMajorUpdates bool,
 ) (*upgradeResult, error) {
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
 	defer changelog.Remove()
@@ -170,6 +171,8 @@ func cloneAndUpgrade(
 		ProviderName:   provider.Name(),
 		Changelog:      changelog,
 		PackageManager: pkgMgr,
+
+		AllowMajorUpdates: allowMajorUpdates,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade: %w", err)
@@ -229,7 +232,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	_ repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[javascript] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
@@ -237,7 +240,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	vCtx := resolveLocalVersionContext(ctx, repoDir)
 	pkgMgr := detectLocalPackageManager(repoDir)
 
-	script := buildBatchJSScript()
+	script := buildBatchJSScript(opts.AllowMajorUpdates)
 	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
 	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
 		return nil, fmt.Errorf("failed to write script: %w", writeErr)
@@ -316,13 +319,15 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 // buildBatchJSScript generates a bash script with only language-specific
 // operations (no git clone, branch, commit, or push) for the batch pipeline.
-func buildBatchJSScript() string {
+func buildBatchJSScript(allowMajorUpdates bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 
-	writeJSUpgradeCommands(&sb, upgradeParams{})
+	writeJSUpgradeCommands(&sb, upgradeParams{ //nolint:exhaustruct // only this field reaches the script
+		AllowMajorUpdates: allowMajorUpdates,
+	})
 	writeDockerfileUpdate(&sb)
 
 	return sb.String()
@@ -347,6 +352,10 @@ type upgradeParams struct {
 	// the clone; an empty value leaves the repository's changelog untouched.
 	Changelog      support.StagedChangelog
 	PackageManager string // "npm", "yarn", or "pnpm"
+	// AllowMajorUpdates raises the ranges declared in package.json rather than
+	// re-resolving inside them. The zero value is the restrictive case; resolve
+	// it with entities.MajorUpdatesAllowed at the call site.
+	AllowMajorUpdates bool
 }
 
 type upgradeResult struct {
@@ -568,7 +577,22 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 	sb.WriteString(support.GitAuthScript(params.ProviderName))
 }
 
-func writeJSUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
+// writeJSUpgradeCommands emits the upgrade for whichever package manager the
+// repository uses.
+//
+// The plain forms -- `npm update`, `yarn upgrade`, `pnpm update` -- all resolve
+// *inside* the ranges package.json already declares, so on their own this
+// updater could never cross a major however `allow_major_updates` was set. Each
+// manager needs a different mechanism to raise the ranges themselves, and npm
+// has no built-in one at all:
+//
+//   - pnpm: `--latest` ignores the declared range and writes the newest.
+//   - yarn: Berry's `up` and Classic's `upgrade --latest` differ, and nothing
+//     here knows which is installed, so the script asks at run time.
+//   - npm: `npm-check-updates` is the conventional answer. It is fetched with
+//     `npx --yes`, and a failure degrades to the plain `npm update` below rather
+//     than aborting -- an offline runner should still get the safe upgrade.
+func writeJSUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 	// Update .nvmrc / .node-version when the release feed is genuinely ahead of
 	// the pin. The feed reports the newest *LTS* line, so a repository tracking
 	// a newer current release is ahead of it, and rewriting the pin would move
@@ -602,6 +626,12 @@ func writeJSUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 	// Run package manager update
 	sb.WriteString("# Update dependencies using detected package manager\n")
 	sb.WriteString("echo \"Using package manager: $PACKAGE_MANAGER\"\n")
+	if params.AllowMajorUpdates {
+		writeJSMajorUpgradeCommands(sb)
+
+		return
+	}
+
 	sb.WriteString("case \"$PACKAGE_MANAGER\" in\n")
 	sb.WriteString("    pnpm)\n")
 	sb.WriteString("        echo \"Running pnpm update...\"\n")
@@ -614,6 +644,56 @@ func writeJSUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 	sb.WriteString("    *)\n")
 	sb.WriteString("        echo \"Running npm update...\"\n")
 	sb.WriteString("        npm update 2>&1 || echo \"WARNING: npm update had some errors (continuing anyway)\"\n")
+	sb.WriteString("        ;;\n")
+	sb.WriteString("esac\n\n")
+}
+
+// writeJSMajorUpgradeCommands emits the range-raising variant used when
+// allow_major_updates is on, which is the default.
+func writeJSMajorUpgradeCommands(sb *strings.Builder) {
+	sb.WriteString("case \"$PACKAGE_MANAGER\" in\n")
+	sb.WriteString("    pnpm)\n")
+	sb.WriteString("        echo \"Running pnpm update --latest...\"\n")
+	sb.WriteString(
+		"        pnpm update --latest 2>&1 || " +
+			"echo \"WARNING: pnpm update --latest had some errors (continuing anyway)\"\n",
+	)
+	sb.WriteString("        ;;\n")
+	sb.WriteString("    yarn)\n")
+	// Berry replaced `upgrade` with `up`, and only Classic understands --latest,
+	// so the installed major decides. `yarn --version` is the one thing both
+	// answer the same way.
+	sb.WriteString("        YARN_MAJOR=\"$(yarn --version 2>/dev/null | cut -d. -f1)\"\n")
+	sb.WriteString("        if [ \"$YARN_MAJOR\" = \"1\" ]; then\n")
+	sb.WriteString("            echo \"Running yarn upgrade --latest...\"\n")
+	sb.WriteString(
+		"            yarn upgrade --latest 2>&1 || " +
+			"echo \"WARNING: yarn upgrade --latest had some errors (continuing anyway)\"\n",
+	)
+	sb.WriteString("        else\n")
+	sb.WriteString("            echo \"Running yarn up '*'...\"\n")
+	sb.WriteString(
+		"            yarn up '*' 2>&1 || " +
+			"echo \"WARNING: yarn up had some errors (continuing anyway)\"\n",
+	)
+	sb.WriteString("        fi\n")
+	sb.WriteString("        ;;\n")
+	sb.WriteString("    *)\n")
+	// ncu rewrites the ranges in package.json; npm install then refreshes the
+	// lockfile against them. When ncu cannot be fetched the plain update still
+	// runs, so the result is a smaller upgrade rather than none.
+	sb.WriteString("        echo \"Raising package.json ranges with npm-check-updates...\"\n")
+	sb.WriteString(
+		"        npx --yes npm-check-updates -u 2>&1 || " +
+			"echo \"WARNING: npm-check-updates unavailable, falling back to npm update\"\n",
+	)
+	sb.WriteString("        echo \"Running npm update...\"\n")
+	sb.WriteString(
+		"        npm update 2>&1 || " +
+			"echo \"WARNING: npm update had some errors (continuing anyway)\"\n",
+	)
+	sb.WriteString("        npm install 2>&1 || " +
+		"echo \"WARNING: npm install had some errors (continuing anyway)\"\n")
 	sb.WriteString("        ;;\n")
 	sb.WriteString("esac\n\n")
 }

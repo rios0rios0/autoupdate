@@ -137,7 +137,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6")
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -159,7 +159,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6")
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -177,7 +177,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6")
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "3.3.6", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -198,7 +198,7 @@ func TestResolveVersionContext(t *testing.T) {
 		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
 
 		// when
-		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "")
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), provider, repo, "", true)
 
 		// then
 		require.NotNil(t, vCtx)
@@ -239,7 +239,7 @@ func TestBuildBatchRubyScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := rbUpdater.BuildBatchRubyScript()
+		script := rbUpdater.BuildBatchRubyScript(true)
 
 		// then
 		assert.True(t, strings.HasPrefix(script, "#!/bin/bash\n"))
@@ -266,7 +266,7 @@ func TestBuildUpgradeScript(t *testing.T) {
 		}
 
 		// when
-		script := rbUpdater.BuildUpgradeScript(params, "/tmp/repo")
+		script := rbUpdater.BuildUpgradeScript(params, "/tmp/repo", true)
 
 		// then
 		assert.True(t, strings.HasPrefix(script, "#!/bin/bash\n"))
@@ -333,5 +333,88 @@ func TestWriteGitAuth(t *testing.T) {
 		result := sb.String()
 		assert.Contains(t, result, "oauth2")
 		assert.Contains(t, result, "gitlab.com")
+	})
+}
+
+// TestRubyGemMajorMode covers the bundler ceiling. Bundler has no flag meaning
+// "raise the Gemfile bounds", and this deliberately does not rewrite one — but
+// it does have a cap on the bump it will take, which is the direction that was
+// missing: an unconstrained `gem "rails"` crossed majors whatever the key said.
+func TestRubyGemMajorMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should let bundler take a major when allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+
+		// when
+		rbUpdater.WriteRubyUpgradeCommands(&sb, true)
+
+		// then -- --major is bundler's default, so it is left off rather than
+		// spelled out
+		script := sb.String()
+		assert.Contains(t, script, "bundle update 2>&1")
+		assert.NotContains(t, script, "--minor")
+	})
+
+	t.Run("should cap bundler below a major when refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+
+		// when
+		rbUpdater.WriteRubyUpgradeCommands(&sb, false)
+
+		// then
+		assert.Contains(t, sb.String(), "bundle update --minor")
+	})
+}
+
+// TestResolveVersionContextMajorMode covers the `.ruby-version` pin under a
+// refusal, and that the refusal reaches the script that rewrites the file.
+//
+// The pin is rewritten by support.VersionPinUpdateScript from
+// TARGET_RUBY_VERSION, and the script's only gate is
+// `autoupdate_version_is_newer`, which has no major-version concept. Withholding
+// the value is how the refusal crosses the Go/bash seam.
+func TestResolveVersionContextMajorMode(t *testing.T) {
+	t.Parallel()
+
+	newProvider := func() *repositorydoubles.SpyProviderRepository {
+		return repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{".ruby-version": true}).
+			WithFileContents(map[string]string{".ruby-version": "3.2.0\n"}).
+			BuildSpy()
+	}
+	repo := entities.Repository{
+		Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main",
+	}
+
+	t.Run("should hold a major bump when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when -- 3.2.0 pinned, 4.0.0 offered
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), newProvider(), repo, "4.0.0", false)
+
+		// then
+		require.NotNil(t, vCtx)
+		assert.False(t, vCtx.NeedsVersionUpgrade)
+		assert.Empty(t, rbUpdater.RubyVersionFor(vCtx),
+			"a refused version must not reach the script that rewrites .ruby-version")
+	})
+
+	t.Run("should take a minor bump when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		vCtx := rbUpdater.ResolveVersionContext(t.Context(), newProvider(), repo, "3.3.6", false)
+
+		// then
+		require.NotNil(t, vCtx)
+		assert.True(t, vCtx.NeedsVersionUpgrade)
+		assert.Equal(t, "3.3.6", rbUpdater.RubyVersionFor(vCtx))
 	})
 }

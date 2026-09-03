@@ -93,8 +93,10 @@ func ClassifyRefStyle(ref string) RefStyle {
 }
 
 // DetermineActionUpgrade is exported for testing.
-func DetermineActionUpgrade(ref ActionRef, tags []string) *ActionUpgrade {
-	return determineActionUpgrade(ref, tags)
+func DetermineActionUpgrade(
+	ref ActionRef, tags []string, allowMajorUpdates bool,
+) *ActionUpgrade {
+	return determineActionUpgrade(ref, tags, allowMajorUpdates)
 }
 
 // NormalizeActionVersion is exported for testing.
@@ -113,8 +115,11 @@ func FindActionUpgradesInFile(
 	provider repositories.ProviderRepository,
 	content, filePath string,
 	cache ActionTagCache,
+	allowMajorUpdates bool,
 ) []UpgradeTask {
-	return findActionUpgradesInFile(ctx, provider, content, filePath, cache)
+	return findActionUpgradesInFile(
+		ctx, provider, content, filePath, cache, allowMajorUpdates,
+	)
 }
 
 // SanitizeBranchSegment is exported for testing.
@@ -174,8 +179,11 @@ func LocalScanAndDetermineUpgrades(
 	repoDir string,
 	provider repositories.ProviderRepository,
 	latestVersions map[string]string,
+	allowMajorUpdates bool,
 ) ([]UpgradeTask, map[string]string) {
-	return localScanAndDetermineUpgrades(ctx, repoDir, provider, latestVersions)
+	return localScanAndDetermineUpgrades(
+		ctx, repoDir, provider, latestVersions, allowMajorUpdates,
+	)
 }
 
 // CreateUpgradePR is exported for testing.

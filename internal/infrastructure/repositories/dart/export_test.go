@@ -69,8 +69,8 @@ func WriteLocalAuth(sb *strings.Builder, params localUpgradeParams) {
 }
 
 // WriteDartUpgradeCommands exports writeDartUpgradeCommands for testing.
-func WriteDartUpgradeCommands(sb *strings.Builder) {
-	writeDartUpgradeCommands(sb)
+func WriteDartUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
+	writeDartUpgradeCommands(sb, allowMajorUpdates)
 }
 
 // WriteFvmPinUpdate exports writeFvmPinUpdate for testing.

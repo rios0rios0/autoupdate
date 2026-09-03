@@ -90,7 +90,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		logger.Infof("[ruby] Latest stable Ruby version: %s", latestRbVersion)
 	}
 
-	vCtx := resolveVersionContext(ctx, provider, repo, latestRbVersion)
+	vCtx := resolveVersionContext(ctx, provider, repo, latestRbVersion, opts.AllowMajorUpdates)
 
 	// Check if PR already exists
 	exists, prCheckErr := provider.PullRequestExists(ctx, repo, vCtx.BranchName)
@@ -110,7 +110,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx)
+	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, opts.AllowMajorUpdates)
 	if upgradeErr != nil {
 		return nil, upgradeErr
 	}
@@ -145,6 +145,7 @@ func cloneAndUpgrade(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
+	allowMajorUpdates bool,
 ) (*upgradeResult, error) {
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
 	defer changelog.Remove()
@@ -156,11 +157,11 @@ func cloneAndUpgrade(
 		CloneURL:      cloneURL,
 		DefaultBranch: defaultBranch,
 		BranchName:    vCtx.BranchName,
-		RubyVersion:   vCtx.LatestVersion,
+		RubyVersion:   rubyVersionFor(vCtx),
 		AuthToken:     provider.AuthToken(),
 		ProviderName:  provider.Name(),
 		Changelog:     changelog,
-	})
+	}, allowMajorUpdates)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade: %w", err)
 	}
@@ -218,14 +219,14 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	_ repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[ruby] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
 	// resolveLocalVersionContext (from local.go) handles fetching + comparison
-	vCtx := resolveLocalVersionContext(ctx, repoDir)
+	vCtx := resolveLocalVersionContext(ctx, repoDir, opts.AllowMajorUpdates)
 
-	script := buildBatchRubyScript()
+	script := buildBatchRubyScript(opts.AllowMajorUpdates)
 	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
 	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
 		return nil, fmt.Errorf("failed to write script: %w", writeErr)
@@ -235,8 +236,8 @@ func (u *UpdaterRepository) ApplyUpdates(
 	cmd := exec.CommandContext(ctx, "bash", scriptPath)
 	cmd.Dir = repoDir
 	env := os.Environ()
-	if vCtx.LatestVersion != "" {
-		env = append(env, "TARGET_RUBY_VERSION="+vCtx.LatestVersion)
+	if pinVersion := rubyVersionFor(vCtx); pinVersion != "" {
+		env = append(env, "TARGET_RUBY_VERSION="+pinVersion)
 	}
 	cmd.Env = env
 
@@ -291,13 +292,13 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 // buildBatchRubyScript generates a bash script with only language-specific
 // operations (no git clone, branch, commit, or push) for the batch pipeline.
-func buildBatchRubyScript() string {
+func buildBatchRubyScript(allowMajorUpdates bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 
-	writeRubyUpgradeCommands(&sb)
+	writeRubyUpgradeCommands(&sb, allowMajorUpdates)
 	writeDockerfileUpdate(&sb)
 
 	return sb.String()
@@ -350,6 +351,7 @@ func resolveVersionContext(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	latestRbVersion string,
+	allowMajorUpdates bool,
 ) *versionContext {
 	needsVersionUpgrade := false
 
@@ -357,7 +359,9 @@ func resolveVersionContext(
 		content, err := provider.GetFileContent(ctx, repo, ".ruby-version")
 		if err == nil {
 			currentVersion := parseRubyVersionFile(content)
-			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestRbVersion)
+			needsVersionUpgrade = support.AcceptsUpgrade(
+				currentVersion, latestRbVersion, allowMajorUpdates,
+			)
 			logger.Infof(
 				"[ruby] Current .ruby-version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -395,6 +399,7 @@ func changelogEntries(vCtx *versionContext) []string {
 func upgradeRepo(
 	ctx context.Context,
 	params upgradeParams,
+	allowMajorUpdates bool,
 ) (*upgradeResult, error) {
 	result := &upgradeResult{}
 
@@ -406,7 +411,7 @@ func upgradeRepo(
 
 	repoDir := filepath.Join(tmpDir, "repo")
 
-	script := buildUpgradeScript(params, repoDir)
+	script := buildUpgradeScript(params, repoDir, allowMajorUpdates)
 	scriptPath := filepath.Join(tmpDir, "upgrade.sh")
 
 	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
@@ -435,6 +440,7 @@ func upgradeRepo(
 func buildUpgradeScript(
 	params upgradeParams,
 	repoDir string,
+	allowMajorUpdates bool,
 ) string {
 	_ = repoDir // used via env vars in the script
 
@@ -464,7 +470,7 @@ func buildUpgradeScript(
 	sb.WriteString("git checkout -b \"$BRANCH_NAME\" 2>&1\n\n")
 
 	// Ruby upgrade commands
-	writeRubyUpgradeCommands(&sb)
+	writeRubyUpgradeCommands(&sb, allowMajorUpdates)
 
 	// Update Dockerfile ruby image tags
 	writeDockerfileUpdate(&sb)
@@ -483,7 +489,24 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 	sb.WriteString(support.GitAuthScript(params.ProviderName))
 }
 
-func writeRubyUpgradeCommands(sb *strings.Builder) {
+// writeRubyUpgradeCommands emits the Ruby pin rewrite and the gem upgrade.
+//
+// Bundler has no flag that means "raise the constraints in the Gemfile", and
+// this deliberately does not rewrite one: a `~> 6.0` is the repository stating
+// a bound, and editing it is a different act from resolving within it.
+//
+// What bundler does have is a ceiling on the bump it will take. Plain
+// `bundle update` allows a major where the Gemfile permits one, and
+// `--minor` caps it below that. So the flag maps onto a real bundler mechanism
+// in the *refusing* direction, which is the one that was missing: before this an
+// unconstrained `gem "rails"` crossed majors whatever the configuration said.
+func writeRubyUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
+	// --major is bundler's default, so it is left off rather than spelled out.
+	bundleArgs := ""
+	if !allowMajorUpdates {
+		bundleArgs = " --minor"
+	}
+
 	// The guard also declines every non-numeric pin, so a repository running
 	// JRuby or TruffleRuby is no longer handed an MRI version number.
 	sb.WriteString(support.VersionPinUpdateScript(support.VersionPinUpdate{
@@ -500,8 +523,11 @@ func writeRubyUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("if [ -f \"Gemfile\" ]; then\n")
 	sb.WriteString("    echo \"Updating bundler...\"\n")
 	sb.WriteString("    gem update bundler 2>&1 || echo \"WARNING: gem update bundler had some errors\"\n\n")
-	sb.WriteString("    echo \"Running bundle update...\"\n")
-	sb.WriteString("    bundle update 2>&1 || echo \"WARNING: bundle update had some errors\"\n")
+	fmt.Fprintf(sb, "    echo \"Running bundle update%s...\"\n", bundleArgs)
+	fmt.Fprintf(sb,
+		"    bundle update%s 2>&1 || echo \"WARNING: bundle update had some errors\"\n",
+		bundleArgs,
+	)
 	sb.WriteString("fi\n\n")
 }
 
@@ -577,4 +603,25 @@ func GeneratePRDescription(rbVersion string, rbVersionUpdated bool) string {
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()
+}
+
+// rubyVersionFor returns the version the generated script may write into the pin, which
+// is the empty string whenever this run declined the upgrade.
+//
+// The decision is made in Go and the rewrite happens in bash, and the script's
+// own gate -- autoupdate_version_is_newer -- has no major-version concept. So
+// the refusal has to be expressed by withholding the value rather than by
+// trusting the script to re-derive it: otherwise `allow_major_updates: false`
+// leaves NeedsVersionUpgrade false (no branch name, commit message, changelog
+// entry or PR title mentioning a version bump) while the script rewrites the pin
+// across the major anyway. That is worse than not gating at all, because the two
+// halves used to agree.
+//
+// The same shape as dart's sdkVersionFor, for the same reason.
+func rubyVersionFor(vCtx *versionContext) string {
+	if vCtx.NeedsVersionUpgrade {
+		return vCtx.LatestVersion
+	}
+
+	return ""
 }

@@ -351,7 +351,7 @@ func TestBuildBatchDartScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := dartUpdater.BuildBatchDartScript()
+		script := dartUpdater.BuildBatchDartScript(true)
 
 		// then
 		assert.True(t, strings.HasPrefix(script, "#!/bin/bash\n"))
@@ -366,7 +366,7 @@ func TestBuildBatchDartScript(t *testing.T) {
 
 		// given / when — fvm installs the SDK per project, so a pinned repository
 		// must not be driven by whatever toolchain happens to be on PATH
-		script := dartUpdater.BuildBatchDartScript()
+		script := dartUpdater.BuildBatchDartScript(true)
 
 		// then
 		assert.Contains(t, script, `if [ -f ".fvmrc" ] && command -v fvm > /dev/null 2>&1; then`)
@@ -377,7 +377,7 @@ func TestBuildBatchDartScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when — one unresolvable package must not abort the whole run
-		script := dartUpdater.BuildBatchDartScript()
+		script := dartUpdater.BuildBatchDartScript(true)
 
 		// then
 		assert.Contains(t, script, `|| echo "WARNING: pub upgrade had some errors (continuing anyway)"`)
@@ -398,6 +398,10 @@ func TestBuildUpgradeScript(t *testing.T) {
 			BranchName:    "chore/upgrade-dart-deps",
 			Toolchain:     "flutter",
 			ProviderName:  "github",
+
+			// The production default; without it the params zero value refuses
+			// majors and pub is asked for a plain re-resolution instead.
+			AllowMajorUpdates: true,
 		}
 
 		// when
@@ -475,7 +479,7 @@ func TestGeneratePRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		desc := dartUpdater.GeneratePRDescription("3.47.0", "flutter", true)
+		desc := dartUpdater.GeneratePRDescription("3.47.0", "flutter", true, true)
 
 		// then
 		assert.Contains(t, desc, "3.47.0")
@@ -487,11 +491,41 @@ func TestGeneratePRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		desc := dartUpdater.GeneratePRDescription("", "dart", false)
+		desc := dartUpdater.GeneratePRDescription("", "dart", false, true)
 
 		// then
 		assert.NotContains(t, desc, ".fvmrc")
 		assert.Contains(t, desc, "dart pub upgrade --major-versions")
 		assert.Contains(t, desc, "Review Checklist")
+	})
+}
+
+// TestDartMajorMode covers what `allow_major_updates` changes for Dart, which is
+// the one ecosystem where the key previously did the opposite of what it said:
+// `--major-versions` is precisely a request to raise constraints across majors,
+// and it was passed unconditionally.
+func TestDartMajorMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should ask pub for major versions when allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := dartUpdater.BuildBatchDartScript(true)
+
+		// then
+		assert.Contains(t, script, "pub upgrade --major-versions")
+	})
+
+	t.Run("should re-resolve within constraints when refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := dartUpdater.BuildBatchDartScript(false)
+
+		// then -- a plain `pub upgrade` rewrites pubspec.lock inside the declared
+		// constraints, which is what holding the current major line means here
+		assert.Contains(t, script, "pub upgrade")
+		assert.NotContains(t, script, "--major-versions")
 	})
 }

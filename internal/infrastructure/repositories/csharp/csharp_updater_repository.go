@@ -95,7 +95,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		logger.Infof("[csharp] Latest stable .NET SDK version: %s", latestDotnetVersion)
 	}
 
-	vCtx := resolveVersionContext(ctx, provider, repo, latestDotnetVersion)
+	vCtx := resolveVersionContext(ctx, provider, repo, latestDotnetVersion, opts.AllowMajorUpdates)
 
 	// Check if PR already exists
 	exists, prCheckErr := provider.PullRequestExists(ctx, repo, vCtx.BranchName)
@@ -166,7 +166,7 @@ func cloneAndUpgrade(
 		CloneURL:      cloneURL,
 		DefaultBranch: defaultBranch,
 		BranchName:    vCtx.BranchName,
-		DotnetVersion: vCtx.LatestVersion,
+		DotnetVersion: dotnetVersionFor(vCtx),
 		AuthToken:     provider.AuthToken(),
 		ProviderName:  provider.Name(),
 		Changelog:     changelog,
@@ -229,12 +229,12 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	_ repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[csharp] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
 	// resolveLocalVersionContext handles fetching + comparison
-	vCtx := resolveLocalVersionContext(ctx, repoDir)
+	vCtx := resolveLocalVersionContext(ctx, repoDir, opts.AllowMajorUpdates)
 
 	dotnetBinary, binErr := findDotnetBinary()
 	if binErr != nil {
@@ -251,8 +251,8 @@ func (u *UpdaterRepository) ApplyUpdates(
 	cmd := exec.CommandContext(ctx, "bash", scriptPath)
 	cmd.Dir = repoDir
 	env := append(os.Environ(), "DOTNET_BINARY="+dotnetBinary)
-	if vCtx.LatestVersion != "" {
-		env = append(env, "DOTNET_VERSION="+vCtx.LatestVersion)
+	if pinVersion := dotnetVersionFor(vCtx); pinVersion != "" {
+		env = append(env, "DOTNET_VERSION="+pinVersion)
 	}
 	cmd.Env = env
 
@@ -371,6 +371,7 @@ func resolveVersionContext(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	latestDotnetVersion string,
+	allowMajorUpdates bool,
 ) *versionContext {
 	needsVersionUpgrade := false
 
@@ -378,7 +379,9 @@ func resolveVersionContext(
 		content, err := provider.GetFileContent(ctx, repo, "global.json")
 		if err == nil {
 			currentVersion := parseGlobalJSON(content)
-			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestDotnetVersion)
+			needsVersionUpgrade = support.AcceptsUpgrade(
+				currentVersion, latestDotnetVersion, allowMajorUpdates,
+			)
 			logger.Infof(
 				"[csharp] Current global.json SDK version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -400,7 +403,9 @@ func resolveVersionContext(
 
 // resolveLocalVersionContext fetches the latest .NET SDK version and compares
 // it against the local global.json to build a versionContext.
-func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionContext {
+func resolveLocalVersionContext(
+	ctx context.Context, repoDir string, allowMajorUpdates bool,
+) *versionContext {
 	fetcher := NewHTTPDotnetVersionFetcher(&http.Client{Timeout: dotnetVersionTimeout})
 	latestDotnetVersion, err := fetcher.FetchLatestVersion(ctx)
 	if err != nil {
@@ -415,7 +420,9 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionCon
 		globalJSONContent, readErr := os.ReadFile(filepath.Join(repoDir, "global.json"))
 		if readErr == nil {
 			currentVersion := parseGlobalJSON(string(globalJSONContent))
-			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestDotnetVersion)
+			needsVersionUpgrade = support.AcceptsUpgrade(
+				currentVersion, latestDotnetVersion, allowMajorUpdates,
+			)
 			logger.Infof(
 				"[csharp] Current global.json SDK version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -728,4 +735,25 @@ func GeneratePRDescription(dotnetVersion string, dotnetVersionUpdated bool) stri
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()
+}
+
+// dotnetVersionFor returns the version the generated script may write into the pin, which
+// is the empty string whenever this run declined the upgrade.
+//
+// The decision is made in Go and the rewrite happens in bash, and the script's
+// own gate -- autoupdate_version_is_newer -- has no major-version concept. So
+// the refusal has to be expressed by withholding the value rather than by
+// trusting the script to re-derive it: otherwise `allow_major_updates: false`
+// leaves NeedsVersionUpgrade false (no branch name, commit message, changelog
+// entry or PR title mentioning a version bump) while the script rewrites the pin
+// across the major anyway. That is worse than not gating at all, because the two
+// halves used to agree.
+//
+// The same shape as dart's sdkVersionFor, for the same reason.
+func dotnetVersionFor(vCtx *versionContext) string {
+	if vCtx.NeedsVersionUpgrade {
+		return vCtx.LatestVersion
+	}
+
+	return ""
 }

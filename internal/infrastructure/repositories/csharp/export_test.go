@@ -28,8 +28,9 @@ func ResolveVersionContext(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	latestVersion string,
+	allowMajorUpdates bool,
 ) *versionContext {
-	return resolveVersionContext(ctx, provider, repo, latestVersion)
+	return resolveVersionContext(ctx, provider, repo, latestVersion, allowMajorUpdates)
 }
 
 // VersionContext is exported for testing.
@@ -120,6 +121,13 @@ func SetDefaultRunner(r cmdrunner.Runner) func() {
 }
 
 // ResolveLocalVersionContext is exported for testing.
-func ResolveLocalVersionContext(ctx context.Context, repoDir string) *versionContext {
-	return resolveLocalVersionContext(ctx, repoDir)
+func ResolveLocalVersionContext(
+	ctx context.Context, repoDir string, allowMajorUpdates bool,
+) *versionContext {
+	return resolveLocalVersionContext(ctx, repoDir, allowMajorUpdates)
+}
+
+// DotnetVersionFor is exported for testing.
+func DotnetVersionFor(vCtx *versionContext) string {
+	return dotnetVersionFor(vCtx)
 }

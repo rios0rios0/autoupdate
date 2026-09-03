@@ -140,7 +140,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	upgrades, fileContents := scanAndDetermineUpgrades(ctx, provider, repo, latestVersions)
+	upgrades, fileContents := scanAndDetermineUpgrades(ctx, provider, repo, latestVersions, opts.AllowMajorUpdates)
 	if len(upgrades) == 0 {
 		logger.Infof("[pipeline] %s/%s: all pipeline versions up to date", repo.Organization, repo.Name)
 		return []entities.PullRequest{}, nil
@@ -169,7 +169,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[pipeline] Scanning local clone of %s/%s for pipeline version references",
 		repo.Organization, repo.Name)
@@ -180,7 +180,9 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	upgrades, fileContents := localScanAndDetermineUpgrades(ctx, repoDir, provider, latestVersions)
+	upgrades, fileContents := localScanAndDetermineUpgrades(
+		ctx, repoDir, provider, latestVersions, opts.AllowMajorUpdates,
+	)
 	if len(upgrades) == 0 {
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
@@ -220,6 +222,7 @@ func localScanAndDetermineUpgrades(
 	repoDir string,
 	provider repositories.ProviderRepository,
 	latestVersions map[string]string,
+	allowMajorUpdates bool,
 ) ([]upgradeTask, map[string]string) {
 	fileContents := make(map[string]string)
 	var upgrades []upgradeTask
@@ -250,10 +253,12 @@ func localScanAndDetermineUpgrades(
 		}
 		content := string(data)
 
-		fileUpgrades := findUpgradesInFile(content, relPath, ci, latestVersions)
+		fileUpgrades := findUpgradesInFile(content, relPath, ci, latestVersions, allowMajorUpdates)
 
 		if ci == ciGitHubActions && provider != nil {
-			actionUpgrades := findActionUpgradesInFile(ctx, provider, content, relPath, tagCache)
+			actionUpgrades := findActionUpgradesInFile(
+				ctx, provider, content, relPath, tagCache, allowMajorUpdates,
+			)
 			fileUpgrades = append(fileUpgrades, actionUpgrades...)
 		}
 
@@ -307,6 +312,7 @@ func scanAndDetermineUpgrades(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	latestVersions map[string]string,
+	allowMajorUpdates bool,
 ) ([]upgradeTask, map[string]string) {
 	fileContents := make(map[string]string)
 	var upgrades []upgradeTask
@@ -330,10 +336,12 @@ func scanAndDetermineUpgrades(
 			continue
 		}
 
-		fileUpgrades := findUpgradesInFile(content, f.Path, ci, latestVersions)
+		fileUpgrades := findUpgradesInFile(content, f.Path, ci, latestVersions, allowMajorUpdates)
 
 		if ci == ciGitHubActions {
-			actionUpgrades := findActionUpgradesInFile(ctx, provider, content, f.Path, tagCache)
+			actionUpgrades := findActionUpgradesInFile(
+				ctx, provider, content, f.Path, tagCache, allowMajorUpdates,
+			)
 			fileUpgrades = append(fileUpgrades, actionUpgrades...)
 		}
 
@@ -371,6 +379,7 @@ func findUpgradesInFile(
 	content, filePath string,
 	ci ciSystem,
 	latestVersions map[string]string,
+	allowMajorUpdates bool,
 ) []upgradeTask {
 	rules := rulesForCI(ci)
 	matches := scanForVersions(content, filePath, ci, rules)
@@ -390,7 +399,7 @@ func findUpgradesInFile(
 		// while the feed reports the 24 LTS line — must keep its pin: rewriting it
 		// would move the build backwards under an "upgraded" pull request title.
 		truncated := truncateToGranularity(latestVer, match.CurrentVer)
-		if !support.IsNewerVersion(match.CurrentVer, truncated) {
+		if !support.AcceptsUpgrade(match.CurrentVer, truncated, allowMajorUpdates) {
 			continue
 		}
 
@@ -654,13 +663,23 @@ func resolveActionTags(
 
 // determineActionUpgrade compares the current action ref against available tags
 // and returns an upgrade if one is available.
-func determineActionUpgrade(ref actionRef, tags []string) *actionUpgrade {
+func determineActionUpgrade(
+	ref actionRef, tags []string, allowMajorUpdates bool,
+) *actionUpgrade {
 	if len(tags) == 0 {
 		return nil
 	}
 
 	switch ref.RefStyle {
 	case refStyleMajor:
+		// A `@v4` -> `@v5` rewrite is unambiguously a major bump, and for many
+		// repositories action refs are the majority of what this updater
+		// changes -- so leaving it ungated would make the key close to inert
+		// here while the docs list pipeline among those honouring it.
+		if !allowMajorUpdates {
+			return nil
+		}
+
 		return findMajorUpgrade(ref, tags)
 	case refStyleSemver:
 		return findSemverUpgrade(ref, tags)
@@ -757,13 +776,14 @@ func findActionUpgradesInFile(
 	provider repositories.ProviderRepository,
 	content, filePath string,
 	cache actionTagCache,
+	allowMajorUpdates bool,
 ) []upgradeTask {
 	refs := scanFileForActions(content, filePath)
 	var tasks []upgradeTask
 
 	for _, ref := range refs {
 		tags := resolveActionTags(ctx, provider, ref.Owner, ref.Repo, cache)
-		up := determineActionUpgrade(ref, tags)
+		up := determineActionUpgrade(ref, tags, allowMajorUpdates)
 		if up == nil {
 			continue
 		}

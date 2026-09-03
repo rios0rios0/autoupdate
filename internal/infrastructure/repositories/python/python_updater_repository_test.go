@@ -417,7 +417,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(true, true, false, false)
+		script := pyUpdater.BuildBatchPythonScript(true, true, false, false, true)
 
 		// then
 		assert.True(t, strings.HasPrefix(script, "#!/bin/bash\n"))
@@ -430,7 +430,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true, false, false)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false, false, true)
 
 		// then
 		assert.NotContains(t, script, "pip install -r requirements.txt")
@@ -441,7 +441,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(true, false, false, false)
+		script := pyUpdater.BuildBatchPythonScript(true, false, false, false, true)
 
 		// then
 		assert.Contains(t, script, "pip install -r requirements.txt")
@@ -452,7 +452,7 @@ func TestBuildBatchPythonScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, false, false, false)
+		script := pyUpdater.BuildBatchPythonScript(false, false, false, false, true)
 
 		// then
 		assert.Contains(t, script, "set -euo pipefail")
@@ -1310,6 +1310,69 @@ func TestRunLanguageUpgradeScript(t *testing.T) { //nolint:paralleltest // mutat
 	})
 }
 
+// TestRunLanguageUpgradeScriptMajorMode covers the seam between the resolved
+// setting and the script that acts on it. LocalUpgradeOptions carries the
+// value in, and the only way to see that it arrived is to read the script the
+// runner is handed: the script-building tests construct localUpgradeParams by
+// hand, so they cannot catch a caller that forgets the field -- which is the
+// shape of defect this guards against, a struct field with no producer being
+// silently the restrictive value.
+func TestRunLanguageUpgradeScriptMajorMode(t *testing.T) { //nolint:paralleltest // mutates package-level localCmdRunner
+	cases := []struct {
+		name       string
+		allowMajor bool
+		contains   string
+		absent     string
+	}{
+		{
+			name:       "should pass --unconstrained to pdm when majors are allowed",
+			allowMajor: true,
+			contains:   "pdm update --update-all --no-sync -G :all --unconstrained",
+		},
+		{
+			name:       "should withhold --unconstrained when majors are refused",
+			allowMajor: false,
+			contains:   "pdm update --update-all --no-sync -G :all 2>&1",
+			absent:     "--unconstrained",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// given -- a PDM project, whose upgrade command is the one that
+			// changes shape with the setting
+			spy := repositorydoubles.NewSpyScriptRunner("Done.\n")
+			restore := pyUpdater.SetLocalCmdRunner(spy)
+			defer restore()
+
+			repoDir := t.TempDir()
+			require.NoError(t, os.WriteFile(
+				filepath.Join(repoDir, "pyproject.toml"),
+				[]byte("[project]\nname = \"demo\"\n"),
+				0o600,
+			))
+			require.NoError(t, os.WriteFile(filepath.Join(repoDir, "pdm.lock"), []byte(""), 0o600))
+
+			vCtx := &pyUpdater.VersionContext{BranchName: "chore/upgrade-python-deps"}
+			opts := pyUpdater.LocalUpgradeOptions{
+				ProviderName:      "github",
+				AllowMajorUpdates: testCase.allowMajor,
+			}
+
+			// when
+			_, err := pyUpdater.RunLanguageUpgradeScript(t.Context(), repoDir, vCtx, opts)
+
+			// then
+			require.NoError(t, err)
+			require.Len(t, spy.Scripts, 1)
+			assert.Contains(t, spy.Scripts[0], testCase.contains)
+			if testCase.absent != "" {
+				assert.NotContains(t, spy.Scripts[0], testCase.absent)
+			}
+		})
+	}
+}
+
 func TestPyprojectUsesPDM(t *testing.T) {
 	t.Parallel()
 
@@ -1558,7 +1621,7 @@ func TestBuildBatchPythonScriptWithPDM(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true, false, true)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false, true, true)
 
 		// then
 		assert.Contains(t, script, "pdm update --update-all --no-sync")
@@ -1569,7 +1632,7 @@ func TestBuildBatchPythonScriptWithPDM(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(true, true, true, false)
+		script := pyUpdater.BuildBatchPythonScript(true, true, true, false, true)
 
 		// then
 		assert.NotContains(t, script, "pip install --upgrade .")
@@ -1580,7 +1643,7 @@ func TestBuildBatchPythonScriptWithPDM(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true, false, false)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false, false, true)
 
 		// then
 		assert.Contains(t, script, "pip install --upgrade .")
@@ -1611,7 +1674,7 @@ func TestWriteEggInfoGitignore(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := pyUpdater.BuildBatchPythonScript(false, true, false, false)
+		script := pyUpdater.BuildBatchPythonScript(false, true, false, false, true)
 
 		// then
 		assert.Contains(t, script, "*.egg-info/")
@@ -1643,5 +1706,39 @@ func TestGeneratePRDescriptionToolchain(t *testing.T) {
 		assert.Contains(t, result, "pip install --upgrade -r requirements.txt")
 		assert.Contains(t, result, "`requirements.txt`")
 		assert.NotContains(t, result, "pdm")
+	})
+}
+
+// TestPythonMajorMode covers the PDM path. Without --unconstrained, `pdm update`
+// resolves inside the bounds pyproject.toml declares, so a caret or tilde kept
+// the project on its major however the key was set.
+func TestPythonMajorMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should raise pyproject bounds when allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when -- pyproject + pdm.lock selects the PDM path
+		script := pyUpdater.BuildBatchPythonScript(false, true, true, true, true)
+
+		// then -- both the -G :all form *and* its fallback must carry the flag,
+		// or the projects where the first form fails get a quietly smaller
+		// upgrade. Asserted on the two command lines rather than by counting,
+		// because the echo above them carries it too.
+		assert.Contains(t, script,
+			"pdm update --update-all --no-sync -G :all --unconstrained")
+		assert.Contains(t, script,
+			"|| pdm update --update-all --no-sync --unconstrained")
+	})
+
+	t.Run("should resolve inside declared bounds when refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := pyUpdater.BuildBatchPythonScript(false, true, true, true, false)
+
+		// then
+		assert.Contains(t, script, "pdm update --update-all --no-sync")
+		assert.NotContains(t, script, "--unconstrained")
 	})
 }

@@ -25,6 +25,8 @@ type LocalUpgradeOptions struct {
 	AuthToken    string
 	ProviderName string                    // git provider name (e.g. "azuredevops", "github", "gitlab")
 	PushAuth     gitlocal.PushAuthResolver // resolves auth methods for git push
+	// AllowMajorUpdates is resolved by entities.MajorUpdatesAllowed.
+	AllowMajorUpdates bool
 }
 
 // LocalResult holds the outcome of a local upgrade operation.
@@ -49,7 +51,7 @@ func RunLocalUpgrade(
 		logger.SetLevel(logger.DebugLevel)
 	}
 
-	vCtx := resolveLocalVersionContext(ctx, repoDir)
+	vCtx := resolveLocalVersionContext(ctx, repoDir, opts.AllowMajorUpdates)
 
 	if opts.DryRun {
 		return handleDryRun(vCtx, repoDir), nil
@@ -60,7 +62,9 @@ func RunLocalUpgrade(
 
 // resolveLocalVersionContext fetches the latest Ruby version and compares
 // it against the local .ruby-version to build a versionContext.
-func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionContext {
+func resolveLocalVersionContext(
+	ctx context.Context, repoDir string, allowMajorUpdates bool,
+) *versionContext {
 	fetcher := NewHTTPRubyVersionFetcher(&http.Client{Timeout: rbVersionTimeout})
 	latestRbVersion, err := fetcher.FetchLatestVersion(ctx)
 	if err != nil {
@@ -75,7 +79,9 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionCon
 		rbVersionContent, readErr := os.ReadFile(filepath.Join(repoDir, ".ruby-version"))
 		if readErr == nil {
 			currentVersion := parseRubyVersionFile(string(rbVersionContent))
-			needsVersionUpgrade = support.IsNewerVersion(currentVersion, latestRbVersion)
+			needsVersionUpgrade = support.AcceptsUpgrade(
+				currentVersion, latestRbVersion, allowMajorUpdates,
+			)
 			logger.Infof(
 				"[ruby] Current .ruby-version: %s (upgrade needed: %v)",
 				currentVersion, needsVersionUpgrade,
@@ -183,6 +189,8 @@ func runLanguageUpgradeScript(
 		Changelog:    changelog,
 		AuthToken:    opts.AuthToken,
 		ProviderName: opts.ProviderName,
+
+		AllowMajorUpdates: opts.AllowMajorUpdates,
 	}
 
 	return cmdrunner.RunScript(ctx, localCmdRunner, cmdrunner.ScriptRun{
@@ -205,6 +213,8 @@ type localUpgradeParams struct {
 	Changelog    support.StagedChangelog
 	AuthToken    string
 	ProviderName string
+	// AllowMajorUpdates caps the bundler bump; see writeRubyUpgradeCommands.
+	AllowMajorUpdates bool
 }
 
 // buildLocalUpgradeScript builds a bash script that performs only the
@@ -222,7 +232,7 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	writeLocalAuth(&sb, params)
 
 	// Ruby upgrade commands (reuse remote-mode helpers)
-	writeRubyUpgradeCommands(&sb)
+	writeRubyUpgradeCommands(&sb, params.AllowMajorUpdates)
 
 	// Update Dockerfile ruby image tags
 	writeDockerfileUpdate(&sb)
