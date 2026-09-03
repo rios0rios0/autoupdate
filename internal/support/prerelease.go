@@ -6,14 +6,11 @@ import (
 )
 
 // prereleaseQualifiers names the suffixes a published artifact uses to say it
-// is not finished. It is the single source of truth for that vocabulary: the
-// Go side reads it through IsPrereleaseVersion, and the Maven side compiles it
-// into the regex list passed to `-Dmaven.version.ignore`.
-//
-// Kept as one list because the two must agree. A qualifier recognised by Go and
-// not by Maven would be filtered from a changelog entry while still being
-// written into a `pom.xml`, which is a worse failure than not filtering at all:
-// the pull request would claim an upgrade the file does not carry.
+// is not finished. It is the single source of truth for that vocabulary:
+// prereleaseShape compiles it into the pattern IsPrereleaseVersion matches, and
+// MavenVersionIgnore compiles it into the regex list passed to
+// `-Dmaven.version.ignore`. Both are derived from this slice, so neither can
+// drift from it by being edited on its own.
 //
 // "sp" and "final" are deliberately absent although Maven ranks them: both sort
 // *above* the plain release and neither means unfinished.
@@ -23,8 +20,16 @@ var prereleaseQualifiers = []string{
 	"alpha", "beta", "milestone", "cr", "rc", "preview", "pre", "dev", "snapshot",
 }
 
+// milestonePattern matches the `-M1` form, which is a convention rather than a
+// word and so cannot be spelled in prereleaseQualifiers.
+//
+// The letter is matched only when a digit follows it. Alone it is an ordinary
+// letter that appears inside real release names, and a bare `-M` suffix is not
+// a convention any of these ecosystems uses.
+const milestonePattern = `[Mm]\d+`
+
 // prereleaseShape matches a version whose release segments are followed by a
-// qualifier from prereleaseQualifiers.
+// qualifier.
 //
 // The separator is optional and the qualifier may be followed by digits,
 // because the ecosystems disagree about both: Maven writes `3.0.0-beta3`,
@@ -32,13 +37,11 @@ var prereleaseQualifiers = []string{
 // is legal in a `pom.xml`. Anchoring on the qualifier rather than on the
 // punctuation is what lets one expression read all of them.
 //
-// `M` is matched only when followed by a digit. Alone it is an ordinary letter
-// that appears inside real release names, and a bare `-M` suffix is not a
-// convention any of these ecosystems uses.
+//nolint:gochecknoglobals // compiled once from prereleaseQualifiers
 var prereleaseShape = regexp.MustCompile(
 	`(?i)^[vV]?\d+(?:\.\d+)*[-_.]?(?:` +
-		`m\d|` +
-		`(?:alpha|beta|milestone|cr|rc|preview|pre|dev|snapshot)` +
+		milestonePattern + `|` +
+		strings.Join(prereleaseQualifiers, "|") +
 		`)`,
 )
 
@@ -46,8 +49,16 @@ var prereleaseShape = regexp.MustCompile(
 // has not finished: an alpha, a beta, a milestone, a release candidate or a
 // snapshot.
 //
-// This is not the same question as semver precedence, and the difference is the
-// bug it exists for. Semver already ranks `3.0.0-beta3` below `3.0.0` — but it
+// It has no production caller, and the doc below is not describing a filter
+// that runs. It exists so the vocabulary above has one readable, directly
+// testable definition, and so TestMavenVersionIgnore can check the Maven
+// regexes against something other than a restatement of themselves. Neither
+// updater consults it: the Go path needs no filter, because `go get -u` already
+// declines pre-releases, and the Java path delegates the decision to Maven
+// through MavenVersionIgnore.
+//
+// The distinction it captures is not semver precedence, which is the bug this
+// file exists for. Semver already ranks `3.0.0-beta3` below `3.0.0` -- but it
 // ranks it *above* `2.26.1`, so a comparison alone happily calls the beta an
 // upgrade. Maven does not even have the concept: to it `3.0.0-beta3` is an
 // ordinary release, which is why `maven-metadata.xml` reports it as `<release>`
@@ -70,13 +81,12 @@ func IsPrereleaseVersion(version string) bool {
 // a candidate. This list is what supplies the missing concept.
 //
 // The expressions are matched against the whole version by the plugin, so each
-// carries its own `.*` rather than relying on a partial match.
+// carries its own `.*` rather than relying on a partial match. The value is
+// embedded in the generated script inside single quotes, so it must never
+// contain one -- TestMavenVersionIgnore asserts that.
 func MavenVersionIgnore() string {
 	patterns := make([]string, 0, len(prereleaseQualifiers)+1)
-
-	// Milestones are `-M1`, not `-milestone1`, and the bare letter has to stay
-	// glued to a digit for the reason prereleaseShape gives.
-	patterns = append(patterns, `.*[-_.]?[Mm]\d+.*`)
+	patterns = append(patterns, `.*[-_.]?`+milestonePattern+`.*`)
 
 	for _, qualifier := range prereleaseQualifiers {
 		patterns = append(patterns, `(?i).*`+qualifier+`.*`)

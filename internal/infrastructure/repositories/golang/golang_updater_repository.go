@@ -804,11 +804,18 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder) {
 	// After tidy, not before: tidy resolves the graph and can settle a
 	// requirement on a different version than `go get` first wrote, so
 	// comparing any earlier would read a version that is not the one shipping.
+	// The guard returns non-zero when it could not resolve something, and the
+	// script runs under `set -e`, so the call is branched rather than bare: a
+	// guard that found a problem must report it, not abort the run before the
+	// safe part of the upgrade is committed.
 	sb.WriteString("    echo \"Checking for major version jumps...\"\n")
+	sb.WriteString("    if ! autoupdate_go_hold_major_jumps " +
+		"\"$GO_BINARY\" \"$MODULE_VERSIONS_BEFORE\" go.mod; then\n")
 	sb.WriteString(
-		"    autoupdate_go_hold_major_jumps " +
-			"\"$GO_BINARY\" \"$MODULE_VERSIONS_BEFORE\" go.mod\n",
+		"        echo \"  WARNING: some major version jumps are unresolved (see above); " +
+			"review this module before merging\"\n",
 	)
+	sb.WriteString("    fi\n")
 	sb.WriteString("    rm -f \"$MODULE_VERSIONS_BEFORE\"\n\n")
 
 	// Re-apply the Go version after go mod tidy, because older Go binaries
@@ -940,9 +947,11 @@ func GenerateGoPRDescription(goVersion string, hasConfigSH, goVersionUpdated boo
 	}
 	sb.WriteString("- Ran `go get -u -t ./...` in each module directory to update all dependencies\n")
 	sb.WriteString(
-		"- Held any dependency whose major version moved at its previous version: " +
-			"v0 and v1 share an unsuffixed module path, so `-u` crosses the one " +
-			"boundary Go makes no compatibility promise across\n",
+		"- Checked every dependency whose major version moved and held it at its " +
+			"previous version, because v0 and v1 share an unsuffixed module path and " +
+			"`-u` crosses the one boundary Go makes no compatibility promise across. " +
+			"A hold can fail when an upgraded dependency requires the new major; the " +
+			"run log names anything left unresolved, so check it before merging\n",
 	)
 	sb.WriteString("- Ran `go mod tidy` in each module directory to clean up\n")
 	if hasConfigSH {

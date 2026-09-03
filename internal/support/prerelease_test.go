@@ -129,6 +129,21 @@ func TestMavenVersionIgnore(t *testing.T) {
 		}
 	})
 
+	t.Run("should never contain a single quote", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- the value is embedded in the generated script wrapped in
+		// single quotes, which is what stops the shell splitting and
+		// glob-expanding the `.*` and `(?i)` it carries
+		value := support.MavenVersionIgnore()
+
+		// when
+		quoted := strings.Contains(value, "'")
+
+		// then
+		assert.False(t, quoted, "a single quote would break out of the shell quoting")
+	})
+
 	t.Run("should not filter the releases the pom actually pins", func(t *testing.T) {
 		t.Parallel()
 

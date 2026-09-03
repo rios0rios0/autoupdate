@@ -100,6 +100,10 @@ func writeMajorGuardHarness(t *testing.T, before string) guardHarness {
 
 	script := filepath.Join(dir, "harness.sh")
 	body := "#!" + bashPath(t) + "\nset -u\ncd " + shellQuote(dir) + "\n" +
+		// The reconciliation pass calls autoupdate_version_is_newer, so the
+		// guard alone is not a runnable unit -- exactly as the Go updater emits
+		// both.
+		support.VersionGuardScript() +
 		support.GoMajorGuardScript() +
 		"autoupdate_go_hold_major_jumps " + shellQuote(goBin) + " " +
 		shellQuote(beforePath) + " " + shellQuote(goModPath) + "\n"
@@ -108,11 +112,17 @@ func writeMajorGuardHarness(t *testing.T, before string) guardHarness {
 	return guardHarness{script: script, goLog: goLog}
 }
 
+// runHarness runs the guard and returns its output. The guard exits non-zero
+// when it leaves something unresolved, which is a result rather than a crash,
+// so only a failure to start is fatal here.
 func runHarness(t *testing.T, script string) string {
 	t.Helper()
 
 	output, err := exec.Command("bash", script).CombinedOutput()
-	require.NoError(t, err, "harness failed: %s", output)
+	if err != nil {
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, err, &exitErr, "harness failed to run: %s", output)
+	}
 
 	return string(output)
 }
@@ -224,5 +234,59 @@ func TestGoMajorGuardScript(t *testing.T) {
 		// then
 		assert.Contains(t, output, "holding github.com/gobwas/glob at v0.2.3")
 		assert.Contains(t, output, "crosses a major version boundary")
+	})
+}
+
+// TestGoMajorGuardReconciliation covers the pass that runs after the holds, on
+// the go.mod that is actually going to be committed.
+//
+// The stub `go` never rewrites go.mod, so from the reconciliation's point of
+// view every hold it issued failed -- which is precisely the state worth
+// asserting on, because that is what a real conflict looks like and it used to
+// ship silently under a pull request claiming the opposite.
+func TestGoMajorGuardReconciliation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should report a hold that did not take", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- glob is v1.0.0 in the fixture and the stub cannot move it
+		harness := writeMajorGuardHarness(t, "github.com/gobwas/glob v0.2.3\n")
+
+		// when
+		output := runHarness(t, harness.script)
+
+		// then
+		assert.Contains(t, output, "github.com/gobwas/glob is still v1.0.0")
+		assert.Contains(t, output, "did not take")
+	})
+
+	t.Run("should report a requirement that moved backwards", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- logrus started ahead of where the fixture leaves it, which is
+		// what a cascade from `go get <path>@<older>` looks like
+		harness := writeMajorGuardHarness(t, "github.com/sirupsen/logrus v1.11.0\n")
+
+		// when
+		output := runHarness(t, harness.script)
+
+		// then
+		assert.Contains(t, output, "github.com/sirupsen/logrus moved backwards")
+		assert.Contains(t, output, "v1.11.0 -> v1.10.2")
+	})
+
+	t.Run("should say nothing when every requirement moved forwards", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		harness := writeMajorGuardHarness(t, "github.com/sirupsen/logrus v1.9.0\n")
+
+		// when
+		output := runHarness(t, harness.script)
+
+		// then
+		assert.NotContains(t, output, "WARNING")
+		assert.NotContains(t, output, "moved backwards")
 	})
 }

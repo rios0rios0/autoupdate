@@ -644,27 +644,41 @@ func writeJavaUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 	// as candidates. MAVEN_VERSION_IGNORE supplies the missing concept, and
 	// -DallowMajorUpdates=false keeps a security pin on its own major line
 	// rather than letting a new major arrive unreviewed inside a routine bump.
-	fmt.Fprintf(sb, "        MAVEN_VERSION_IGNORE=%q\n", support.MavenVersionIgnore())
-	sb.WriteString("        MAVEN_UPDATE_FLAGS=\"-DgenerateBackupPoms=false\"\n")
-	sb.WriteString("        MAVEN_UPDATE_FLAGS=\"$MAVEN_UPDATE_FLAGS -DallowSnapshots=false\"\n")
-	sb.WriteString("        MAVEN_UPDATE_FLAGS=\"$MAVEN_UPDATE_FLAGS -DallowMajorUpdates=false\"\n")
-	sb.WriteString(
-		"        MAVEN_UPDATE_FLAGS=\"$MAVEN_UPDATE_FLAGS " +
-			"-Dmaven.version.ignore=$MAVEN_VERSION_IGNORE\"\n\n",
-	)
-	sb.WriteString("        echo \"Updating Maven properties...\"\n")
-	sb.WriteString(
-		"        $MVN_CMD versions:update-properties $MAVEN_UPDATE_FLAGS 2>&1 || " +
-			"echo \"WARNING: Maven properties update had some errors (continuing anyway)\"\n",
-	)
-	sb.WriteString("\n        echo \"Updating Maven dependencies to latest releases...\"\n")
-	sb.WriteString(
-		"        $MVN_CMD versions:use-latest-releases $MAVEN_UPDATE_FLAGS 2>&1 || " +
-			"echo \"WARNING: Maven dependency update had some errors (continuing anyway)\"\n",
-	)
+	// Single-quoted, and every flag passed as its own argument rather than through
+	// an accumulator variable. The ignore value is a list of regexes carrying `.*`
+	// and `(?i)`, which an unquoted expansion would subject to word splitting and
+	// pathname expansion -- so a file in the repository root could rewrite the flag
+	// and the filtering would silently not apply. MavenVersionIgnore never emits a
+	// single quote (assertMavenIgnoreQuotable guards that), so the wrapping is safe.
+	fmt.Fprintf(sb, "        MAVEN_VERSION_IGNORE='%s'\n\n", support.MavenVersionIgnore())
+
+	writeMavenGoal(sb, "versions:update-properties",
+		"Updating Maven properties...",
+		"WARNING: Maven properties update had some errors (continuing anyway)")
+	sb.WriteString("\n")
+	writeMavenGoal(sb, "versions:use-latest-releases",
+		"Updating Maven dependencies to latest releases...",
+		"WARNING: Maven dependency update had some errors (continuing anyway)")
 	sb.WriteString("        ;;\n")
 
 	sb.WriteString("esac\n\n")
+}
+
+// writeMavenGoal emits one versions-maven-plugin invocation with the guard flags
+// spelled out as individual quoted arguments.
+//
+// `-Dmaven.version.ignore` is double-quoted so the variable expands without being
+// split or glob-expanded; the rest carry no metacharacters but are written out
+// rather than accumulated, so a later addition cannot reintroduce the unquoted
+// expansion this replaced.
+func writeMavenGoal(sb *strings.Builder, goal, announce, warning string) {
+	fmt.Fprintf(sb, "        echo %q\n", announce)
+	fmt.Fprintf(sb, "        $MVN_CMD %s \\\n", goal)
+	sb.WriteString("            -DgenerateBackupPoms=false \\\n")
+	sb.WriteString("            -DallowSnapshots=false \\\n")
+	sb.WriteString("            -DallowMajorUpdates=false \\\n")
+	sb.WriteString("            \"-Dmaven.version.ignore=$MAVEN_VERSION_IGNORE\" 2>&1 || \\\n")
+	fmt.Fprintf(sb, "            echo %q\n", warning)
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
