@@ -682,8 +682,9 @@ func writeGitLabAuth(sb *strings.Builder) {
 // module under a subdirectory — and `go get ./...` never crosses a module
 // boundary, so each module has to be upgraded in its own directory.
 func writeGoUpgradeCommands(sb *strings.Builder) {
-	// Defined once, outside the per-module loop that uses it.
+	// Defined once, outside the per-module loop that uses them.
 	sb.WriteString(support.VersionGuardScript())
+	sb.WriteString(support.GoMajorGuardScript())
 
 	writeGoModuleDiscovery(sb)
 
@@ -779,6 +780,15 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder) {
 	sb.WriteString("        echo \"GO_VERSION_UPDATED=false\"\n")
 	sb.WriteString("    fi\n\n")
 
+	// Snapshot the requirements before the upgrade so the major-version guard
+	// below has something to compare against. See GoMajorGuardScript: `-u` will
+	// not reach for a `/v2` path, but v0 and v1 share the unsuffixed one, so
+	// the boundary Go itself calls compatibility-free is the one it crosses.
+	sb.WriteString("    MODULE_VERSIONS_BEFORE=\"$(mktemp)\"\n")
+	sb.WriteString(
+		"    autoupdate_go_module_versions go.mod > \"$MODULE_VERSIONS_BEFORE\"\n\n",
+	)
+
 	sb.WriteString("    echo \"Running go get -u -t ./...\"\n")
 	sb.WriteString(
 		"    \"$GO_BINARY\" get -u -t ./... 2>&1 || " +
@@ -790,6 +800,23 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder) {
 		"    \"$GO_BINARY\" mod tidy 2>&1 || " +
 			"echo \"WARNING: go mod tidy had some errors (continuing anyway)\"\n\n",
 	)
+
+	// After tidy, not before: tidy resolves the graph and can settle a
+	// requirement on a different version than `go get` first wrote, so
+	// comparing any earlier would read a version that is not the one shipping.
+	// The guard returns non-zero when it could not resolve something, and the
+	// script runs under `set -e`, so the call is branched rather than bare: a
+	// guard that found a problem must report it, not abort the run before the
+	// safe part of the upgrade is committed.
+	sb.WriteString("    echo \"Checking for major version jumps...\"\n")
+	sb.WriteString("    if ! autoupdate_go_hold_major_jumps " +
+		"\"$GO_BINARY\" \"$MODULE_VERSIONS_BEFORE\" go.mod; then\n")
+	sb.WriteString(
+		"        echo \"  WARNING: some major version jumps are unresolved (see above); " +
+			"review this module before merging\"\n",
+	)
+	sb.WriteString("    fi\n")
+	sb.WriteString("    rm -f \"$MODULE_VERSIONS_BEFORE\"\n\n")
 
 	// Re-apply the Go version after go mod tidy, because older Go binaries
 	// may normalise the three-part version back to two-part during tidy.
@@ -919,6 +946,13 @@ func GenerateGoPRDescription(goVersion string, hasConfigSH, goVersionUpdated boo
 		sb.WriteString("- Updated the `go` directive to `" + goVersion + "` in every `go.mod`\n")
 	}
 	sb.WriteString("- Ran `go get -u -t ./...` in each module directory to update all dependencies\n")
+	sb.WriteString(
+		"- Checked every dependency whose major version moved and held it at its " +
+			"previous version, because v0 and v1 share an unsuffixed module path and " +
+			"`-u` crosses the one boundary Go makes no compatibility promise across. " +
+			"A hold can fail when an upgraded dependency requires the new major; the " +
+			"run log names anything left unresolved, so check it before merging\n",
+	)
 	sb.WriteString("- Ran `go mod tidy` in each module directory to clean up\n")
 	if hasConfigSH {
 		sb.WriteString("- `config.sh` was sourced before running Go commands (private package settings)\n")
