@@ -48,69 +48,26 @@ func runGemfileRelax(t *testing.T, content string) string {
 func TestGemfileConstraintScript(t *testing.T) {
 	t.Parallel()
 
-	cases := []struct {
-		name  string
-		given string
-		want  string
-	}{
+	// Only `~>` moves, and only to `>=`: that operator exists for the implicit
+	// ceiling it adds, so converting it keeps the floor the repository declared
+	// and drops the cap. Everything else is a statement the repository made on
+	// purpose -- an exact pin is the same kind of thing as a `.ruby-version`
+	// file, and an explicit `<` is a refusal in as many words -- so the rows
+	// that must *not* change carry as much weight here as the ones that must.
+	cases := []struct{ name, given, want string }{
+		{"single-quoted", "gem 'rails', '~> 6.0'\n", "gem 'rails', '>= 6.0'\n"},
+		{"double-quoted", "gem \"rails\", \"~> 6.0.1\"\n", "gem \"rails\", \">= 6.0.1\"\n"},
+		{"no space after operator", "gem 'puma', '~>5.6'\n", "gem 'puma', '>= 5.6'\n"},
+		{"pre-release suffix kept", "gem 'r', '~> 7.1.0.beta1'\n", "gem 'r', '>= 7.1.0.beta1'\n"},
+		{"exact pin untouched", "gem 'rails', '6.0.1'\n", "gem 'rails', '6.0.1'\n"},
+		{"explicit ceiling untouched", "gem 'rails', '< 7'\n", "gem 'rails', '< 7'\n"},
+		{"already open untouched", "gem 'rails', '>= 6.0'\n", "gem 'rails', '>= 6.0'\n"},
+		{"unconstrained untouched", "gem 'rails'\n", "gem 'rails'\n"},
 		{
-			// The whole point: `~>` exists for its implicit ceiling, so
-			// converting it to `>=` keeps the floor and drops the ceiling.
-			name:  "single-quoted pessimistic constraint",
-			given: "gem 'rails', '~> 6.0'\n",
-			want:  "gem 'rails', '>= 6.0'\n",
+			"compound keeps its ceiling",
+			"gem 'rails', '~> 6.0', '< 7'\n", "gem 'rails', '>= 6.0', '< 7'\n",
 		},
-		{
-			name:  "double-quoted pessimistic constraint",
-			given: "gem \"rails\", \"~> 6.0.1\"\n",
-			want:  "gem \"rails\", \">= 6.0.1\"\n",
-		},
-		{
-			name:  "no space after the operator",
-			given: "gem 'puma', '~>5.6'\n",
-			want:  "gem 'puma', '>= 5.6'\n",
-		},
-		{
-			name:  "pre-release suffix is preserved",
-			given: "gem 'rails', '~> 7.1.0.beta1'\n",
-			want:  "gem 'rails', '>= 7.1.0.beta1'\n",
-		},
-		{
-			// An exact pin is the same kind of statement as a .ruby-version
-			// file. Widening it would be a different decision entirely.
-			name:  "exact pin is left alone",
-			given: "gem 'rails', '6.0.1'\n",
-			want:  "gem 'rails', '6.0.1'\n",
-		},
-		{
-			// The repository said no in as many words.
-			name:  "explicit upper bound is left alone",
-			given: "gem 'rails', '< 7'\n",
-			want:  "gem 'rails', '< 7'\n",
-		},
-		{
-			name:  "already-open constraint is left alone",
-			given: "gem 'rails', '>= 6.0'\n",
-			want:  "gem 'rails', '>= 6.0'\n",
-		},
-		{
-			name:  "unconstrained gem is left alone",
-			given: "gem 'rails'\n",
-			want:  "gem 'rails'\n",
-		},
-		{
-			// The ceiling half of a compound constraint survives, so the
-			// repository's explicit refusal still holds.
-			name:  "compound keeps its explicit ceiling",
-			given: "gem 'rails', '~> 6.0', '< 7'\n",
-			want:  "gem 'rails', '>= 6.0', '< 7'\n",
-		},
-		{
-			// A line that merely mentions the operator is not a constraint.
-			name:  "prose mentioning the operator is untouched",
-			given: "# pin with ~> when you mean it\ngem 'rails'\n",
-			want:  "# pin with ~> when you mean it\ngem 'rails'\n",
-		},
+		{"prose is not a constraint", "# use ~> here\ngem 'r'\n", "# use ~> here\ngem 'r'\n"},
 	}
 
 	for _, testCase := range cases {
