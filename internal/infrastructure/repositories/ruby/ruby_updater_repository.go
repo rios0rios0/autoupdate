@@ -502,8 +502,9 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 // `>=` *before* `bundle update`, so the resolution sees the raised bounds, and
 // each one is re-tightened afterwards to `~>` the version that resolved, at the
 // precision the repository wrote -- `~> 6.0` becomes `~> 7.1`, never `>= 6.0`
-// for ever. A constraint whose gem stayed inside its bound is put back
-// untouched. When the widened resolution fails, the manifest is restored and
+// for ever -- and the lockfile is re-locked against the raised bounds, since
+// the resolution recorded the widened ones. A constraint whose gem stayed
+// inside its bound is put back untouched. When the widened resolution fails, the manifest is restored and
 // `bundle update` retried within the bounds the repository declared, so a
 // conflict between two new majors degrades to the smaller upgrade rather than
 // to a dropped ceiling beside a stale lockfile, or to no upgrade at all. Only
@@ -540,16 +541,27 @@ func writeRubyUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 }
 
 // writeGemfileWideningUpdate emits the allowing direction: widen, resolve,
-// re-tighten -- or, when the widened resolution fails, restore the manifest and
-// resolve within the bounds it declared, so the run still carries every upgrade
-// bundler can make. The widening comes before `bundle update` because editing
-// the manifest after the resolution would leave the lockfile resolved against
-// the ceiling that was just removed, which is the worst of both.
+// re-tighten, re-lock -- or, when the widened resolution fails, restore the
+// manifest and resolve within the bounds it declared, so the run still carries
+// every upgrade bundler can make. The widening comes before `bundle update`
+// because editing the manifest after the resolution would leave the lockfile
+// resolved against the ceiling that was just removed, which is the worst of
+// both. The re-lock comes after the re-tightening for the mirror-image reason:
+// `bundle update` ran against the widened manifest, so the lockfile's
+// DEPENDENCIES block records `rails (>= 6.0)` beside a Gemfile that now says
+// `~> 7.1`, and a frozen or deployment install refuses that mismatch with "the
+// dependencies in your gemfile changed". `bundle lock` is the conservative
+// reconcile: every locked version already satisfies the raised bound, so it
+// rewrites DEPENDENCIES and moves nothing.
 func writeGemfileWideningUpdate(sb *strings.Builder) {
 	sb.WriteString("    autoupdate_relax_gemfile_constraints Gemfile\n")
 	sb.WriteString("    echo \"Running bundle update...\"\n")
 	sb.WriteString("    if bundle update 2>&1; then\n")
 	sb.WriteString("        autoupdate_retighten_gemfile_constraints Gemfile Gemfile.lock\n")
+	sb.WriteString(
+		"        bundle lock 2>&1 || " +
+			"echo \"WARNING: could not re-lock Gemfile.lock against the raised constraints\"\n",
+	)
 	sb.WriteString("    else\n")
 	sb.WriteString(
 		"        echo \"WARNING: bundle update could not resolve past the declared bounds, " +

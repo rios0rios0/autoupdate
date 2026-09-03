@@ -309,8 +309,10 @@ would stay on 6.x for ever. `support.GemfileConstraintScript` works in two moves
 `bundle update`. Before it, every pessimistic (`~>`) constraint on a `gem` line is widened
 to `>=` so the resolution may cross the major; after it, each one is re-tightened to `~>`
 the version that resolved, at the precision the repository wrote -- `~> 6.0` becomes
-`~> 7.1`, and a constraint whose gem stayed inside its bound is put back untouched. The
-widening is a means, not the result: a `>=` left behind would be permanent, so turning the
+`~> 7.1`, and a constraint whose gem stayed inside its bound is put back untouched -- and
+`bundle lock` reconciles the lockfile, whose DEPENDENCIES block still records the widened
+requirements the resolution ran against and which a frozen install would otherwise refuse.
+The widening is a means, not the result: a `>=` left behind would be permanent, so turning the
 key off again would restore nothing and every later resolution, by any tool, would be free
 to take the next major. Raising the bound and keeping the operator is the contract
 `pub upgrade --major-versions` and `npm-check-updates` honour too. When the widened

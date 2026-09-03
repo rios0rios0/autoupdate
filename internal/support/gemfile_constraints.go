@@ -49,6 +49,14 @@ package support
 // application may resolve to, and widening it would loosen someone else's
 // constraints rather than this repository's.
 //
+// The resolution ran against the widened manifest, so the lockfile it wrote
+// records the widened requirement in its DEPENDENCIES block -- `rails (>= 6.0)`
+// beside a Gemfile that now says `~> 7.1`, which a frozen or deployment
+// install refuses. None of these functions runs bundler, so the caller must
+// re-lock after the re-tightening (`bundle lock`, which moves nothing because
+// every locked version already satisfies the raised bound); the Ruby updater
+// does, and asserts the order.
+//
 // The result is deliberately visible in the diff: a reviewer sees `~> 6.0`
 // become `~> 7.1` next to the `Gemfile.lock` change.
 func GemfileConstraintScript() string {

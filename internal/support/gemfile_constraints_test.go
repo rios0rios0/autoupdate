@@ -13,11 +13,15 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/support"
 )
 
-// gemfileFixtureLock stands in for what `bundle update` writes: the specs are
-// what the re-tightening reads, and the rest is there so the parser has to
-// step over the same shapes a real lockfile carries -- nested dependencies
-// with their own constraints, a platform-suffixed version, and the
-// DEPENDENCIES block that repeats the manifest's own constraints.
+// gemfileFixtureLock stands in for what `bundle update` writes against the
+// *widened* manifest: the specs are what the re-tightening reads, and the rest
+// is there so the parser has to step over the same shapes a real lockfile
+// carries -- nested dependencies with their own constraints, a platform-suffixed
+// version, and the DEPENDENCIES block. That block records the widened
+// requirements bundler resolved against (`rails (>= 6.0)`), which is why it
+// disagrees with the re-tightened Gemfile the rows below assert: the fragment
+// never runs bundler, and reconciling the two is the caller's `bundle lock`,
+// asserted in the Ruby updater's tests.
 const gemfileFixtureLock = `GEM
   remote: https://rubygems.org/
   specs:

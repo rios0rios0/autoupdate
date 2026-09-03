@@ -383,6 +383,7 @@ func gemModeCases() []gemModeCase {
 				"autoupdate_relax_gemfile_constraints Gemfile",
 				"if bundle update 2>&1; then",
 				"autoupdate_retighten_gemfile_constraints Gemfile Gemfile.lock",
+				"bundle lock 2>&1",
 				"autoupdate_restore_gemfile_constraints Gemfile",
 			},
 			absent: []string{"--minor"},
@@ -395,6 +396,7 @@ func gemModeCases() []gemModeCase {
 				"autoupdate_relax_gemfile_constraints",
 				"autoupdate_retighten_gemfile_constraints",
 				"autoupdate_restore_gemfile_constraints",
+				"bundle lock",
 			},
 		},
 	}
@@ -427,13 +429,15 @@ func TestRubyGemMajorMode(t *testing.T) {
 		})
 	}
 
-	t.Run("should widen the Gemfile before resolving and re-tighten it after", func(t *testing.T) {
+	t.Run("should widen before resolving, re-tighten after, and re-lock last", func(t *testing.T) {
 		t.Parallel()
 
 		// given -- ordering is the part a "contains" assertion cannot express:
 		// editing the manifest after the resolution would leave the lockfile
-		// pinned against the ceiling that was just removed, and re-tightening
-		// before it would put the ceiling back before bundler ever saw past it
+		// pinned against the ceiling that was just removed, re-tightening
+		// before it would put the ceiling back before bundler ever saw past it,
+		// and re-locking before the re-tightening would record the widened
+		// bounds a frozen install then refuses
 		var sb strings.Builder
 
 		// when
@@ -444,8 +448,10 @@ func TestRubyGemMajorMode(t *testing.T) {
 		relaxAt := strings.Index(script, "autoupdate_relax_gemfile_constraints Gemfile")
 		updateAt := strings.Index(script, "bundle update")
 		retightenAt := strings.Index(script, "autoupdate_retighten_gemfile_constraints Gemfile")
+		lockAt := strings.Index(script, "bundle lock")
 		assert.Less(t, relaxAt, updateAt, "the Gemfile must be widened before bundle update runs")
 		assert.Greater(t, retightenAt, updateAt, "the Gemfile must be re-tightened after bundle update ran")
+		assert.Greater(t, lockAt, retightenAt, "the lockfile must be re-locked against the re-tightened Gemfile")
 	})
 }
 
