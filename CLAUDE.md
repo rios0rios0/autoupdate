@@ -296,7 +296,7 @@ major on its own. Each ecosystem needed a different one:
 | `javascript` (pnpm) | `pnpm update --latest` | `pnpm update` |
 | `javascript` (yarn) | `up '*'` / `upgrade --latest` | `yarn upgrade` |
 | `javascript` (npm) | `npm-check-updates -u` then install | `npm update` |
-| `ruby` (gems) | Gemfile widened, then `bundle update` | `bundle update --minor` |
+| `ruby` (gems) | `~>` bounds raised around `bundle update` | `bundle update --minor` |
 | `java` | `-DallowMajorUpdates=true` | `-DallowMajorUpdates=false` |
 
 Three of those deserve a note. **yarn** is decided at run time, because Berry replaced
@@ -305,13 +305,24 @@ knows which is installed. **npm** has no built-in range-raiser at all, so `npm-c
 is fetched with `npx --yes` and a failure degrades to the plain `npm update` -- an offline
 runner gets a smaller upgrade rather than none. **ruby** is the one that needs the manifest
 edited: bundler has no flag meaning "raise the Gemfile bounds", so `gem "rails", "~> 6.0"`
-would stay on 6.x for ever. `support.GemfileConstraintScript` converts the pessimistic
-operator to `>=`, keeping the floor the repository declared and dropping only the implicit
-ceiling, and runs *before* `bundle update` so the resolution sees the widened bounds. Exact
-pins and explicit `<` ceilings are left alone -- those are the repository saying no in as
-many words -- and only the `Gemfile` is touched, never a `.gemspec`, whose constraints
-describe what *consumers* must tolerate rather than what this application may resolve to.
-The refusing direction still uses bundler's own ceiling, `--minor`.
+would stay on 6.x for ever. `support.GemfileConstraintScript` works in two moves around
+`bundle update`. Before it, every pessimistic (`~>`) constraint on a `gem` line is widened
+to `>=` so the resolution may cross the major; after it, each one is re-tightened to `~>`
+the version that resolved, at the precision the repository wrote -- `~> 6.0` becomes
+`~> 7.1`, and a constraint whose gem stayed inside its bound is put back untouched. The
+widening is a means, not the result: a `>=` left behind would be permanent, so turning the
+key off again would restore nothing and every later resolution, by any tool, would be free
+to take the next major. Raising the bound and keeping the operator is the contract
+`pub upgrade --major-versions` and `npm-check-updates` honour too. When the widened
+resolution fails, the manifest is restored and `bundle update` retried within the declared
+bounds, so a conflict between two new majors degrades to the smaller upgrade rather than to
+a dropped ceiling beside a stale lockfile. The rewrite is anchored on the `gem` call rather
+than on the operator, which keeps the `ruby "~> 3.2"` directive, commented-out declarations
+and bundler plugins out of reach by construction; within a `gem` line, exact pins and
+explicit `<` ceilings are left alone -- those are the repository saying no in as many words
+-- and only the `Gemfile` is touched, never a `.gemspec`, whose constraints describe what
+*consumers* must tolerate rather than what this application may resolve to. The refusing
+direction still uses bundler's own ceiling, `--minor`.
 
 **The refusal has to cross the Go/bash seam.** `csharp` and `ruby` decide in Go and rewrite
 the pin in bash, and the script's only gate is `autoupdate_version_is_newer`, which has no

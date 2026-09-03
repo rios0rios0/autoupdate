@@ -214,7 +214,7 @@ func TestGeneratePRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		result := rbUpdater.GeneratePRDescription("3.3.6", true)
+		result := rbUpdater.GeneratePRDescription("3.3.6", true, true)
 
 		// then
 		assert.Contains(t, result, "3.3.6")
@@ -225,10 +225,35 @@ func TestGeneratePRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		result := rbUpdater.GeneratePRDescription("3.3.6", false)
+		result := rbUpdater.GeneratePRDescription("3.3.6", false, true)
 
 		// then
 		assert.Contains(t, result, "dependencies")
+	})
+
+	t.Run("should send the reviewer to the Gemfile when majors are allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when -- the diff can carry raised `~>` bounds, so the body
+		// has to say so and the checklist has to point at them
+		result := rbUpdater.GeneratePRDescription("3.3.6", false, true)
+
+		// then
+		assert.Contains(t, result, "`~> 6.0` becomes `~> 7.1`")
+		assert.Contains(t, result, "- [ ] Review the constraint changes in `Gemfile`")
+		assert.NotContains(t, result, "--minor")
+	})
+
+	t.Run("should describe the bundler cap when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when -- only the lockfile moves, so no constraint checklist
+		result := rbUpdater.GeneratePRDescription("3.3.6", false, false)
+
+		// then
+		assert.Contains(t, result, "bundle update --minor")
+		assert.Contains(t, result, "`allow_major_updates` is off")
+		assert.NotContains(t, result, "constraint changes in `Gemfile`")
 	})
 }
 
@@ -336,10 +361,6 @@ func TestWriteGitAuth(t *testing.T) {
 	})
 }
 
-// TestRubyGemMajorMode covers the bundler ceiling. Bundler has no flag meaning
-// "raise the Gemfile bounds", and this deliberately does not rewrite one — but
-// it does have a cap on the bump it will take, which is the direction that was
-// missing: an unconstrained `gem "rails"` crossed majors whatever the key said.
 // gemModeCase is one setting put to the gem half of the Ruby updater.
 type gemModeCase struct {
 	name       string
@@ -348,27 +369,40 @@ type gemModeCase struct {
 	absent     []string
 }
 
-// gemModeCases covers both directions. Bundler has no flag meaning "raise the
-// Gemfile bounds", so the two are expressed differently: refusing uses
-// bundler's own ceiling, allowing needs the manifest widened first.
+// gemModeCases covers both directions. Bundler resolves only inside the bounds
+// the Gemfile declares, so the two are expressed differently: refusing uses
+// bundler's own ceiling, allowing widens the manifest first and re-tightens it
+// to what resolved -- or restores it when nothing did.
 func gemModeCases() []gemModeCase {
 	return []gemModeCase{
 		{
-			name:       "allowed: widen the Gemfile, then let bundler take a major",
+			name:       "allowed: widen the Gemfile, resolve, then re-tighten to what resolved",
 			allowMajor: true,
 			// --major is bundler's default, so it is left off rather than spelled out.
-			contains: []string{"autoupdate_relax_gemfile_constraints Gemfile", "bundle update 2>&1"},
-			absent:   []string{"--minor"},
+			contains: []string{
+				"autoupdate_relax_gemfile_constraints Gemfile",
+				"if bundle update 2>&1; then",
+				"autoupdate_retighten_gemfile_constraints Gemfile Gemfile.lock",
+				"autoupdate_restore_gemfile_constraints Gemfile",
+			},
+			absent: []string{"--minor"},
 		},
 		{
 			name:       "refused: cap bundler and leave the manifest alone",
 			allowMajor: false,
 			contains:   []string{"bundle update --minor"},
-			absent:     []string{"autoupdate_relax_gemfile_constraints"},
+			absent: []string{
+				"autoupdate_relax_gemfile_constraints",
+				"autoupdate_retighten_gemfile_constraints",
+				"autoupdate_restore_gemfile_constraints",
+			},
 		},
 	}
 }
 
+// TestRubyGemMajorMode covers the gem half of the Ruby updater in both
+// directions -- the strings each one must and must not emit, and the order the
+// allowing direction emits them in.
 func TestRubyGemMajorMode(t *testing.T) {
 	t.Parallel()
 
@@ -393,12 +427,13 @@ func TestRubyGemMajorMode(t *testing.T) {
 		})
 	}
 
-	t.Run("should widen the Gemfile before resolving", func(t *testing.T) {
+	t.Run("should widen the Gemfile before resolving and re-tighten it after", func(t *testing.T) {
 		t.Parallel()
 
 		// given -- ordering is the part a "contains" assertion cannot express:
 		// editing the manifest after the resolution would leave the lockfile
-		// pinned against the ceiling that was just removed
+		// pinned against the ceiling that was just removed, and re-tightening
+		// before it would put the ceiling back before bundler ever saw past it
 		var sb strings.Builder
 
 		// when
@@ -406,10 +441,11 @@ func TestRubyGemMajorMode(t *testing.T) {
 
 		// then
 		script := sb.String()
-		assert.Less(t,
-			strings.Index(script, "autoupdate_relax_gemfile_constraints Gemfile"),
-			strings.Index(script, "bundle update"),
-			"the Gemfile must be widened before bundle update runs")
+		relaxAt := strings.Index(script, "autoupdate_relax_gemfile_constraints Gemfile")
+		updateAt := strings.Index(script, "bundle update")
+		retightenAt := strings.Index(script, "autoupdate_retighten_gemfile_constraints Gemfile")
+		assert.Less(t, relaxAt, updateAt, "the Gemfile must be widened before bundle update runs")
+		assert.Greater(t, retightenAt, updateAt, "the Gemfile must be re-tightened after bundle update ran")
 	})
 }
 
