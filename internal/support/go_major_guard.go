@@ -70,9 +70,14 @@ autoupdate_go_major_of() {
 
 # autoupdate_go_hold_major_jumps <go binary> <before snapshot> <go.mod path>
 # Puts back every requirement whose major version moved, leaving the rest of the
-# upgrade in place. Always returns success: a dependency that cannot be held is
-# reported and the run continues, the same way the surrounding script treats a
-# failed "go get".
+# upgrade in place. A dependency that cannot be held is reported and the loop
+# continues, the same way the surrounding script treats a failed "go get".
+#
+# Returns the status of autoupdate_go_report_unheld, which it ends with: non-zero
+# when a hold did not take or a requirement moved backwards. Callers must branch
+# on that rather than invoke it bare -- the generated scripts run under "set -e",
+# where a bare call would abort the whole run on the first module the guard found
+# something on, losing the safe part of the upgrade it had already made.
 autoupdate_go_hold_major_jumps() {
     go_binary="$1"
     before_file="$2"

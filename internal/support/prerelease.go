@@ -80,17 +80,31 @@ func IsPrereleaseVersion(version string) bool {
 // excludes none of them and `versions:use-latest-releases` treats every one as
 // a candidate. This list is what supplies the missing concept.
 //
-// The expressions are matched against the whole version by the plugin, so each
-// carries its own `.*` rather than relying on a partial match. The value is
-// embedded in the generated script inside single quotes, so it must never
-// contain one -- TestMavenVersionIgnore asserts that.
+// Each expression is anchored the way prereleaseShape is: the qualifier has to
+// follow the numeric segments, not merely appear somewhere in the string. A
+// leading `.*` would make these match any version *containing* the letters, and
+// the short qualifiers are the ones that bite -- `.*cr.*` filters
+// `1.0.0-incremental` and `2.0.0-macro`, `.*pre.*` filters `1.0.0-compressed`.
+// Those are finished releases, and refusing them silently stops the updater
+// doing its job, which is the failure this whole file is guarding against
+// inverted. The trailing `.*` stays because the plugin full-matches.
+//
+// The value is embedded in the generated script inside single quotes, so it must
+// never contain one -- TestMavenVersionIgnore asserts that.
 func MavenVersionIgnore() string {
 	patterns := make([]string, 0, len(prereleaseQualifiers)+1)
-	patterns = append(patterns, `.*[-_.]?`+milestonePattern+`.*`)
+	patterns = append(patterns, mavenIgnorePattern(milestonePattern))
 
 	for _, qualifier := range prereleaseQualifiers {
-		patterns = append(patterns, `(?i).*`+qualifier+`.*`)
+		patterns = append(patterns, mavenIgnorePattern(qualifier))
 	}
 
 	return strings.Join(patterns, ",")
+}
+
+// mavenIgnorePattern wraps one qualifier in the same shape prereleaseShape uses,
+// so the two sides answer identically rather than only on the rows a table
+// happens to list.
+func mavenIgnorePattern(qualifier string) string {
+	return `(?i)[vV]?\d+(\.\d+)*[-_.]?` + qualifier + `.*`
 }

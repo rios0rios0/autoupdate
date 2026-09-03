@@ -49,6 +49,17 @@ func prereleaseCases() []struct {
 		{"four segments", "1.2.3.4", false},
 		{"build metadata only", "1.0.0+build.1", false},
 		{"classifier that merely contains no qualifier", "1.0.0-android", false},
+
+		// A qualifier appearing *inside* another word is not a pre-release, and
+		// the short ones are where an unanchored pattern goes wrong: "cr" sits in
+		// "incremental", "macro" and "secretive", "pre" in "compressed". Each of
+		// these is a finished release an over-broad filter would refuse, which
+		// stops the updater doing its job just as surely as no filter at all.
+		{"cr inside incremental", "1.0.0-incremental", false},
+		{"cr inside macro", "2.0.0-macro", false},
+		{"cr inside secretive", "1.0.0-secretive", false},
+		{"pre inside compressed", "1.0.0-compressed", false},
+		{"dev inside devtools classifier", "1.0.0-sdevtools", false},
 		{"empty", "", false},
 		{"not a version", "latest", false},
 	}
