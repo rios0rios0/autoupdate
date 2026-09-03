@@ -639,14 +639,27 @@ func writeJavaUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 	sb.WriteString("        else\n")
 	sb.WriteString("            MVN_CMD=\"mvn\"\n")
 	sb.WriteString("        fi\n\n")
+	// Maven has no notion of a pre-release, so `3.0.0-beta3`, `7.1.0-M1` and
+	// `5.7-alpha1` are ordinary releases to it and both goals below treat them
+	// as candidates. MAVEN_VERSION_IGNORE supplies the missing concept, and
+	// -DallowMajorUpdates=false keeps a security pin on its own major line
+	// rather than letting a new major arrive unreviewed inside a routine bump.
+	fmt.Fprintf(sb, "        MAVEN_VERSION_IGNORE=%q\n", support.MavenVersionIgnore())
+	sb.WriteString("        MAVEN_UPDATE_FLAGS=\"-DgenerateBackupPoms=false\"\n")
+	sb.WriteString("        MAVEN_UPDATE_FLAGS=\"$MAVEN_UPDATE_FLAGS -DallowSnapshots=false\"\n")
+	sb.WriteString("        MAVEN_UPDATE_FLAGS=\"$MAVEN_UPDATE_FLAGS -DallowMajorUpdates=false\"\n")
+	sb.WriteString(
+		"        MAVEN_UPDATE_FLAGS=\"$MAVEN_UPDATE_FLAGS " +
+			"-Dmaven.version.ignore=$MAVEN_VERSION_IGNORE\"\n\n",
+	)
 	sb.WriteString("        echo \"Updating Maven properties...\"\n")
 	sb.WriteString(
-		"        $MVN_CMD versions:update-properties -DgenerateBackupPoms=false 2>&1 || " +
+		"        $MVN_CMD versions:update-properties $MAVEN_UPDATE_FLAGS 2>&1 || " +
 			"echo \"WARNING: Maven properties update had some errors (continuing anyway)\"\n",
 	)
 	sb.WriteString("\n        echo \"Updating Maven dependencies to latest releases...\"\n")
 	sb.WriteString(
-		"        $MVN_CMD versions:use-latest-releases -DgenerateBackupPoms=false 2>&1 || " +
+		"        $MVN_CMD versions:use-latest-releases $MAVEN_UPDATE_FLAGS 2>&1 || " +
 			"echo \"WARNING: Maven dependency update had some errors (continuing anyway)\"\n",
 	)
 	sb.WriteString("        ;;\n")
@@ -731,6 +744,11 @@ func GeneratePRDescription(javaVersion, buildSys string, javaVersionUpdated bool
 	case buildSystemMaven:
 		sb.WriteString("- Ran `mvn versions:update-properties` to update dependency properties\n")
 		sb.WriteString("- Ran `mvn versions:use-latest-releases` to update dependencies\n")
+		sb.WriteString(
+			"- Held every version on its current major line and skipped pre-releases " +
+				"(alpha, beta, milestone, RC, snapshot), which Maven reports as ordinary " +
+				"releases\n",
+		)
 	default:
 		sb.WriteString("- Ran `./gradlew wrapper --gradle-version latest` to upgrade the Gradle wrapper\n")
 		sb.WriteString("- Updated Gradle dependency lockfiles (if present)\n")
