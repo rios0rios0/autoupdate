@@ -12,6 +12,21 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/support"
 )
 
+// writeRelaxScript materialises the emitted fragment plus a call against one
+// Gemfile path, and returns the script to run. `trailer` is appended so a caller
+// can prove execution continued past the call.
+func writeRelaxScript(t *testing.T, dir, gemfile, trailer string) string {
+	t.Helper()
+
+	script := filepath.Join(dir, "relax.sh")
+	body := "#!" + bashPath(t) + "\nset -eu\n" +
+		support.GemfileConstraintScript() +
+		"autoupdate_relax_gemfile_constraints " + shellQuote(gemfile) + "\n" + trailer
+	require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
+
+	return script
+}
+
 // runGemfileRelax writes the given Gemfile, runs the emitted bash against it and
 // returns the rewritten content.
 func runGemfileRelax(t *testing.T, content string) string {
@@ -21,13 +36,7 @@ func runGemfileRelax(t *testing.T, content string) string {
 	gemfile := filepath.Join(dir, "Gemfile")
 	require.NoError(t, os.WriteFile(gemfile, []byte(content), 0o600))
 
-	script := filepath.Join(dir, "relax.sh")
-	body := "#!" + bashPath(t) + "\nset -u\n" +
-		support.GemfileConstraintScript() +
-		"autoupdate_relax_gemfile_constraints " + shellQuote(gemfile) + "\n"
-	require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
-
-	out, err := exec.Command("bash", script).CombinedOutput()
+	out, err := exec.Command("bash", writeRelaxScript(t, dir, gemfile, "")).CombinedOutput()
 	require.NoError(t, err, "relax script failed: %s", out)
 
 	rewritten, err := os.ReadFile(gemfile)
@@ -122,12 +131,9 @@ func TestGemfileConstraintScript(t *testing.T) {
 		// given -- a Ruby repository without a Gemfile is not an error, and the
 		// surrounding script runs under `set -e`
 		dir := t.TempDir()
-		script := filepath.Join(dir, "relax.sh")
-		body := "#!" + bashPath(t) + "\nset -eu\n" +
-			support.GemfileConstraintScript() +
-			"autoupdate_relax_gemfile_constraints " + shellQuote(filepath.Join(dir, "Gemfile")) + "\n" +
-			"echo reached-the-end\n"
-		require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
+		script := writeRelaxScript(
+			t, dir, filepath.Join(dir, "Gemfile"), "echo reached-the-end\n",
+		)
 
 		// when
 		out, err := exec.Command("bash", script).CombinedOutput()

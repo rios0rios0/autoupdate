@@ -340,71 +340,76 @@ func TestWriteGitAuth(t *testing.T) {
 // "raise the Gemfile bounds", and this deliberately does not rewrite one — but
 // it does have a cap on the bump it will take, which is the direction that was
 // missing: an unconstrained `gem "rails"` crossed majors whatever the key said.
+// gemModeCase is one setting put to the gem half of the Ruby updater.
+type gemModeCase struct {
+	name       string
+	allowMajor bool
+	contains   []string
+	absent     []string
+}
+
+// gemModeCases covers both directions. Bundler has no flag meaning "raise the
+// Gemfile bounds", so the two are expressed differently: refusing uses
+// bundler's own ceiling, allowing needs the manifest widened first.
+func gemModeCases() []gemModeCase {
+	return []gemModeCase{
+		{
+			name:       "allowed: widen the Gemfile, then let bundler take a major",
+			allowMajor: true,
+			// --major is bundler's default, so it is left off rather than spelled out.
+			contains: []string{"autoupdate_relax_gemfile_constraints Gemfile", "bundle update 2>&1"},
+			absent:   []string{"--minor"},
+		},
+		{
+			name:       "refused: cap bundler and leave the manifest alone",
+			allowMajor: false,
+			contains:   []string{"bundle update --minor"},
+			absent:     []string{"autoupdate_relax_gemfile_constraints"},
+		},
+	}
+}
+
 func TestRubyGemMajorMode(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should let bundler take a major when allowed", func(t *testing.T) {
+	for _, testCase := range gemModeCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			var sb strings.Builder
+
+			// when
+			rbUpdater.WriteRubyUpgradeCommands(&sb, testCase.allowMajor)
+
+			// then
+			script := sb.String()
+			for _, want := range testCase.contains {
+				assert.Contains(t, script, want)
+			}
+			for _, unwanted := range testCase.absent {
+				assert.NotContains(t, script, unwanted)
+			}
+		})
+	}
+
+	t.Run("should widen the Gemfile before resolving", func(t *testing.T) {
 		t.Parallel()
 
-		// given
+		// given -- ordering is the part a "contains" assertion cannot express:
+		// editing the manifest after the resolution would leave the lockfile
+		// pinned against the ceiling that was just removed
 		var sb strings.Builder
 
 		// when
 		rbUpdater.WriteRubyUpgradeCommands(&sb, true)
 
-		// then -- --major is bundler's default, so it is left off rather than
-		// spelled out
+		// then
 		script := sb.String()
-		assert.Contains(t, script, "bundle update 2>&1")
-		assert.NotContains(t, script, "--minor")
-	})
-
-	t.Run("should widen the Gemfile before resolving when allowed", func(t *testing.T) {
-		t.Parallel()
-
-		// given -- no bundler flag can raise the Gemfile's own bounds, so a
-		// `~> 6.0` would otherwise hold the gem on 6.x whatever the key says
-		var sb strings.Builder
-
-		// when
-		rbUpdater.WriteRubyUpgradeCommands(&sb, true)
-
-		// then -- and the widening has to precede the resolution, or the
-		// lockfile is resolved against the ceiling that was just removed
-		script := sb.String()
-		assert.Contains(t, script, "autoupdate_relax_gemfile_constraints Gemfile")
 		assert.Less(t,
 			strings.Index(script, "autoupdate_relax_gemfile_constraints Gemfile"),
 			strings.Index(script, "bundle update"),
 			"the Gemfile must be widened before bundle update runs")
-	})
-
-	t.Run("should not touch the Gemfile when majors are refused", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		var sb strings.Builder
-
-		// when
-		rbUpdater.WriteRubyUpgradeCommands(&sb, false)
-
-		// then -- refusing is bundler's own ceiling, and needs no manifest edit
-		script := sb.String()
-		assert.NotContains(t, script, "autoupdate_relax_gemfile_constraints")
-		assert.Contains(t, script, "bundle update --minor")
-	})
-
-	t.Run("should cap bundler below a major when refused", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		var sb strings.Builder
-
-		// when
-		rbUpdater.WriteRubyUpgradeCommands(&sb, false)
-
-		// then
-		assert.Contains(t, sb.String(), "bundle update --minor")
 	})
 }
 
