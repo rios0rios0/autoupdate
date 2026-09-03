@@ -31,7 +31,7 @@
 # Honoured by every updater, though what it means differs by ecosystem: for the ones that
 # pick a version in Go it is a comparison, and for the ones that shell out it selects the
 # flag -- `pub upgrade --major-versions`, `pdm --unconstrained`, `pnpm update --latest`,
-# `npm-check-updates`, `bundle update --minor`.
+# `npm-check-updates`, and for Ruby the Gemfile's `~>` bounds raised around `bundle update`.
 #allow_major_updates: false
 
 # (optional) number of repositories processed in parallel within an organization.

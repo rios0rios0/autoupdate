@@ -213,7 +213,7 @@ type localUpgradeParams struct {
 	Changelog    support.StagedChangelog
 	AuthToken    string
 	ProviderName string
-	// AllowMajorUpdates caps the bundler bump; see writeRubyUpgradeCommands.
+	// AllowMajorUpdates picks the direction of the gem upgrade; see writeRubyUpgradeCommands.
 	AllowMajorUpdates bool
 }
 

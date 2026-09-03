@@ -191,7 +191,7 @@ func openPullRequest(
 			vCtx.LatestVersion,
 		)
 	}
-	prDesc := GeneratePRDescription(vCtx.LatestVersion, result.RubyVersionUpdated)
+	prDesc := GeneratePRDescription(vCtx.LatestVersion, result.RubyVersionUpdated, opts.AllowMajorUpdates)
 
 	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
 		SourceBranch: "refs/heads/" + vCtx.BranchName,
@@ -286,7 +286,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		BranchName:    vCtx.BranchName,
 		CommitMessage: commitMsg,
 		PRTitle:       prTitle,
-		PRDescription: GeneratePRDescription(vCtx.LatestVersion, rbVersionUpdated),
+		PRDescription: GeneratePRDescription(vCtx.LatestVersion, rbVersionUpdated, opts.AllowMajorUpdates),
 	}, nil
 }
 
@@ -491,22 +491,25 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 
 // writeRubyUpgradeCommands emits the Ruby pin rewrite and the gem upgrade.
 //
-// Bundler has no flag that means "raise the constraints in the Gemfile", and
-// this deliberately does not rewrite one: a `~> 6.0` is the repository stating
-// a bound, and editing it is a different act from resolving within it.
-//
-// What bundler does have is a ceiling on the bump it will take. Plain
-// `bundle update` allows a major where the Gemfile permits one, and
-// `--minor` caps it below that. So the flag maps onto a real bundler mechanism
-// in the *refusing* direction, which is the one that was missing: before this an
-// unconstrained `gem "rails"` crossed majors whatever the configuration said.
+// The two directions of allow_major_updates are expressed differently, because
+// bundler resolves only inside the bounds the Gemfile declares and has no flag
+// meaning "raise them". Refusing uses bundler's own ceiling: `bundle update
+// --minor` caps the bump below a major whatever the Gemfile permits, which is
+// the direction that was missing first -- an unconstrained `gem "rails"`
+// crossed majors however the key was set. Allowing needs the manifest edited,
+// which support.GemfileConstraintScript does in two moves around the
+// resolution: every pessimistic (`~>`) constraint on a `gem` line is widened to
+// `>=` *before* `bundle update`, so the resolution sees the raised bounds, and
+// each one is re-tightened afterwards to `~>` the version that resolved, at the
+// precision the repository wrote -- `~> 6.0` becomes `~> 7.1`, never `>= 6.0`
+// for ever -- and the lockfile is re-locked against the raised bounds, since
+// the resolution recorded the widened ones. A constraint whose gem stayed
+// inside its bound is put back untouched. When the widened resolution fails, the manifest is restored and
+// `bundle update` retried within the bounds the repository declared, so a
+// conflict between two new majors degrades to the smaller upgrade rather than
+// to a dropped ceiling beside a stale lockfile, or to no upgrade at all. Only
+// the `Gemfile` is touched, never a `.gemspec`.
 func writeRubyUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
-	// --major is bundler's default, so it is left off rather than spelled out.
-	bundleArgs := ""
-	if !allowMajorUpdates {
-		bundleArgs = " --minor"
-	}
-
 	// The guard also declines every non-numeric pin, so a repository running
 	// JRuby or TruffleRuby is no longer handed an MRI version number.
 	sb.WriteString(support.VersionPinUpdateScript(support.VersionPinUpdate{
@@ -520,15 +523,53 @@ func writeRubyUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 
 	// Update bundler and bundle update
 	sb.WriteString("# Update bundler and gem dependencies\n")
+	if allowMajorUpdates {
+		sb.WriteString(support.GemfileConstraintScript())
+	}
 	sb.WriteString("if [ -f \"Gemfile\" ]; then\n")
 	sb.WriteString("    echo \"Updating bundler...\"\n")
 	sb.WriteString("    gem update bundler 2>&1 || echo \"WARNING: gem update bundler had some errors\"\n\n")
-	fmt.Fprintf(sb, "    echo \"Running bundle update%s...\"\n", bundleArgs)
-	fmt.Fprintf(sb,
-		"    bundle update%s 2>&1 || echo \"WARNING: bundle update had some errors\"\n",
-		bundleArgs,
-	)
+	if allowMajorUpdates {
+		writeGemfileWideningUpdate(sb)
+	} else {
+		// --major is bundler's default, so the allowing direction never spells
+		// it out; --minor is the cap.
+		sb.WriteString("    echo \"Running bundle update --minor...\"\n")
+		sb.WriteString("    bundle update --minor 2>&1 || echo \"WARNING: bundle update had some errors\"\n")
+	}
 	sb.WriteString("fi\n\n")
+}
+
+// writeGemfileWideningUpdate emits the allowing direction: widen, resolve,
+// re-tighten, re-lock -- or, when the widened resolution fails, restore the
+// manifest and resolve within the bounds it declared, so the run still carries
+// every upgrade bundler can make. The widening comes before `bundle update`
+// because editing the manifest after the resolution would leave the lockfile
+// resolved against the ceiling that was just removed, which is the worst of
+// both. The re-lock comes after the re-tightening for the mirror-image reason:
+// `bundle update` ran against the widened manifest, so the lockfile's
+// DEPENDENCIES block records `rails (>= 6.0)` beside a Gemfile that now says
+// `~> 7.1`, and a frozen or deployment install refuses that mismatch with "the
+// dependencies in your gemfile changed". `bundle lock` is the conservative
+// reconcile: every locked version already satisfies the raised bound, so it
+// rewrites DEPENDENCIES and moves nothing.
+func writeGemfileWideningUpdate(sb *strings.Builder) {
+	sb.WriteString("    autoupdate_relax_gemfile_constraints Gemfile\n")
+	sb.WriteString("    echo \"Running bundle update...\"\n")
+	sb.WriteString("    if bundle update 2>&1; then\n")
+	sb.WriteString("        autoupdate_retighten_gemfile_constraints Gemfile Gemfile.lock\n")
+	sb.WriteString(
+		"        bundle lock 2>&1 || " +
+			"echo \"WARNING: could not re-lock Gemfile.lock against the raised constraints\"\n",
+	)
+	sb.WriteString("    else\n")
+	sb.WriteString(
+		"        echo \"WARNING: bundle update could not resolve past the declared bounds, " +
+			"retrying within them\"\n",
+	)
+	sb.WriteString("        autoupdate_restore_gemfile_constraints Gemfile\n")
+	sb.WriteString("        bundle update 2>&1 || echo \"WARNING: bundle update had some errors\"\n")
+	sb.WriteString("    fi\n")
 }
 
 func writeDockerfileUpdate(sb *strings.Builder) {
@@ -578,7 +619,14 @@ func buildEnv(params upgradeParams, repoDir string) []string {
 // GeneratePRDescription builds a markdown PR description for a Ruby
 // dependency upgrade. Exported so that the local-mode CLI handler can
 // reuse the same description format.
-func GeneratePRDescription(rbVersion string, rbVersionUpdated bool) string {
+//
+// The wording follows the flag the script was actually given. With majors
+// allowed the diff can carry a `Gemfile` edit -- the raised `~>` bounds -- and
+// a reviewer pointed only at `Gemfile.lock` would merge a constraint change
+// without being told to look at it; with majors refused only the lockfile
+// moves, and claiming otherwise would send the reviewer after changes that are
+// not there.
+func GeneratePRDescription(rbVersion string, rbVersionUpdated, allowMajorUpdates bool) string {
 	var sb strings.Builder
 	sb.WriteString("## Summary\n\n")
 	if rbVersionUpdated {
@@ -595,11 +643,26 @@ func GeneratePRDescription(rbVersion string, rbVersionUpdated bool) string {
 		sb.WriteString("- Updated `.ruby-version` to `" + rbVersion + "`\n")
 	}
 	sb.WriteString("- Ran `gem update bundler` to ensure bundler is current\n")
-	sb.WriteString("- Ran `bundle update` to update all gem dependencies\n")
+	if allowMajorUpdates {
+		sb.WriteString(
+			"- Ran `bundle update` with the pessimistic (`~>`) constraints in `Gemfile` widened, " +
+				"then raised each constraint whose gem resolved past its bound to the new version " +
+				"(`~> 6.0` becomes `~> 7.1`); constraints whose gems stayed within their bounds are " +
+				"unchanged\n",
+		)
+	} else {
+		sb.WriteString(
+			"- Ran `bundle update --minor`, which re-resolves `Gemfile.lock` within the current " +
+				"major of every gem (`allow_major_updates` is off for this repository)\n",
+		)
+	}
 	sb.WriteString("\n### Review Checklist\n\n")
 	sb.WriteString("- [ ] Verify build passes\n")
 	sb.WriteString("- [ ] Verify tests pass\n")
 	sb.WriteString("- [ ] Review dependency changes in `Gemfile.lock`\n")
+	if allowMajorUpdates {
+		sb.WriteString("- [ ] Review the constraint changes in `Gemfile` for breaking major bumps\n")
+	}
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()
