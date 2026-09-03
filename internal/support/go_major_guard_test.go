@@ -76,12 +76,19 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
+// guardHarness is one materialised guard: the script that runs it, and the log
+// the stub `go` writes what it was asked for into.
+type guardHarness struct {
+	script string
+	goLog  string
+}
+
 // writeMajorGuardHarness materialises the guard plus a caller that runs it
-// against the fixture, and returns the directory it built.
-func writeMajorGuardHarness(t *testing.T, before string) (dir, script, goLog string) {
+// against the fixture.
+func writeMajorGuardHarness(t *testing.T, before string) guardHarness {
 	t.Helper()
 
-	dir = t.TempDir()
+	dir := t.TempDir()
 
 	goModPath := filepath.Join(dir, "go.mod")
 	require.NoError(t, os.WriteFile(goModPath, []byte(goModFixture), 0o600))
@@ -91,14 +98,14 @@ func writeMajorGuardHarness(t *testing.T, before string) (dir, script, goLog str
 
 	goBin, goLog := stubGoBinary(t, dir)
 
-	script = filepath.Join(dir, "harness.sh")
+	script := filepath.Join(dir, "harness.sh")
 	body := "#!" + bashPath(t) + "\nset -u\ncd " + shellQuote(dir) + "\n" +
 		support.GoMajorGuardScript() +
 		"autoupdate_go_hold_major_jumps " + shellQuote(goBin) + " " +
 		shellQuote(beforePath) + " " + shellQuote(goModPath) + "\n"
 	require.NoError(t, os.WriteFile(script, []byte(body), 0o755))
 
-	return dir, script, goLog
+	return guardHarness{script: script, goLog: goLog}
 }
 
 func runHarness(t *testing.T, script string) string {
@@ -118,15 +125,15 @@ func TestGoMajorGuardScript(t *testing.T) {
 
 		// given -- the glob case: an indirect dependency nobody named, moved
 		// across the one boundary Go promises nothing about
-		_, script, goLog := writeMajorGuardHarness(t,
+		harness := writeMajorGuardHarness(t,
 			"github.com/gobwas/glob v0.2.3\n"+
 				"github.com/sirupsen/logrus v1.9.0\n")
 
 		// when
-		output := runHarness(t, script)
+		output := runHarness(t, harness.script)
 
 		// then
-		calls, err := os.ReadFile(goLog)
+		calls, err := os.ReadFile(harness.goLog)
 		require.NoError(t, err)
 		assert.Contains(t, string(calls), "get github.com/gobwas/glob@v0.2.3")
 		assert.Contains(t, output, "holding github.com/gobwas/glob at v0.2.3")
@@ -137,14 +144,14 @@ func TestGoMajorGuardScript(t *testing.T) {
 
 		// given -- logrus moved v1.9.0 -> v1.10.2, which is the whole point of
 		// the run and must survive it
-		_, script, goLog := writeMajorGuardHarness(t,
+		harness := writeMajorGuardHarness(t,
 			"github.com/sirupsen/logrus v1.9.0\n")
 
 		// when
-		runHarness(t, script)
+		runHarness(t, harness.script)
 
 		// then
-		calls, _ := os.ReadFile(goLog)
+		calls, _ := os.ReadFile(harness.goLog)
 		assert.NotContains(t, string(calls), "logrus")
 	})
 
@@ -152,14 +159,14 @@ func TestGoMajorGuardScript(t *testing.T) {
 		t.Parallel()
 
 		// given
-		_, script, goLog := writeMajorGuardHarness(t,
+		harness := writeMajorGuardHarness(t,
 			"github.com/stretchr/testify v1.12.1\n")
 
 		// when
-		runHarness(t, script)
+		runHarness(t, harness.script)
 
 		// then
-		calls, _ := os.ReadFile(goLog)
+		calls, _ := os.ReadFile(harness.goLog)
 		assert.NotContains(t, string(calls), "testify")
 	})
 
@@ -168,14 +175,14 @@ func TestGoMajorGuardScript(t *testing.T) {
 
 		// given -- present before, absent after: `go mod tidy` dropped it, and
 		// reinstating it would undo that
-		_, script, goLog := writeMajorGuardHarness(t,
+		harness := writeMajorGuardHarness(t,
 			"github.com/dropped/module v0.4.0\n")
 
 		// when
-		runHarness(t, script)
+		runHarness(t, harness.script)
 
 		// then
-		calls, _ := os.ReadFile(goLog)
+		calls, _ := os.ReadFile(harness.goLog)
 		assert.NotContains(t, string(calls), "dropped")
 	})
 
@@ -184,14 +191,14 @@ func TestGoMajorGuardScript(t *testing.T) {
 
 		// given -- cobra is declared outside the parenthesised block, and
 		// crossed v0 -> v1 there
-		_, script, goLog := writeMajorGuardHarness(t,
+		harness := writeMajorGuardHarness(t,
 			"github.com/spf13/cobra v0.0.7\n")
 
 		// when
-		runHarness(t, script)
+		runHarness(t, harness.script)
 
 		// then
-		calls, err := os.ReadFile(goLog)
+		calls, err := os.ReadFile(harness.goLog)
 		require.NoError(t, err)
 		assert.Contains(t, string(calls), "get github.com/spf13/cobra@v0.0.7")
 	})
@@ -200,19 +207,19 @@ func TestGoMajorGuardScript(t *testing.T) {
 		t.Parallel()
 
 		// given
-		_, heldScript, heldLog := writeMajorGuardHarness(t,
+		held := writeMajorGuardHarness(t,
 			"github.com/gobwas/glob v0.2.3\n")
-		_, cleanScript, cleanLog := writeMajorGuardHarness(t,
+		clean := writeMajorGuardHarness(t,
 			"github.com/sirupsen/logrus v1.9.0\n")
 
 		// when
-		runHarness(t, heldScript)
-		runHarness(t, cleanScript)
+		runHarness(t, held.script)
+		runHarness(t, clean.script)
 
 		// then
-		held, _ := os.ReadFile(heldLog)
-		clean, _ := os.ReadFile(cleanLog)
-		assert.Contains(t, string(held), "mod tidy")
-		assert.NotContains(t, string(clean), "mod tidy")
+		heldCalls, _ := os.ReadFile(held.goLog)
+		cleanCalls, _ := os.ReadFile(clean.goLog)
+		assert.Contains(t, string(heldCalls), "mod tidy")
+		assert.NotContains(t, string(cleanCalls), "mod tidy")
 	})
 }

@@ -17,6 +17,8 @@ import (
 //
 // "sp" and "final" are deliberately absent although Maven ranks them: both sort
 // *above* the plain release and neither means unfinished.
+//
+//nolint:gochecknoglobals // read-only lookup table
 var prereleaseQualifiers = []string{
 	"alpha", "beta", "milestone", "cr", "rc", "preview", "pre", "dev", "snapshot",
 }

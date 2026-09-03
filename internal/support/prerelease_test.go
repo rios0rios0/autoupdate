@@ -87,7 +87,7 @@ func TestMavenVersionIgnore(t *testing.T) {
 		require.NotEmpty(t, value)
 
 		patterns := make([]*regexp.Regexp, 0)
-		for _, raw := range strings.Split(value, ",") {
+		for raw := range strings.SplitSeq(value, ",") {
 			compiled, err := regexp.Compile(raw)
 			require.NoError(t, err, "pattern %q does not compile", raw)
 			patterns = append(patterns, compiled)
