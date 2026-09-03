@@ -117,109 +117,112 @@ func runHarness(t *testing.T, script string) string {
 	return string(output)
 }
 
+// guardCase is one before-state put to the guard. `held` names the requirement
+// the guard must put back, or is empty when the run must be left alone entirely.
+type guardCase struct {
+	name   string
+	before string
+	held   string
+}
+
+// guardCases covers what reaches the guard after a real `go get -u`. The first
+// row is the one it exists for: an indirect dependency nobody named, moved
+// across the only boundary Go promises nothing about.
+//
+// The empty-`held` rows matter just as much. A guard that also reverted those
+// would undo the upgrade it was asked to protect, which is a quieter failure
+// than the one it fixes -- the pull request would simply carry nothing.
+func guardCases() []guardCase {
+	return []guardCase{
+		{
+			name:   "a dependency that crossed from v0 to v1",
+			before: "github.com/gobwas/glob v0.2.3\ngithub.com/sirupsen/logrus v1.9.0\n",
+			held:   "github.com/gobwas/glob@v0.2.3",
+		},
+		{
+			name:   "a single-line require that crossed from v0 to v1",
+			before: "github.com/spf13/cobra v0.0.7\n",
+			held:   "github.com/spf13/cobra@v0.0.7",
+		},
+		{
+			name:   "an ordinary minor upgrade",
+			before: "github.com/sirupsen/logrus v1.9.0\n",
+			held:   "",
+		},
+		{
+			name:   "a dependency whose version did not move",
+			before: "github.com/stretchr/testify v1.12.1\n",
+			held:   "",
+		},
+		{
+			name:   "a module the upgrade removed",
+			before: "github.com/dropped/module v0.4.0\n",
+			held:   "",
+		},
+	}
+}
+
 func TestGoMajorGuardScript(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should hold a dependency that crossed from v0 to v1", func(t *testing.T) {
-		t.Parallel()
+	for _, testCase := range guardCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-		// given -- the glob case: an indirect dependency nobody named, moved
-		// across the one boundary Go promises nothing about
-		harness := writeMajorGuardHarness(t,
-			"github.com/gobwas/glob v0.2.3\n"+
-				"github.com/sirupsen/logrus v1.9.0\n")
+			// given
+			harness := writeMajorGuardHarness(t, testCase.before)
 
-		// when
-		output := runHarness(t, harness.script)
+			// when
+			runHarness(t, harness.script)
 
-		// then
-		calls, err := os.ReadFile(harness.goLog)
-		require.NoError(t, err)
-		assert.Contains(t, string(calls), "get github.com/gobwas/glob@v0.2.3")
-		assert.Contains(t, output, "holding github.com/gobwas/glob at v0.2.3")
-	})
+			// then
+			calls, err := os.ReadFile(harness.goLog)
+			require.NoError(t, err)
 
-	t.Run("should leave an ordinary minor upgrade alone", func(t *testing.T) {
-		t.Parallel()
+			if testCase.held == "" {
+				assert.NotContains(t, string(calls), "get ",
+					"nothing should have been held back")
 
-		// given -- logrus moved v1.9.0 -> v1.10.2, which is the whole point of
-		// the run and must survive it
-		harness := writeMajorGuardHarness(t,
-			"github.com/sirupsen/logrus v1.9.0\n")
+				return
+			}
 
-		// when
-		runHarness(t, harness.script)
-
-		// then
-		calls, _ := os.ReadFile(harness.goLog)
-		assert.NotContains(t, string(calls), "logrus")
-	})
-
-	t.Run("should not touch a dependency whose version did not move", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		harness := writeMajorGuardHarness(t,
-			"github.com/stretchr/testify v1.12.1\n")
-
-		// when
-		runHarness(t, harness.script)
-
-		// then
-		calls, _ := os.ReadFile(harness.goLog)
-		assert.NotContains(t, string(calls), "testify")
-	})
-
-	t.Run("should ignore a module the upgrade removed", func(t *testing.T) {
-		t.Parallel()
-
-		// given -- present before, absent after: `go mod tidy` dropped it, and
-		// reinstating it would undo that
-		harness := writeMajorGuardHarness(t,
-			"github.com/dropped/module v0.4.0\n")
-
-		// when
-		runHarness(t, harness.script)
-
-		// then
-		calls, _ := os.ReadFile(harness.goLog)
-		assert.NotContains(t, string(calls), "dropped")
-	})
-
-	t.Run("should read a single-line require as well as a block", func(t *testing.T) {
-		t.Parallel()
-
-		// given -- cobra is declared outside the parenthesised block, and
-		// crossed v0 -> v1 there
-		harness := writeMajorGuardHarness(t,
-			"github.com/spf13/cobra v0.0.7\n")
-
-		// when
-		runHarness(t, harness.script)
-
-		// then
-		calls, err := os.ReadFile(harness.goLog)
-		require.NoError(t, err)
-		assert.Contains(t, string(calls), "get github.com/spf13/cobra@v0.0.7")
-	})
+			assert.Contains(t, string(calls), "get "+testCase.held)
+		})
+	}
 
 	t.Run("should re-run tidy only when something was held", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		held := writeMajorGuardHarness(t,
-			"github.com/gobwas/glob v0.2.3\n")
-		clean := writeMajorGuardHarness(t,
-			"github.com/sirupsen/logrus v1.9.0\n")
+		held := writeMajorGuardHarness(t, "github.com/gobwas/glob v0.2.3\n")
+		clean := writeMajorGuardHarness(t, "github.com/sirupsen/logrus v1.9.0\n")
 
 		// when
 		runHarness(t, held.script)
 		runHarness(t, clean.script)
 
-		// then
-		heldCalls, _ := os.ReadFile(held.goLog)
-		cleanCalls, _ := os.ReadFile(clean.goLog)
+		// then -- tidy is what makes the hold take effect, and running it when
+		// nothing moved would rewrite go.mod for no reason
+		heldCalls, err := os.ReadFile(held.goLog)
+		require.NoError(t, err)
+		cleanCalls, err := os.ReadFile(clean.goLog)
+		require.NoError(t, err)
 		assert.Contains(t, string(heldCalls), "mod tidy")
 		assert.NotContains(t, string(cleanCalls), "mod tidy")
+	})
+
+	t.Run("should report each requirement it holds", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- the log line is how a reader of the pull request learns an
+		// upgrade was declined rather than never offered
+		harness := writeMajorGuardHarness(t, "github.com/gobwas/glob v0.2.3\n")
+
+		// when
+		output := runHarness(t, harness.script)
+
+		// then
+		assert.Contains(t, output, "holding github.com/gobwas/glob at v0.2.3")
+		assert.Contains(t, output, "crosses a major version boundary")
 	})
 }
