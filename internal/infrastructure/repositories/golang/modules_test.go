@@ -328,9 +328,14 @@ func runUpgradeScript(t *testing.T, repoDir string) string {
 	require.NoError(t, os.WriteFile(scriptPath, []byte(sb.String()), 0o700))
 
 	// A stub stands in for the real toolchain: the loop's job is to run the
-	// commands in each module directory, not to resolve dependencies.
+	// commands in each module directory, not to resolve dependencies. The
+	// script execs the stub by path, so the kernel resolves its shebang: it
+	// has to name the bash that was found, not `/bin/bash`, which Termux and
+	// other non-FHS platforms do not have.
 	stubPath := filepath.Join(scriptDir, "go-stub")
-	require.NoError(t, os.WriteFile(stubPath, []byte("#!/bin/bash\necho \"stub $* in $(pwd)\"\n"), 0o700))
+	require.NoError(t, os.WriteFile(
+		stubPath, []byte("#!"+bashPath+"\necho \"stub $* in $(pwd)\"\n"), 0o700,
+	))
 
 	cmd := exec.CommandContext(t.Context(), bashPath, scriptPath)
 	cmd.Dir = repoDir
