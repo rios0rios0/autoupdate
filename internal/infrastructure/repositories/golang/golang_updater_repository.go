@@ -162,6 +162,27 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 // ApplyUpdates implements repositories.LocalUpdater for the clone-based pipeline.
 // It runs Go upgrade commands on the already-cloned repository, updates
 // Dockerfiles and CHANGELOG, and returns PR metadata.
+// rewriteDockerfileGoTags rewrites the golang base-image tags in Go, verifying
+// each target tag exists on Docker Hub and falling back to the closest published
+// one, instead of blindly writing the go.dev version -- which may not have a
+// published image yet, or may lack the requested Alpine variant.
+//
+// Best effort by design: a Dockerfile that could not be retagged is worth a
+// warning, not a failed upgrade that discards every other change in the run.
+func rewriteDockerfileGoTags(ctx context.Context, repoDir, goVersion string) {
+	changed, err := updateDockerfileGolangTags(ctx, repoDir, goVersion, fetchGolangTags)
+	switch {
+	case err != nil:
+		logger.Warnf("[golang] Failed to update Dockerfile golang image tags: %v", err)
+	case changed:
+		logger.Infof(
+			"[golang] Updated Dockerfile golang base image tags to the closest "+
+				"published tags for Go %s",
+			goVersion,
+		)
+	}
+}
+
 func (u *UpdaterRepository) ApplyUpdates(
 	ctx context.Context,
 	repoDir string,
@@ -217,23 +238,8 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	goVersionUpdated := strings.Contains(outputStr, "GO_VERSION_UPDATED=true")
 
-	// Rewrite Dockerfile golang base-image tags in Go, verifying each target
-	// tag exists on Docker Hub (falling back to the closest published one)
-	// instead of blindly writing the go.dev version, which may not have a
-	// published image yet or may lack the requested Alpine variant.
 	if goVersionUpdated {
-		dfChanged, dfErr := updateDockerfileGolangTags(
-			ctx, repoDir, vCtx.LatestVersion, fetchGolangTags,
-		)
-		switch {
-		case dfErr != nil:
-			logger.Warnf("[golang] Failed to update Dockerfile golang image tags: %v", dfErr)
-		case dfChanged:
-			logger.Infof(
-				"[golang] Updated Dockerfile golang base image tags to the closest published tags for Go %s",
-				vCtx.LatestVersion,
-			)
-		}
+		rewriteDockerfileGoTags(ctx, repoDir, vCtx.LatestVersion)
 	}
 
 	// Return early if the upgrade script made no filesystem changes
