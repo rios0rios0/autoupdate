@@ -331,7 +331,7 @@ func TestBuildBatchJavaScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := javaUpdater.BuildBatchJavaScript("gradle")
+		script := javaUpdater.BuildBatchJavaScript("gradle", true)
 
 		// then
 		assert.Contains(t, script, "#!/bin/bash")
@@ -344,7 +344,7 @@ func TestBuildBatchJavaScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := javaUpdater.BuildBatchJavaScript("maven")
+		script := javaUpdater.BuildBatchJavaScript("maven", true)
 
 		// then
 		assert.Contains(t, script, "#!/bin/bash")
@@ -435,5 +435,50 @@ func TestWriteGitAuth(t *testing.T) {
 		result := sb.String()
 		assert.Contains(t, result, "oauth2")
 		assert.Contains(t, result, "gitlab.com")
+	})
+}
+
+// TestBuildBatchJavaScriptMajorMode covers what `allow_major_updates` changes on
+// the Maven side: the value of -DallowMajorUpdates on both plugin goals.
+func TestBuildBatchJavaScriptMajorMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should allow majors by default", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := javaUpdater.BuildBatchJavaScript("maven", true)
+
+		// then -- the flag is read from a variable, so assert the variable and
+		// that both goals reference it rather than a literal
+		assert.Contains(t, script, "MAVEN_ALLOW_MAJOR=true")
+		assert.Equal(t, 2, strings.Count(script, "-DallowMajorUpdates=$MAVEN_ALLOW_MAJOR"))
+	})
+
+	t.Run("should refuse majors when configured off", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := javaUpdater.BuildBatchJavaScript("maven", false)
+
+		// then
+		assert.Contains(t, script, "MAVEN_ALLOW_MAJOR=false")
+		assert.Equal(t, 2, strings.Count(script, "-DallowMajorUpdates=$MAVEN_ALLOW_MAJOR"))
+	})
+
+	t.Run("should keep the pre-release filter in both modes", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- a pre-release is never a candidate regardless of the major
+		// setting: taking a beta is how CVEs get reintroduced, not remediated
+		for _, allowMajor := range []bool{true, false} {
+			// when
+			script := javaUpdater.BuildBatchJavaScript("maven", allowMajor)
+
+			// then
+			assert.Contains(t, script, "MAVEN_VERSION_IGNORE=")
+			assert.Contains(t, script, "-Dmaven.version.ignore=$MAVEN_VERSION_IGNORE")
+			assert.Contains(t, script, "-DallowSnapshots=false")
+		}
 	})
 }

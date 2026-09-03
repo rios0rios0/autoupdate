@@ -211,7 +211,7 @@ func TestBuildLocalGoScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := goUpdater.BuildLocalGoScript("github", false)
+		script := goUpdater.BuildLocalGoScript("github", false, true)
 
 		// then
 		assert.Contains(t, script, "#!/bin/bash")
@@ -222,7 +222,7 @@ func TestBuildLocalGoScript(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		script := goUpdater.BuildLocalGoScript("github", true)
+		script := goUpdater.BuildLocalGoScript("github", true, true)
 
 		// then
 		assert.Contains(t, script, "config.sh")
@@ -236,7 +236,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		result := goUpdater.GenerateGoPRDescription("1.25.7", false, true)
+		result := goUpdater.GenerateGoPRDescription("1.25.7", false, true, true)
 
 		// then
 		assert.Contains(t, result, "1.25.7")
@@ -246,7 +246,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		result := goUpdater.GenerateGoPRDescription("1.25.7", false, false)
+		result := goUpdater.GenerateGoPRDescription("1.25.7", false, false, true)
 
 		// then
 		assert.Contains(t, result, "dependencies")

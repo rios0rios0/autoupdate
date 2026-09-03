@@ -260,11 +260,54 @@ and a release number from an unrelated channel is not a comparable replacement. 
 `dockerfile` and the Go Dockerfile tag rewriter (`golang/dockerfile_tags.go`) reach the same conclusion
 through `golang.org/x/mod/semver` directly, since they compare registry tags rather than pin files.
 
-### Only Finished Releases, and Only Within a Major
+### Majors Are Allowed by Default
 
-"Newest" is two questions, and a version pin is only moved when both answer yes: is the
-candidate *finished*, and is it on the *same major line*. `support.IsNewerVersion` answers
-neither -- it orders versions, and `3.0.0-beta3` really does outrank `2.26.1`.
+`allow_major_updates` (`entities.MajorUpdatesAllowed`, unset means **true**) decides whether
+an upgrade may cross a major version boundary. It is settable in any layer, including the
+target repository's own `.autoupdate.yaml` -- unlike `cleanup_stale_branches` it is accepted
+in *both* directions, because it starts nothing and destroys nothing: it decides which
+version a rewrite writes into a manifest, and a repository declining majors is declining
+upgrades for itself.
+
+On by default because a dependency held back is a dependency whose CVEs are never
+remediated, and the fix is often only in the next major -- Spring Framework 6.2.x carried
+six unpatched advisories whose only remedy was 7.0.x, and no 6.2 release ever shipped one.
+Refusing the major there does not avoid risk, it accumulates it silently. What catches a
+breaking change instead is the pipeline: the pull request builds, tests and lints the
+repository, so an incompatible major arrives as a red check on a branch rather than as a
+broken main. That is a more accurate signal than a version-number heuristic, which cannot
+tell a rename from a rewrite.
+
+Only `java` and `golang` read it, from `UpdateOptions.AllowMajorUpdates`. The other eight
+accept the key through the config layers and then ignore it, because they delegate to a
+native tool with its own policy -- Dart's `pub upgrade --major-versions` crosses majors
+whatever this says. Turning it off does **not** hold those ecosystems back, and the
+user-facing docs say so; wiring the rest is open work.
+
+The two that do act on it:
+`java` passes it through as `-DallowMajorUpdates` on both versions-maven-plugin goals, and
+`golang` emits `support.GoMajorGuardScript()` **only when it is false** -- an unused bash
+function in a generated script is a thing a reader has to rule out. The allowed branch is
+deliberately not an early return: the Go-directive re-apply and `go mod vendor` follow it
+and run either way.
+
+`UpdateOptions`'s zero value is therefore the *restrictive* case. Construct it through the
+run command, which resolves the flag, rather than by hand.
+
+**This does not relax the pre-release filter.** A pre-release is never a candidate whatever
+this is set to: `log4j2` `3.0.0-beta3` is how three CVEs were reintroduced, so betas work
+against the reason majors are allowed rather than for it.
+
+### Only Finished Releases, and Majors Only When Allowed
+
+"Newest" is two questions: is the candidate *finished*, and is it on the *same major line*.
+`support.IsNewerVersion` answers neither -- it orders versions, and `3.0.0-beta3` really
+does outrank `2.26.1`.
+
+The two are answered differently. A pre-release is **never** a candidate, unconditionally
+and in every mode. The major question is `allow_major_updates`, which defaults to *yes* --
+see "Majors Are Allowed by Default" above, and read the **Majors.** paragraph below as
+describing what happens only when a layer turns that key off.
 
 **Pre-releases.** `prereleaseQualifiers` (`internal/support/prerelease.go`) holds the
 vocabulary -- alpha, beta, milestone, cr, rc, preview, pre, dev, snapshot. Both
@@ -284,11 +327,17 @@ Maven is where this bites. It has no concept of a pre-release at all: `3.0.0-bet
 excludes none of them, and `maven-metadata.xml` reports the newest of them as `<release>`. One
 run moved four security pins onto pre-releases, and the log4j2 one silently dropped
 `log4j-api` back to a transitive 2.24.1 -- reintroducing the three CVEs the pin existed to
-remediate, in a pull request titled as a dependency update. Both goals now also pass
-`-DallowMajorUpdates=false`: a security pin belongs on its own major line, and a new major
-arriving unreviewed inside a routine bump is the same failure by another route.
+remediate, in a pull request titled as a dependency update.
 
-**Majors.** `support.GoMajorGuardScript()` emits the bash counterpart for Go. `go get -u` is
+Both goals also pass `-DallowMajorUpdates`, taken from `MAVEN_ALLOW_MAJOR` and carrying the
+resolved `allow_major_updates` rather than a literal. It was hardcoded `false` when the
+guard shipped; that is now the opt-out rather than the default, because the fix for a
+serious CVE is often only in the next major. The pre-release filtering above is independent
+of it and applies in both modes.
+
+**Majors — only when `allow_major_updates` is off.** Everything in this paragraph is the
+opt-out path; on the default path the guard is not emitted at all.
+`support.GoMajorGuardScript()` emits the bash counterpart for Go. `go get -u` is
 documented as taking the latest *minor or patch*, and for most modules it does -- semantic
 import versioning puts v2 and above behind a `/v2` suffix, which is a different module path
 `-u` will never reach for. The exception is the boundary below that suffix: v0 and v1 share

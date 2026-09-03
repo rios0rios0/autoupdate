@@ -146,7 +146,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	result, hasConfigSH, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx)
+	result, hasConfigSH, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, opts.AllowMajorUpdates)
 	if upgradeErr != nil {
 		return nil, upgradeErr
 	}
@@ -159,6 +159,27 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 	return openPullRequest(ctx, provider, repo, opts, vCtx, result, hasConfigSH)
 }
 
+// rewriteDockerfileGoTags rewrites the golang base-image tags in Go, verifying
+// each target tag exists on Docker Hub and falling back to the closest published
+// one, instead of blindly writing the go.dev version -- which may not have a
+// published image yet, or may lack the requested Alpine variant.
+//
+// Best effort by design: a Dockerfile that could not be retagged is worth a
+// warning, not a failed upgrade that discards every other change in the run.
+func rewriteDockerfileGoTags(ctx context.Context, repoDir, goVersion string) {
+	changed, err := updateDockerfileGolangTags(ctx, repoDir, goVersion, fetchGolangTags)
+	switch {
+	case err != nil:
+		logger.Warnf("[golang] Failed to update Dockerfile golang image tags: %v", err)
+	case changed:
+		logger.Infof(
+			"[golang] Updated Dockerfile golang base image tags to the closest "+
+				"published tags for Go %s",
+			goVersion,
+		)
+	}
+}
+
 // ApplyUpdates implements repositories.LocalUpdater for the clone-based pipeline.
 // It runs Go upgrade commands on the already-cloned repository, updates
 // Dockerfiles and CHANGELOG, and returns PR metadata.
@@ -167,7 +188,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[golang] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
@@ -186,7 +207,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, fmt.Errorf("go binary not found: %w", goErr)
 	}
 
-	script := buildLocalGoScript(provider.Name(), hasConfigSH)
+	script := buildLocalGoScript(provider.Name(), hasConfigSH, opts.AllowMajorUpdates)
 	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
 	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
 		return nil, fmt.Errorf("failed to write script: %w", writeErr)
@@ -217,23 +238,8 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	goVersionUpdated := strings.Contains(outputStr, "GO_VERSION_UPDATED=true")
 
-	// Rewrite Dockerfile golang base-image tags in Go, verifying each target
-	// tag exists on Docker Hub (falling back to the closest published one)
-	// instead of blindly writing the go.dev version, which may not have a
-	// published image yet or may lack the requested Alpine variant.
 	if goVersionUpdated {
-		dfChanged, dfErr := updateDockerfileGolangTags(
-			ctx, repoDir, vCtx.LatestVersion, fetchGolangTags,
-		)
-		switch {
-		case dfErr != nil:
-			logger.Warnf("[golang] Failed to update Dockerfile golang image tags: %v", dfErr)
-		case dfChanged:
-			logger.Infof(
-				"[golang] Updated Dockerfile golang base image tags to the closest published tags for Go %s",
-				vCtx.LatestVersion,
-			)
-		}
+		rewriteDockerfileGoTags(ctx, repoDir, vCtx.LatestVersion)
 	}
 
 	// Return early if the upgrade script made no filesystem changes
@@ -269,7 +275,9 @@ func (u *UpdaterRepository) ApplyUpdates(
 		BranchName:    vCtx.BranchName,
 		CommitMessage: commitMsg,
 		PRTitle:       prTitle,
-		PRDescription: GenerateGoPRDescription(vCtx.LatestVersion, hasConfigSH, goVersionUpdated),
+		PRDescription: GenerateGoPRDescription(
+			vCtx.LatestVersion, hasConfigSH, goVersionUpdated, opts.AllowMajorUpdates,
+		),
 	}, nil
 }
 
@@ -306,7 +314,7 @@ func localResolveVersionContext(repoDir, latestGoVersion string) *versionContext
 
 // buildLocalGoScript generates a bash script with only language-specific
 // operations (no git clone, branch, commit, or push).
-func buildLocalGoScript(providerName string, hasConfigSH bool) string {
+func buildLocalGoScript(providerName string, hasConfigSH, allowMajorUpdates bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("#!/bin/bash\n")
@@ -336,7 +344,7 @@ func buildLocalGoScript(providerName string, hasConfigSH bool) string {
 		sb.WriteString("fi\n\n")
 	}
 
-	writeGoUpgradeCommands(&sb)
+	writeGoUpgradeCommands(&sb, allowMajorUpdates)
 	// Dockerfile golang image tags are rewritten in Go (registry-verified) by
 	// updateDockerfileGolangTags after this script runs — see ApplyUpdates.
 
@@ -356,6 +364,7 @@ func cloneAndUpgrade(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
+	allowMajorUpdates bool,
 ) (*upgradeResult, bool, error) {
 	hasConfigSH := provider.HasFile(ctx, repo, "config.sh")
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
@@ -373,6 +382,8 @@ func cloneAndUpgrade(
 		HasConfigSH:   hasConfigSH,
 		ProviderName:  provider.Name(),
 		Changelog:     changelog,
+
+		AllowMajorUpdates: allowMajorUpdates,
 	})
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to upgrade: %w", err)
@@ -404,7 +415,9 @@ func openPullRequest(
 			vCtx.LatestVersion,
 		)
 	}
-	prDesc := GenerateGoPRDescription(vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated)
+	prDesc := GenerateGoPRDescription(
+		vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated, opts.AllowMajorUpdates,
+	)
 
 	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
 		SourceBranch: "refs/heads/" + vCtx.BranchName,
@@ -505,6 +518,14 @@ type upgradeParams struct {
 	// Changelog is the staged changelog payload the script copies into the
 	// clone; an empty value leaves the repository's changelog untouched.
 	Changelog support.StagedChangelog
+	// AllowMajorUpdates decides whether the major-version guard is emitted and
+	// called at all.
+	//
+	// The zero value is the *restrictive* case, as on entities.UpdateOptions:
+	// resolve it with entities.MajorUpdatesAllowed at the call site rather than
+	// relying on a default here. cloneAndUpgrade carries opts.AllowMajorUpdates
+	// through for exactly that reason.
+	AllowMajorUpdates bool
 }
 
 type upgradeResult struct {
@@ -642,7 +663,7 @@ func buildUpgradeScript(
 	}
 
 	// Go upgrade commands
-	writeGoUpgradeCommands(&sb)
+	writeGoUpgradeCommands(&sb, params.AllowMajorUpdates)
 
 	// NOTE: Dockerfile golang image tags are no longer rewritten from bash.
 	// This monolithic clone-and-push flow is legacy (the golang updater
@@ -681,10 +702,14 @@ func writeGitLabAuth(sb *strings.Builder) {
 // an infrastructure repository whose integration-test harness lives in its own
 // module under a subdirectory — and `go get ./...` never crosses a module
 // boundary, so each module has to be upgraded in its own directory.
-func writeGoUpgradeCommands(sb *strings.Builder) {
-	// Defined once, outside the per-module loop that uses them.
+func writeGoUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
+	// Defined once, outside the per-module loop that uses them. The major guard is
+	// emitted only when it will be called: an unused bash function in a generated
+	// script is a thing a reader has to rule out.
 	sb.WriteString(support.VersionGuardScript())
-	sb.WriteString(support.GoMajorGuardScript())
+	if !allowMajorUpdates {
+		sb.WriteString(support.GoMajorGuardScript())
+	}
 
 	writeGoModuleDiscovery(sb)
 
@@ -699,7 +724,7 @@ func writeGoUpgradeCommands(sb *strings.Builder) {
 	// would otherwise parse as pushd's stack-index option.
 	sb.WriteString("    pushd \"./$MODULE_DIR\" > /dev/null\n\n")
 
-	writeGoModuleUpgradeCommands(sb)
+	writeGoModuleUpgradeCommands(sb, allowMajorUpdates)
 
 	sb.WriteString("    popd > /dev/null\n")
 	// The delimiter is deliberately unquoted so that GO_MODULE_DIRS expands.
@@ -733,7 +758,7 @@ func writeGoModuleDiscovery(sb *strings.Builder) {
 // writeGoModuleUpgradeCommands emits the upgrade of a single module. It runs
 // with the working directory already set to that module's directory, so every
 // path stays module-relative.
-func writeGoModuleUpgradeCommands(sb *strings.Builder) {
+func writeGoModuleUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 	// Read the current go version from go.mod and compare with the target.
 	// "|| true" is required: a go.mod without a go directive makes grep exit 1,
 	// which under `set -o pipefail` would abort the script and leave the
@@ -784,10 +809,15 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder) {
 	// below has something to compare against. See GoMajorGuardScript: `-u` will
 	// not reach for a `/v2` path, but v0 and v1 share the unsuffixed one, so
 	// the boundary Go itself calls compatibility-free is the one it crosses.
-	sb.WriteString("    MODULE_VERSIONS_BEFORE=\"$(mktemp)\"\n")
-	sb.WriteString(
-		"    autoupdate_go_module_versions go.mod > \"$MODULE_VERSIONS_BEFORE\"\n\n",
-	)
+	//
+	// Skipped entirely when majors are allowed, which is the default: there is
+	// nothing to compare against if nothing will be held back.
+	if !allowMajorUpdates {
+		sb.WriteString("    MODULE_VERSIONS_BEFORE=\"$(mktemp)\"\n")
+		sb.WriteString(
+			"    autoupdate_go_module_versions go.mod > \"$MODULE_VERSIONS_BEFORE\"\n\n",
+		)
+	}
 
 	sb.WriteString("    echo \"Running go get -u -t ./...\"\n")
 	sb.WriteString(
@@ -808,15 +838,24 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder) {
 	// script runs under `set -e`, so the call is branched rather than bare: a
 	// guard that found a problem must report it, not abort the run before the
 	// safe part of the upgrade is committed.
-	sb.WriteString("    echo \"Checking for major version jumps...\"\n")
-	sb.WriteString("    if ! autoupdate_go_hold_major_jumps " +
-		"\"$GO_BINARY\" \"$MODULE_VERSIONS_BEFORE\" go.mod; then\n")
-	sb.WriteString(
-		"        echo \"  WARNING: some major version jumps are unresolved (see above); " +
-			"review this module before merging\"\n",
-	)
-	sb.WriteString("    fi\n")
-	sb.WriteString("    rm -f \"$MODULE_VERSIONS_BEFORE\"\n\n")
+	if allowMajorUpdates {
+		// Said out loud so a reader of the log knows the guard did not merely fail
+		// to find anything -- it was not asked to look. Not an early return: the
+		// Go-directive re-apply and `go mod vendor` below run either way.
+		sb.WriteString(
+			"    echo \"Major version upgrades are allowed; not holding any back\"\n\n",
+		)
+	} else {
+		sb.WriteString("    echo \"Checking for major version jumps...\"\n")
+		sb.WriteString("    if ! autoupdate_go_hold_major_jumps " +
+			"\"$GO_BINARY\" \"$MODULE_VERSIONS_BEFORE\" go.mod; then\n")
+		sb.WriteString(
+			"        echo \"  WARNING: some major version jumps are unresolved (see above); " +
+				"review this module before merging\"\n",
+		)
+		sb.WriteString("    fi\n")
+		sb.WriteString("    rm -f \"$MODULE_VERSIONS_BEFORE\"\n\n")
+	}
 
 	// Re-apply the Go version after go mod tidy, because older Go binaries
 	// may normalise the three-part version back to two-part during tidy.
@@ -929,7 +968,10 @@ func findGoBinaryInGVM(home string) (string, bool) {
 // GenerateGoPRDescription builds a markdown PR description for a Go
 // dependency upgrade.  Exported so that the local-mode CLI handler can
 // reuse the same description format.
-func GenerateGoPRDescription(goVersion string, hasConfigSH, goVersionUpdated bool) string {
+func GenerateGoPRDescription(
+	goVersion string,
+	hasConfigSH, goVersionUpdated, allowMajorUpdates bool,
+) string {
 	var sb strings.Builder
 	sb.WriteString("## Summary\n\n")
 	if goVersionUpdated {
@@ -946,13 +988,21 @@ func GenerateGoPRDescription(goVersion string, hasConfigSH, goVersionUpdated boo
 		sb.WriteString("- Updated the `go` directive to `" + goVersion + "` in every `go.mod`\n")
 	}
 	sb.WriteString("- Ran `go get -u -t ./...` in each module directory to update all dependencies\n")
-	sb.WriteString(
-		"- Checked every dependency whose major version moved and held it at its " +
-			"previous version, because v0 and v1 share an unsuffixed module path and " +
-			"`-u` crosses the one boundary Go makes no compatibility promise across. " +
-			"A hold can fail when an upgraded dependency requires the new major; the " +
-			"run log names anything left unresolved, so check it before merging\n",
-	)
+	if allowMajorUpdates {
+		sb.WriteString(
+			"- Allowed major version upgrades (`allow_major_updates`, on by default), " +
+				"so a dependency that moved across a major is in this diff. The checks " +
+				"on this pull request are what establish whether the repository still " +
+				"builds against it\n",
+		)
+	} else {
+		sb.WriteString(
+			"- Held every dependency whose major version moved at its previous version, " +
+				"because `allow_major_updates` is off for this repository. A hold can " +
+				"fail when an upgraded dependency requires the new major; the run log " +
+				"names anything left unresolved, so check it before merging\n",
+		)
+	}
 	sb.WriteString("- Ran `go mod tidy` in each module directory to clean up\n")
 	if hasConfigSH {
 		sb.WriteString("- `config.sh` was sourced before running Go commands (private package settings)\n")

@@ -124,7 +124,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 	}
 
 	buildSys := detectRemoteBuildSystem(ctx, provider, repo)
-	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, buildSys)
+	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, buildSys, opts.AllowMajorUpdates)
 	if upgradeErr != nil {
 		return nil, upgradeErr
 	}
@@ -160,6 +160,7 @@ func cloneAndUpgrade(
 	repo entities.Repository,
 	vCtx *versionContext,
 	buildSys string,
+	allowMajorUpdates bool,
 ) (*upgradeResult, error) {
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
 	defer changelog.Remove()
@@ -176,6 +177,8 @@ func cloneAndUpgrade(
 		ProviderName:  provider.Name(),
 		Changelog:     changelog,
 		BuildSystem:   buildSys,
+
+		AllowMajorUpdates: allowMajorUpdates,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade: %w", err)
@@ -235,7 +238,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	repoDir string,
 	_ repositories.ProviderRepository,
 	repo entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	logger.Infof("[java] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
@@ -244,7 +247,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	buildSys := detectLocalBuildSystem(repoDir)
 
-	script := buildBatchJavaScript(buildSys)
+	script := buildBatchJavaScript(buildSys, opts.AllowMajorUpdates)
 	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
 	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
 		return nil, fmt.Errorf("failed to write script: %w", writeErr)
@@ -310,14 +313,17 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 // buildBatchJavaScript generates a bash script with only language-specific
 // operations (no git clone, branch, commit, or push) for the batch pipeline.
-func buildBatchJavaScript(buildSys string) string {
+func buildBatchJavaScript(buildSys string, allowMajorUpdates bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 	sb.WriteString("BUILD_SYSTEM=\"" + buildSys + "\"\n\n")
 
-	writeJavaUpgradeCommands(&sb, upgradeParams{BuildSystem: buildSys})
+	writeJavaUpgradeCommands(&sb, upgradeParams{ //nolint:exhaustruct // only these two reach the script
+		BuildSystem:       buildSys,
+		AllowMajorUpdates: allowMajorUpdates,
+	})
 	writeDockerfileUpdate(&sb)
 
 	return sb.String()
@@ -342,6 +348,9 @@ type upgradeParams struct {
 	// the clone; an empty value leaves the repository's changelog untouched.
 	Changelog   support.StagedChangelog
 	BuildSystem string // "gradle" or "maven"
+	// AllowMajorUpdates becomes -DallowMajorUpdates on both versions-maven-plugin
+	// goals. See entities.Settings.AllowMajorUpdates for why it defaults to true.
+	AllowMajorUpdates bool
 }
 
 type upgradeResult struct {
@@ -585,7 +594,7 @@ func writeGitAuth(sb *strings.Builder, params upgradeParams) {
 	sb.WriteString(support.GitAuthScript(params.ProviderName))
 }
 
-func writeJavaUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
+func writeJavaUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 	// Only when the fetched release is genuinely ahead of the pin: the feed
 	// reports the newest LTS JDK, so a repository already on a later JDK is
 	// ahead of it and must keep its pin.
@@ -641,9 +650,13 @@ func writeJavaUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 	sb.WriteString("        fi\n\n")
 	// Maven has no notion of a pre-release, so `3.0.0-beta3`, `7.1.0-M1` and
 	// `5.7-alpha1` are ordinary releases to it and both goals below treat them
-	// as candidates. MAVEN_VERSION_IGNORE supplies the missing concept, and
-	// -DallowMajorUpdates=false keeps a security pin on its own major line
-	// rather than letting a new major arrive unreviewed inside a routine bump.
+	// as candidates. MAVEN_VERSION_IGNORE supplies the missing concept.
+	//
+	// The major-version flag is a separate question and a configurable one: both
+	// goals take -DallowMajorUpdates from MAVEN_ALLOW_MAJOR below, which carries
+	// the resolved allow_major_updates -- on unless a layer turns it off. The
+	// pre-release filtering is independent of it and applies in both modes, since
+	// taking a beta is how CVEs get reintroduced rather than remediated.
 	// Single-quoted, and every flag passed as its own argument rather than through
 	// an accumulator variable. The ignore value is a list of regexes carrying `.*`
 	// and `(?i)`, which an unquoted expansion would subject to word splitting and
@@ -651,6 +664,8 @@ func writeJavaUpgradeCommands(sb *strings.Builder, _ upgradeParams) {
 	// and the filtering would silently not apply. MavenVersionIgnore never emits a
 	// single quote (assertMavenIgnoreQuotable guards that), so the wrapping is safe.
 	fmt.Fprintf(sb, "        MAVEN_VERSION_IGNORE='%s'\n\n", support.MavenVersionIgnore())
+
+	fmt.Fprintf(sb, "        MAVEN_ALLOW_MAJOR=%t\n\n", params.AllowMajorUpdates)
 
 	writeMavenGoal(sb, "versions:update-properties",
 		"Updating Maven properties...",
@@ -676,7 +691,7 @@ func writeMavenGoal(sb *strings.Builder, goal, announce, warning string) {
 	fmt.Fprintf(sb, "        $MVN_CMD %s \\\n", goal)
 	sb.WriteString("            -DgenerateBackupPoms=false \\\n")
 	sb.WriteString("            -DallowSnapshots=false \\\n")
-	sb.WriteString("            -DallowMajorUpdates=false \\\n")
+	sb.WriteString("            -DallowMajorUpdates=$MAVEN_ALLOW_MAJOR \\\n")
 	sb.WriteString("            \"-Dmaven.version.ignore=$MAVEN_VERSION_IGNORE\" 2>&1 || \\\n")
 	fmt.Fprintf(sb, "            echo %q\n", warning)
 }

@@ -221,6 +221,7 @@ func ApplyRepoOverlay(base *Settings, config *RepoConfig) (*Settings, error) {
 type RestrictedConfig struct {
 	Updaters             map[string]UpdaterConfig `yaml:"updaters"`
 	CleanupStaleBranches *bool                    `yaml:"cleanup_stale_branches"`
+	AllowMajorUpdates    *bool                    `yaml:"allow_major_updates"`
 	ExcludeForks         *bool                    `yaml:"exclude_forks"`
 	ExcludeArchived      *bool                    `yaml:"exclude_archived"`
 	ExcludeRepos         []string                 `yaml:"exclude_repos"`
@@ -232,6 +233,16 @@ func (r RestrictedConfig) applyTo(settings *Settings, layerName string) *Setting
 
 	if acceptSwitchOff(r.CleanupStaleBranches, layerName, "cleanup_stale_branches") {
 		next.CleanupStaleBranches = r.CleanupStaleBranches
+	}
+	// Both directions, unlike cleanup_stale_branches above. That one is filtered
+	// because it deletes remote branches and closes their pull requests, and
+	// because --skip-cleanup is applied before this layer. This one starts
+	// nothing and destroys nothing: it decides which version a rewrite writes
+	// into a manifest, and the repository being released is the party that knows
+	// whether it can take a major. A repository turning it off is declining
+	// upgrades for itself, which is its own business either way.
+	if r.AllowMajorUpdates != nil {
+		next.AllowMajorUpdates = r.AllowMajorUpdates
 	}
 	if r.ExcludeForks != nil {
 		next.ExcludeForks = *r.ExcludeForks

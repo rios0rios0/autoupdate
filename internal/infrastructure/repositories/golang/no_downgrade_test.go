@@ -20,7 +20,7 @@ func runGoUpgradeBlock(t *testing.T, repoDir, goVersion string) string {
 	t.Helper()
 
 	var sb strings.Builder
-	goUpdater.WriteGoUpgradeCommands(&sb)
+	goUpdater.WriteGoUpgradeCommands(&sb, false)
 
 	return scriptrunner.Run(t, repoDir, sb.String(), scriptrunner.Options{
 		Env:   map[string]string{"GO_VERSION": goVersion, "GO_BINARY": "go"},

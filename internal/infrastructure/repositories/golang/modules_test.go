@@ -320,7 +320,7 @@ func runUpgradeScript(t *testing.T, repoDir string) string {
 
 	var sb strings.Builder
 	sb.WriteString("#!/bin/bash\nset -euo pipefail\n\n")
-	goUpdater.WriteGoUpgradeCommands(&sb)
+	goUpdater.WriteGoUpgradeCommands(&sb, false)
 	sb.WriteString("echo \"AGGREGATED_CHANGE=$GO_VERSION_CHANGED\"\n")
 
 	scriptDir := t.TempDir()
@@ -587,5 +587,94 @@ func TestResolveVersionUpgradeNeed(t *testing.T) {
 
 		// then
 		assert.False(t, found)
+	})
+}
+
+// TestWriteGoUpgradeCommandsMajorMode covers the two shapes the emitted script
+// takes, which is the whole of what `allow_major_updates` changes for Go.
+func TestWriteGoUpgradeCommandsMajorMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should emit no guard when majors are allowed", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+
+		// when
+		goUpdater.WriteGoUpgradeCommands(&sb, true)
+
+		// then -- the functions are not merely uncalled, they are not defined:
+		// an unused bash function in a generated script is a thing a reader has
+		// to rule out
+		script := sb.String()
+		assert.NotContains(t, script, "autoupdate_go_hold_major_jumps")
+		assert.NotContains(t, script, "MODULE_VERSIONS_BEFORE")
+		assert.Contains(t, script, "Major version upgrades are allowed")
+	})
+
+	t.Run("should emit and call the guard when majors are refused", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		var sb strings.Builder
+
+		// when
+		goUpdater.WriteGoUpgradeCommands(&sb, false)
+
+		// then
+		script := sb.String()
+		assert.Contains(t, script, "autoupdate_go_hold_major_jumps()")
+		assert.Contains(t, script, "if ! autoupdate_go_hold_major_jumps")
+		assert.Contains(t, script, "MODULE_VERSIONS_BEFORE")
+		assert.NotContains(t, script, "Major version upgrades are allowed")
+	})
+
+	t.Run("should keep the trailing steps in both modes", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- the allowed branch is not an early return: the Go-directive
+		// re-apply and `go mod vendor` come after it and run either way
+		var allowed, refused strings.Builder
+
+		// when
+		goUpdater.WriteGoUpgradeCommands(&allowed, true)
+		goUpdater.WriteGoUpgradeCommands(&refused, false)
+
+		// then
+		for _, script := range []string{allowed.String(), refused.String()} {
+			assert.Contains(t, script, "Re-apply Go version if go mod tidy normalised it")
+			assert.Contains(t, script, "go mod vendor")
+		}
+	})
+}
+
+// TestRemoteScriptMajorMode guards the regression review found: the remote path
+// consumed upgradeParams.AllowMajorUpdates but its only constructor never set
+// it, so the guard ran even when the resolved setting said majors were allowed —
+// while the PR description, rendered from the resolved value, said the opposite.
+func TestRemoteScriptMajorMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should carry the allowed mode into the remote script", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := goUpdater.BuildRemoteScriptForMajorMode(true)
+
+		// then
+		assert.NotContains(t, script, "autoupdate_go_hold_major_jumps")
+		assert.Contains(t, script, "Major version upgrades are allowed")
+	})
+
+	t.Run("should carry the refused mode into the remote script", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		script := goUpdater.BuildRemoteScriptForMajorMode(false)
+
+		// then
+		assert.Contains(t, script, "autoupdate_go_hold_major_jumps()")
+		assert.NotContains(t, script, "Major version upgrades are allowed")
 	})
 }
