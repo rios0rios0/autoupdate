@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed `TestWriteGoUpgradeCommands` failing on platforms without `/bin/bash`, such as Termux. The generated script execs the stub `go` binary by path, so the kernel resolved the stub''s hard-coded `#!/bin/bash` shebang and failed with `bad interpreter`; the stub now names the bash the test already looked up with `exec.LookPath`, the same way the `internal/support` guard tests build theirs'
-time: '2026-09-03T18:33:41.268329312Z'
