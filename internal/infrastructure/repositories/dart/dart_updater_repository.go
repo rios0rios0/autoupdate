@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,10 +21,6 @@ const (
 	updaterName       = "dart"
 	sdkVersionTimeout = 15 * time.Second
 	pubspecFile       = "pubspec.yaml"
-
-	// refsHeadsPrefix is how the provider APIs spell a branch ref; the
-	// repository's DefaultBranch arrives carrying it and the PR input expects it.
-	refsHeadsPrefix = "refs/heads/"
 
 	// Toolchain executables. A Flutter project must be driven through the
 	// flutter wrapper: `dart pub get` cannot resolve the SDK-sourced packages
@@ -106,31 +101,14 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 
 	vCtx := u.resolveVersionContext(ctx, provider, repo)
 
-	exists, prCheckErr := provider.PullRequestExists(ctx, repo, vCtx.BranchName)
-	if prCheckErr != nil {
-		logger.Warnf("[dart] Failed to check existing PRs: %v", prCheckErr)
-	}
-	if exists {
-		logger.Infof("[dart] PR already exists for branch %q, skipping", vCtx.BranchName)
-		return []entities.PullRequest{}, nil
-	}
-
-	if opts.DryRun {
-		logDryRun(vCtx, repo)
-		return []entities.PullRequest{}, nil
-	}
-
-	result, upgradeErr := cloneAndUpgrade(ctx, u.cmdRunner, provider, repo, vCtx, opts.AllowMajorUpdates)
-	if upgradeErr != nil {
-		return nil, upgradeErr
-	}
-
-	if !result.HasChanges {
-		logger.Infof("[dart] %s/%s: already up to date", repo.Organization, repo.Name)
-		return []entities.PullRequest{}, nil
-	}
-
-	return openPullRequest(ctx, provider, repo, opts, vCtx, result)
+	return support.RunRemoteUpgrade(ctx, provider, repo, opts, support.RemoteUpgrade{
+		LogPrefix:  updaterName,
+		BranchName: vCtx.BranchName,
+		DryRun:     func() { logDryRun(vCtx, repo) },
+		Upgrade: func(ctx context.Context) (support.RemoteUpgradeResult, error) {
+			return cloneAndUpgrade(ctx, u.cmdRunner, provider, repo, vCtx, opts)
+		},
+	})
 }
 
 // ApplyUpdates implements repositories.LocalUpdater. It runs the pub upgrade on
@@ -233,16 +211,12 @@ type versionContext struct {
 }
 
 type upgradeParams struct {
-	CloneURL      string
-	DefaultBranch string
-	BranchName    string
-	Toolchain     string
-	SDKVersion    string
-	AuthToken     string
-	ProviderName  string
-	// Changelog is the staged changelog payload the script copies into
-	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog support.StagedChangelog
+	// CloneTarget identifies the repository the script clones and how it
+	// authenticates against it, and carries the staged changelog.
+	support.CloneTarget
+
+	Toolchain  string
+	SDKVersion string
 	// AllowMajorUpdates decides whether pub is asked for --major-versions.
 	// The zero value is the restrictive case; resolve it with
 	// entities.MajorUpdatesAllowed at the call site.
@@ -379,28 +353,33 @@ func cloneAndUpgrade(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
-	allowMajorUpdates bool,
-) (*upgradeResult, error) {
+	opts entities.UpdateOptions,
+) (support.RemoteUpgradeResult, error) {
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx, vCtx.NeedsVersionUpgrade))
 	defer changelog.Remove()
 
 	result, err := upgradeRepo(ctx, runner, upgradeParams{
-		CloneURL:      provider.CloneURL(repo),
-		DefaultBranch: strings.TrimPrefix(repo.DefaultBranch, refsHeadsPrefix),
-		BranchName:    vCtx.BranchName,
-		Toolchain:     vCtx.Toolchain,
-		SDKVersion:    sdkVersionFor(vCtx),
-		AuthToken:     provider.AuthToken(),
-		ProviderName:  provider.Name(),
-		Changelog:     changelog,
+		CloneTarget: support.CloneTargetFor(provider, repo, vCtx.BranchName, changelog),
+		Toolchain:   vCtx.Toolchain,
+		SDKVersion:  sdkVersionFor(vCtx),
 
-		AllowMajorUpdates: allowMajorUpdates,
+		AllowMajorUpdates: opts.AllowMajorUpdates,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to upgrade: %w", err)
+		return support.RemoteUpgradeResult{}, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	return result, nil
+	return support.RemoteUpgradeResult{
+		Pushed: result.HasChanges,
+		PullRequest: support.PullRequestSpec{
+			LogPrefix:  updaterName,
+			BranchName: vCtx.BranchName,
+			Title:      commitMessage(vCtx, result.SDKUpdated),
+			Description: GeneratePRDescription(
+				vCtx.LatestVersion, vCtx.Toolchain, result.SDKUpdated, opts.AllowMajorUpdates,
+			),
+		},
+	}, nil
 }
 
 // sdkVersionFor returns the SDK version the script should pin, or empty when
@@ -412,54 +391,12 @@ func sdkVersionFor(vCtx *versionContext) string {
 	return ""
 }
 
-// openPullRequest creates the PR on the hosting provider after a successful upgrade.
-func openPullRequest(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	opts entities.UpdateOptions,
-	vCtx *versionContext,
-	result *upgradeResult,
-) ([]entities.PullRequest, error) {
-	targetBranch := repo.DefaultBranch
-	if opts.TargetBranch != "" {
-		targetBranch = refsHeadsPrefix + opts.TargetBranch
-	}
-
-	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
-		SourceBranch: refsHeadsPrefix + vCtx.BranchName,
-		TargetBranch: targetBranch,
-		Title:        commitMessage(vCtx, result.SDKUpdated),
-		Description: GeneratePRDescription(
-			vCtx.LatestVersion, vCtx.Toolchain, result.SDKUpdated, opts.AllowMajorUpdates,
-		),
-		AutoComplete: opts.AutoComplete,
-	})
-	if createErr != nil {
-		return nil, fmt.Errorf("failed to create PR: %w", createErr)
-	}
-
-	logger.Infof("[dart] Created PR #%d for %s/%s: %s", pr.ID, repo.Organization, repo.Name, pr.URL)
-	return []entities.PullRequest{*pr}, nil
-}
-
 func upgradeRepo(ctx context.Context, runner cmdrunner.Runner, params upgradeParams) (*upgradeResult, error) {
-	// The clone lives in its own throwaway directory rather than beside the
-	// script, so nothing the script writes can outlive this call.
-	cloneRoot, err := os.MkdirTemp("", "autoupdate-dart-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(cloneRoot)
-
-	output, runErr := cmdrunner.RunScript(ctx, runner, cmdrunner.ScriptRun{
+	output, runErr := cmdrunner.RunCloneScript(ctx, runner, cmdrunner.CloneScriptRun{
 		Body:        buildUpgradeScript(params),
-		TempPattern: "autoupdate-dart-script-*",
-		Dir:         cloneRoot,
-		Env:         buildEnv(params, filepath.Join(cloneRoot, "repo")),
-		RedactOutput: func(out string) string {
-			return support.RedactTokens(out, params.AuthToken)
-		},
+		TempPattern: "autoupdate-dart-*",
+		Env:         func(repoDir string) []string { return buildEnv(params, repoDir) },
+		Secrets:     []string{params.AuthToken},
 	})
 	if runErr != nil {
 		return nil, runErr
@@ -480,20 +417,7 @@ func buildUpgradeScript(params upgradeParams) string {
 	sb.WriteString("set -euo pipefail\n\n")
 
 	writeGitAuth(&sb, params)
-
-	sb.WriteString("# Ensure git user identity is configured\n")
-	sb.WriteString("if ! git config --global user.name > /dev/null 2>&1; then\n")
-	sb.WriteString("    git config --global user.name \"autoupdate[bot]\"\n")
-	sb.WriteString("fi\n")
-	sb.WriteString("if ! git config --global user.email > /dev/null 2>&1; then\n")
-	sb.WriteString("    git config --global user.email \"autoupdate[bot]@users.noreply.github.com\"\n")
-	sb.WriteString("fi\n\n")
-
-	sb.WriteString("echo \"Cloning repository...\"\n")
-	sb.WriteString("git clone --depth=1 --branch \"$DEFAULT_BRANCH\" \"$CLONE_URL\" \"$REPO_DIR\" 2>&1\n")
-	sb.WriteString("cd \"$REPO_DIR\"\n\n")
-
-	sb.WriteString("git checkout -b \"$BRANCH_NAME\" 2>&1\n\n")
+	sb.WriteString(support.RemoteCloneScript())
 
 	writeFvmPinUpdate(&sb)
 	writeDartUpgradeCommands(&sb, allowMajorUpdates)
@@ -567,39 +491,22 @@ func writeDartUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 }
 
 func writeCommitAndPush(sb *strings.Builder) {
-	sb.WriteString("if [ -n \"$(git status --porcelain)\" ]; then\n")
-	sb.WriteString("    echo \"Changes detected, committing and pushing...\"\n")
-	sb.WriteString("    git add -A\n")
-	sb.WriteString("    if [ -n \"${TARGET_SDK_VERSION:-}\" ]; then\n")
-	sb.WriteString(
-		"        git commit -m \"chore(deps): upgraded Flutter to \\`$TARGET_SDK_VERSION\\` " +
-			"and updated all pub dependencies\"\n",
-	)
-	sb.WriteString("    else\n")
-	sb.WriteString("        git commit -m \"chore(deps): updated Dart pub dependencies\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("    git push origin \"$BRANCH_NAME\" 2>&1\n")
-	sb.WriteString("    echo \"CHANGES_PUSHED=true\"\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"No changes detected.\"\n")
-	sb.WriteString("    echo \"CHANGES_PUSHED=false\"\n")
-	sb.WriteString("fi\n")
+	sb.WriteString(support.CommitAndPushScript(support.CommitAndPush{
+		UpgradedWhen: `[ -n "${TARGET_SDK_VERSION:-}" ]`,
+		UpgradeMessage: "chore(deps): upgraded Flutter to `$TARGET_SDK_VERSION` " +
+			"and updated all pub dependencies",
+		DepsMessage: dartCommitMsgDeps,
+	}))
 }
 
 func buildEnv(params upgradeParams, repoDir string) []string {
-	env := append(os.Environ(),
-		"AUTH_TOKEN="+params.AuthToken,
-		"GIT_HTTPS_TOKEN="+params.AuthToken,
-		"CLONE_URL="+params.CloneURL,
-		"BRANCH_NAME="+params.BranchName,
-		"REPO_DIR="+repoDir,
-		"DEFAULT_BRANCH="+params.DefaultBranch,
+	env := append(support.CloneEnv(params.CloneTarget, repoDir),
 		"PUB_EXECUTABLE="+params.Toolchain,
 	)
 	if params.SDKVersion != "" {
 		env = append(env, "TARGET_SDK_VERSION="+params.SDKVersion)
 	}
-	env = append(env, params.Changelog.Env()...)
+
 	return env
 }
 

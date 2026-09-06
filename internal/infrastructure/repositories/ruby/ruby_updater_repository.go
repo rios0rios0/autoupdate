@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,7 +18,10 @@ import (
 )
 
 const (
-	updaterName      = "ruby"
+	updaterName = "ruby"
+	// runtimeName is how the runtime is spelled in log lines, commit subjects
+	// and pull request text.
+	runtimeName      = "Ruby"
 	rbVersionTimeout = 15 * time.Second
 	scriptFileMode   = 0o700
 
@@ -34,6 +35,9 @@ const (
 	rbCommitMsgDeps      = "chore(deps): updated Ruby gem dependencies"
 	rbChangelogEntryDeps = "- changed the Ruby gem dependencies to their latest versions"
 )
+
+// defaultRunner is the package-level command runner for remote-mode functions.
+var defaultRunner cmdrunner.Runner = cmdrunner.NewDefaultRunner() //nolint:gochecknoglobals // test override
 
 // UpdaterRepository implements repositories.UpdaterRepository for Ruby dependencies.
 // It clones the repository locally, runs bundler commands to update
@@ -82,133 +86,77 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 ) ([]entities.PullRequest, error) {
 	logger.Infof("[ruby] Processing %s/%s", repo.Organization, repo.Name)
 
-	latestRbVersion, err := u.versionFetcher.FetchLatestVersion(ctx)
-	if err != nil {
-		logger.Warnf("[ruby] Failed to fetch latest Ruby version: %v (continuing without version upgrade)", err)
-		latestRbVersion = ""
-	} else {
-		logger.Infof("[ruby] Latest stable Ruby version: %s", latestRbVersion)
-	}
+	latestRbVersion := support.LatestVersion(
+		support.VersionFeed{LogPrefix: updaterName, Runtime: runtimeName, Release: "stable Ruby"},
+		func() (string, error) { return u.versionFetcher.FetchLatestVersion(ctx) },
+	)
 
 	vCtx := resolveVersionContext(ctx, provider, repo, latestRbVersion, opts.AllowMajorUpdates)
 
-	// Check if PR already exists
-	exists, prCheckErr := provider.PullRequestExists(ctx, repo, vCtx.BranchName)
-	if prCheckErr != nil {
-		logger.Warnf("[ruby] Failed to check existing PRs: %v", prCheckErr)
-	}
-	if exists {
-		logger.Infof(
-			"[ruby] PR already exists for branch %q, skipping",
-			vCtx.BranchName,
-		)
-		return []entities.PullRequest{}, nil
-	}
-
-	if opts.DryRun {
-		logDryRun(vCtx, repo)
-		return []entities.PullRequest{}, nil
-	}
-
-	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, opts.AllowMajorUpdates)
-	if upgradeErr != nil {
-		return nil, upgradeErr
-	}
-
-	if !result.HasChanges {
-		logger.Infof("[ruby] %s/%s: already up to date", repo.Organization, repo.Name)
-		return []entities.PullRequest{}, nil
-	}
-
-	return openPullRequest(ctx, provider, repo, opts, vCtx, result)
+	return support.RunRemoteUpgrade(ctx, provider, repo, opts, support.RemoteUpgrade{
+		LogPrefix:  updaterName,
+		BranchName: vCtx.BranchName,
+		DryRun:     func() { logDryRun(vCtx, repo) },
+		Upgrade: func(ctx context.Context) (support.RemoteUpgradeResult, error) {
+			return cloneAndUpgrade(ctx, provider, repo, vCtx, opts.AllowMajorUpdates)
+		},
+	})
 }
 
 // logDryRun logs what would happen without actually performing the upgrade.
 func logDryRun(vCtx *versionContext, repo entities.Repository) {
-	if vCtx.NeedsVersionUpgrade {
-		logger.Infof(
-			"[ruby] [DRY RUN] Would upgrade Ruby to %s and update deps for %s/%s",
-			vCtx.LatestVersion, repo.Organization, repo.Name,
-		)
-	} else {
-		logger.Infof(
-			"[ruby] [DRY RUN] Would update Ruby gem dependencies for %s/%s",
-			repo.Organization, repo.Name,
-		)
-	}
+	support.LogRemoteDryRun(updaterName, repo, support.DryRunPlan{
+		Runtime:         runtimeName,
+		Version:         vCtx.LatestVersion,
+		UpgradesVersion: vCtx.NeedsVersionUpgrade,
+		Dependencies:    "Ruby gem dependencies",
+	})
 }
 
 // cloneAndUpgrade prepares the changelog, clones the repository, runs the
-// upgrade script, and returns the result.
+// upgrade script, and describes the pull request the upgrade earned.
 func cloneAndUpgrade(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
 	allowMajorUpdates bool,
-) (*upgradeResult, error) {
+) (support.RemoteUpgradeResult, error) {
 	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
 	defer changelog.Remove()
 
-	cloneURL := provider.CloneURL(repo)
-	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
-
 	result, err := upgradeRepo(ctx, upgradeParams{
-		CloneURL:      cloneURL,
-		DefaultBranch: defaultBranch,
-		BranchName:    vCtx.BranchName,
-		RubyVersion:   rubyVersionFor(vCtx),
-		AuthToken:     provider.AuthToken(),
-		ProviderName:  provider.Name(),
-		Changelog:     changelog,
+		CloneTarget: support.CloneTargetFor(provider, repo, vCtx.BranchName, changelog),
+		RubyVersion: rubyVersionFor(vCtx),
 	}, allowMajorUpdates)
 	if err != nil {
-		return nil, fmt.Errorf("failed to upgrade: %w", err)
+		return support.RemoteUpgradeResult{}, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	return result, nil
+	return support.RemoteUpgradeResult{
+		Pushed: result.HasChanges,
+		PullRequest: support.PullRequestSpec{
+			LogPrefix:  updaterName,
+			BranchName: vCtx.BranchName,
+			Title:      upgradeSubject(vCtx.LatestVersion, result.RubyVersionUpdated),
+			Description: GeneratePRDescription(
+				vCtx.LatestVersion, result.RubyVersionUpdated, allowMajorUpdates,
+			),
+		},
+	}, nil
 }
 
-// openPullRequest creates the PR on the hosting provider after a successful
-// upgrade.
-func openPullRequest(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	opts entities.UpdateOptions,
-	vCtx *versionContext,
-	result *upgradeResult,
-) ([]entities.PullRequest, error) {
-	targetBranch := repo.DefaultBranch
-	if opts.TargetBranch != "" {
-		targetBranch = "refs/heads/" + opts.TargetBranch
-	}
-
-	prTitle := rbCommitMsgDeps
-	if result.RubyVersionUpdated {
-		prTitle = fmt.Sprintf(
+// upgradeSubject is the one-line summary of what the run changed, used as both
+// the commit subject and the pull request title.
+func upgradeSubject(rbVersion string, rbVersionUpdated bool) string {
+	if rbVersionUpdated {
+		return fmt.Sprintf(
 			"chore(deps): upgraded Ruby to `%s` and updated all gem dependencies",
-			vCtx.LatestVersion,
+			rbVersion,
 		)
 	}
-	prDesc := GeneratePRDescription(vCtx.LatestVersion, result.RubyVersionUpdated, opts.AllowMajorUpdates)
 
-	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
-		SourceBranch: "refs/heads/" + vCtx.BranchName,
-		TargetBranch: targetBranch,
-		Title:        prTitle,
-		Description:  prDesc,
-		AutoComplete: opts.AutoComplete,
-	})
-	if createErr != nil {
-		return nil, fmt.Errorf("failed to create PR: %w", createErr)
-	}
-
-	logger.Infof(
-		"[ruby] Created PR #%d for %s/%s: %s",
-		pr.ID, repo.Organization, repo.Name, pr.URL,
-	)
-	return []entities.PullRequest{*pr}, nil
+	return rbCommitMsgDeps
 }
 
 // ApplyUpdates implements repositories.LocalUpdater. It runs language-specific
@@ -226,32 +174,23 @@ func (u *UpdaterRepository) ApplyUpdates(
 	// resolveLocalVersionContext (from local.go) handles fetching + comparison
 	vCtx := resolveLocalVersionContext(ctx, repoDir, opts.AllowMajorUpdates)
 
-	script := buildBatchRubyScript(opts.AllowMajorUpdates)
-	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
-	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return nil, fmt.Errorf("failed to write script: %w", writeErr)
-	}
-	defer func() { _ = os.Remove(scriptPath) }()
-
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = repoDir
 	env := os.Environ()
 	if pinVersion := rubyVersionFor(vCtx); pinVersion != "" {
 		env = append(env, "TARGET_RUBY_VERSION="+pinVersion)
 	}
-	cmd.Env = env
 
-	output, cmdErr := cmd.CombinedOutput()
-	outputStr := string(output)
-	logger.Debugf("[ruby] Upgrade script output:\n%s", outputStr)
-
-	if cmdErr != nil {
-		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, outputStr)
+	outputStr, runErr := cmdrunner.RunScript(ctx, u.cmdRunner, cmdrunner.ScriptRun{
+		Body:        buildBatchRubyScript(opts.AllowMajorUpdates),
+		TempPattern: "autoupdate-ruby-local-*",
+		Dir:         repoDir,
+		Env:         env,
+		LogPrefix:   updaterName,
+		Verbose:     true,
+	})
+	if runErr != nil {
+		return nil, runErr
 	}
 
-	// Remove the script before checking worktree state so it does not
-	// appear as an untracked file in the git status check below.
-	_ = os.Remove(scriptPath)
 	rbVersionUpdated := strings.Contains(outputStr, "RUBY_VERSION_UPDATED=true")
 
 	// Return early if the upgrade script made no filesystem changes
@@ -272,20 +211,12 @@ func (u *UpdaterRepository) ApplyUpdates(
 	}
 	support.LocalChangelogUpdate(repoDir, []string{entry})
 
-	commitMsg := rbCommitMsgDeps
-	prTitle := commitMsg
-	if rbVersionUpdated {
-		commitMsg = fmt.Sprintf(
-			"chore(deps): upgraded Ruby to `%s` and updated all gem dependencies",
-			vCtx.LatestVersion,
-		)
-		prTitle = commitMsg
-	}
+	commitMsg := upgradeSubject(vCtx.LatestVersion, rbVersionUpdated)
 
 	return &repositories.LocalUpdateResult{
 		BranchName:    vCtx.BranchName,
 		CommitMessage: commitMsg,
-		PRTitle:       prTitle,
+		PRTitle:       commitMsg,
 		PRDescription: GeneratePRDescription(vCtx.LatestVersion, rbVersionUpdated, opts.AllowMajorUpdates),
 	}, nil
 }
@@ -313,15 +244,11 @@ type versionContext struct {
 }
 
 type upgradeParams struct {
-	CloneURL      string
-	DefaultBranch string
-	BranchName    string
-	RubyVersion   string
-	AuthToken     string
-	ProviderName  string
-	// Changelog is the staged changelog payload the script copies into
-	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog support.StagedChangelog
+	// CloneTarget identifies the repository the script clones and how it
+	// authenticates against it, and carries the staged changelog.
+	support.CloneTarget
+
+	RubyVersion string
 }
 
 type upgradeResult struct {
@@ -401,40 +328,21 @@ func upgradeRepo(
 	params upgradeParams,
 	allowMajorUpdates bool,
 ) (*upgradeResult, error) {
-	result := &upgradeResult{}
-
-	tmpDir, err := os.MkdirTemp("", "autoupdate-ruby-*")
+	output, err := cmdrunner.RunCloneScript(ctx, defaultRunner, cmdrunner.CloneScriptRun{
+		Body:        buildUpgradeScript(params, "", allowMajorUpdates),
+		TempPattern: "autoupdate-ruby-*",
+		Env:         func(repoDir string) []string { return buildEnv(params, repoDir) },
+		Secrets:     []string{params.AuthToken},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	repoDir := filepath.Join(tmpDir, "repo")
-
-	script := buildUpgradeScript(params, repoDir, allowMajorUpdates)
-	scriptPath := filepath.Join(tmpDir, "upgrade.sh")
-
-	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return nil, fmt.Errorf("failed to write script: %w", writeErr)
+		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = tmpDir
-	cmd.Env = buildEnv(params, repoDir)
-
-	output, err := cmd.CombinedOutput()
-	result.Output = string(output)
-
-	if err != nil {
-		redactedOutput := support.RedactTokens(result.Output, params.AuthToken)
-		return result, fmt.Errorf(
-			"upgrade script failed: %w\nOutput:\n%s", err, redactedOutput,
-		)
-	}
-
-	result.HasChanges = strings.Contains(result.Output, "CHANGES_PUSHED=true")
-	result.RubyVersionUpdated = strings.Contains(result.Output, "RUBY_VERSION_UPDATED=true")
-	return result, nil
+	return &upgradeResult{
+		HasChanges:         strings.Contains(output, "CHANGES_PUSHED=true"),
+		RubyVersionUpdated: strings.Contains(output, "RUBY_VERSION_UPDATED=true"),
+		Output:             output,
+	}, nil
 }
 
 func buildUpgradeScript(
@@ -449,25 +357,9 @@ func buildUpgradeScript(
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 
-	// Set up git credentials based on provider
+	// Set up git credentials based on provider, then clone onto the branch.
 	writeGitAuth(&sb, params)
-
-	// Ensure git user identity is configured
-	sb.WriteString("# Ensure git user identity is configured\n")
-	sb.WriteString("if ! git config --global user.name > /dev/null 2>&1; then\n")
-	sb.WriteString("    git config --global user.name \"autoupdate[bot]\"\n")
-	sb.WriteString("fi\n")
-	sb.WriteString("if ! git config --global user.email > /dev/null 2>&1; then\n")
-	sb.WriteString("    git config --global user.email \"autoupdate[bot]@users.noreply.github.com\"\n")
-	sb.WriteString("fi\n\n")
-
-	// Clone
-	sb.WriteString("echo \"Cloning repository...\"\n")
-	sb.WriteString("git clone --depth=1 --branch \"$DEFAULT_BRANCH\" \"$CLONE_URL\" \"$REPO_DIR\" 2>&1\n")
-	sb.WriteString("cd \"$REPO_DIR\"\n\n")
-
-	// Create branch
-	sb.WriteString("git checkout -b \"$BRANCH_NAME\" 2>&1\n\n")
+	sb.WriteString(support.RemoteCloneScript())
 
 	// Ruby upgrade commands
 	writeRubyUpgradeCommands(&sb, allowMajorUpdates)
@@ -514,7 +406,7 @@ func writeRubyUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 	// JRuby or TruffleRuby is no longer handed an MRI version number.
 	sb.WriteString(support.VersionPinUpdateScript(support.VersionPinUpdate{
 		File:       ".ruby-version",
-		Subject:    "Ruby",
+		Subject:    runtimeName,
 		VersionVar: "TARGET_RUBY_VERSION",
 		CurrentVar: "CURRENT_RB_VERSION",
 		ChangedVar: "RUBY_VERSION_CHANGED",
@@ -576,43 +468,26 @@ func writeDockerfileUpdate(sb *strings.Builder) {
 	sb.WriteString(support.DockerfileTagUpdateScript(support.DockerfileTagUpdate{
 		ChangedVar: "RUBY_VERSION_CHANGED",
 		VersionVar: "TARGET_RUBY_VERSION",
-		Subject:    "Ruby",
+		Subject:    runtimeName,
 		Images:     []support.DockerfileImage{{Name: "ruby"}},
 	}))
 }
 
 func writeCommitAndPush(sb *strings.Builder) {
-	sb.WriteString("if [ -n \"$(git status --porcelain)\" ]; then\n")
-	sb.WriteString("    echo \"Changes detected, committing and pushing...\"\n")
-	sb.WriteString("    git add -A\n")
-	sb.WriteString("    if [ \"$RUBY_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString(
-		"        git commit -m \"chore(deps): upgraded Ruby to `$TARGET_RUBY_VERSION` and updated all gem dependencies\"\n",
-	)
-	sb.WriteString("    else\n")
-	sb.WriteString("        git commit -m \"chore(deps): updated Ruby gem dependencies\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("    git push origin \"$BRANCH_NAME\" 2>&1\n")
-	sb.WriteString("    echo \"CHANGES_PUSHED=true\"\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"No changes detected.\"\n")
-	sb.WriteString("    echo \"CHANGES_PUSHED=false\"\n")
-	sb.WriteString("fi\n")
+	sb.WriteString(support.CommitAndPushScript(support.CommitAndPush{
+		UpgradedWhen: `[ "$RUBY_VERSION_CHANGED" = "true" ]`,
+		UpgradeMessage: "chore(deps): upgraded Ruby to `$TARGET_RUBY_VERSION` " +
+			"and updated all gem dependencies",
+		DepsMessage: rbCommitMsgDeps,
+	}))
 }
 
 func buildEnv(params upgradeParams, repoDir string) []string {
-	env := append(os.Environ(),
-		"AUTH_TOKEN="+params.AuthToken,
-		"GIT_HTTPS_TOKEN="+params.AuthToken,
-		"CLONE_URL="+params.CloneURL,
-		"BRANCH_NAME="+params.BranchName,
-		"REPO_DIR="+repoDir,
-		"DEFAULT_BRANCH="+params.DefaultBranch,
-	)
+	env := support.CloneEnv(params.CloneTarget, repoDir)
 	if params.RubyVersion != "" {
 		env = append(env, "TARGET_RUBY_VERSION="+params.RubyVersion)
 	}
-	env = append(env, params.Changelog.Env()...)
+
 	return env
 }
 

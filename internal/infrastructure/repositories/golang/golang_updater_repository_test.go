@@ -339,44 +339,6 @@ func TestLocalResolveVersionContext(t *testing.T) {
 	})
 }
 
-func TestWriteAzureDevOpsAuth(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should write Azure DevOps git config entries", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		var sb strings.Builder
-
-		// when
-		goUpdater.WriteAzureDevOpsAuth(&sb)
-
-		// then
-		result := sb.String()
-		assert.Contains(t, result, "dev.azure.com")
-		assert.Contains(t, result, "AUTH_TOKEN")
-	})
-}
-
-func TestWriteGitLabAuth(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should write GitLab git config entries", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		var sb strings.Builder
-
-		// when
-		goUpdater.WriteGitLabAuth(&sb)
-
-		// then
-		result := sb.String()
-		assert.Contains(t, result, "gitlab.com")
-		assert.Contains(t, result, "oauth2")
-	})
-}
-
 func TestBuildUpgradeScript(t *testing.T) {
 	t.Parallel()
 
@@ -388,9 +350,9 @@ func TestBuildUpgradeScript(t *testing.T) {
 			CloneURL:      "https://github.com/org/repo.git",
 			DefaultBranch: "main",
 			BranchName:    "chore/upgrade-go-1.25.7",
-			GoVersion:     "1.25.7",
 			AuthToken:     "test-token",
 			ProviderName:  "github",
+			GoVersion:     "1.25.7",
 		}
 
 		// when
@@ -479,8 +441,8 @@ func TestBuildEnv(t *testing.T) {
 			CloneURL:      "https://github.com/org/repo.git",
 			DefaultBranch: "main",
 			BranchName:    "chore/upgrade-go-1.25.7",
-			GoVersion:     "1.25.7",
 			AuthToken:     "test-token",
+			GoVersion:     "1.25.7",
 		}
 
 		// when
@@ -531,62 +493,34 @@ func TestFileExistsLocally(t *testing.T) {
 	})
 }
 
-func TestOpenPullRequest(t *testing.T) {
+func TestUpgradeSubject(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should create PR with correct parameters", func(t *testing.T) {
+	t.Run("should describe only the dependencies when the version did not move", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithCreatedPR(&entities.PullRequest{ID: 42, URL: "https://example.com/pr/42"}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
-		opts := entities.UpdateOptions{}
-		vCtx := &goUpdater.VersionContext{
-			LatestVersion:       "1.25.7",
-			NeedsVersionUpgrade: true,
-			BranchName:          "chore/upgrade-go-1.25.7",
-		}
-		result := &goUpdater.UpgradeResult{
-			HasChanges:       true,
-			GoVersionUpdated: true,
-			Output:           "",
-		}
+		const goVersion = "1.25.7"
 
 		// when
-		prs, err := goUpdater.OpenPullRequest(t.Context(), provider, repo, opts, vCtx, result, false)
+		subject := goUpdater.UpgradeSubject(goVersion, false)
 
 		// then
-		require.NoError(t, err)
-		require.Len(t, prs, 1)
-		assert.Equal(t, 42, prs[0].ID)
-		assert.NotEmpty(t, provider.PRInputs)
+		assert.Equal(t, "chore(deps): update Go module dependencies", subject)
 	})
 
-	t.Run("should use target branch from options", func(t *testing.T) {
+	t.Run("should name the version when the version moved", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithCreatedPR(&entities.PullRequest{ID: 1}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
-		opts := entities.UpdateOptions{TargetBranch: "develop"}
-		vCtx := &goUpdater.VersionContext{
-			LatestVersion:       "1.25.7",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-go-deps",
-		}
-		result := &goUpdater.UpgradeResult{HasChanges: true}
+		const goVersion = "1.25.7"
 
 		// when
-		prs, err := goUpdater.OpenPullRequest(t.Context(), provider, repo, opts, vCtx, result, false)
+		subject := goUpdater.UpgradeSubject(goVersion, true)
 
 		// then
-		require.NoError(t, err)
-		require.Len(t, prs, 1)
-		assert.Contains(t, provider.PRInputs[0].TargetBranch, "develop")
+		assert.Contains(t, subject, goVersion)
+		assert.Contains(t, subject, "upgraded Go version")
 	})
 }
 

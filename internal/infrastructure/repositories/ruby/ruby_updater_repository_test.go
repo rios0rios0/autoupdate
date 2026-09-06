@@ -285,9 +285,9 @@ func TestBuildUpgradeScript(t *testing.T) {
 			CloneURL:      "https://github.com/org/repo.git",
 			DefaultBranch: "main",
 			BranchName:    "chore/upgrade-ruby-3.3.6",
-			RubyVersion:   "3.3.6",
 			AuthToken:     "token",
 			ProviderName:  "github",
+			RubyVersion:   "3.3.6",
 		}
 
 		// when

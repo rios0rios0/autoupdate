@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -96,9 +95,7 @@ func RedactTokens(input string, tokens ...string) string {
 // found, not a repo) it returns true to avoid false negatives that would
 // incorrectly skip updates.
 func HasUncommittedChanges(ctx context.Context, repoDir string) bool {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
-	cmd.Dir = repoDir
-	output, err := cmd.Output()
+	output, err := GitCommand(ctx, repoDir, "status", "--porcelain").Output()
 	if err != nil {
 		logger.Warnf("Failed to check git status in %s: %v", repoDir, err)
 		return true

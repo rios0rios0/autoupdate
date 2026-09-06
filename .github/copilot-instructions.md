@@ -113,6 +113,37 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 2. Implement `UpdaterRepository` interface (`Name()`, `Detect()`, `CreateUpdatePRs()`)
 3. Register in `internal/infrastructure/repositories/container.go`
 
+### Shared Updater Scaffolding
+
+An updater owns what is specific to its ecosystem; everything the ten of them do
+identically lives in one place, so a new updater is written by calling into it
+rather than by copying a sibling.
+
+- **Clone-and-push flow** (`internal/support/remote_upgrade.go`): `RunRemoteUpgrade`
+  drives one run -- skip the branch that already has a pull request open, honour a
+  dry run, run the upgrade, open the pull request when something was pushed.
+  `LogRemoteDryRun` prints the dry run.
+- **Clone identity** (`internal/support/remote_clone.go`): `CloneTargetFor` builds
+  the `CloneTarget` an updater embeds in its `upgradeParams`; `RemoteCloneScript`
+  emits the bash that clones onto the upgrade branch and `CloneEnv` the
+  environment it reads. The generated script never spells the clone itself.
+- **Script execution** (`internal/infrastructure/repositories/cmdrunner`):
+  `RunScript` writes and runs a generated script outside the repository;
+  `RunCloneScript` adds the throwaway directory the clone-based flow works in and
+  scrubs the auth token from a failed run's output.
+- **Commit block** (`internal/support/commit_script.go`): `CommitAndPushScript`
+  closes every clone-based script -- commit under one of two subjects, push, and
+  report `CHANGES_PUSHED`. It escapes the backticks around the version, which
+  bash would otherwise read as command substitution.
+- **Pull requests** (`internal/support/pull_request.go`): `PullRequestOpen`,
+  `OpenPullRequest` and `PushChangesAndOpenPullRequest` -- the last for the
+  updaters that commit through the provider API instead of a clone.
+- **Release feeds** (`internal/support/version_feed.go`): `LatestVersion` reports
+  the newest release or the empty string, which is how every updater says "the
+  feed was unreachable, refresh the dependencies but leave the pin alone".
+- **git** (`internal/support/git_command.go`): `GitCommand` is the only place this
+  program looks git up on `PATH`, resolved once with `exec.LookPath`.
+
 ### Configuration System
 - **Configuration is layered.** Four sources, each overriding only the keys its document declares: built-in defaults (`configs/autoupdate.yaml`, embedded via `configs/embed.go`) → published defaults (the same file fetched from `entities.DefaultConfigURL`, best effort) → the operator's file (`--config`, else `~/` then `~/.config/`, names `.autoupdate.{yml,yaml}` and `autoupdate.{yml,yaml}`) → the target repository's own `.autoupdate.yaml`
 - `internal/domain/entities/config_layers.go` is the engine (`ConfigLayer`, `ApplyLayer`, `ApplyRepoOverlay`, `ResolveSettings`, `FinalizeSettings`); `configLoader` in `internal/infrastructure/controllers/config_helpers.go` assembles the first three (its `fetch` field is the seam that keeps the tests offline)

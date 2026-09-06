@@ -355,10 +355,10 @@ func TestBuildUpgradeScript(t *testing.T) {
 			CloneURL:      "https://example.com/org/repo.git",
 			DefaultBranch: "main",
 			BranchName:    "chore/upgrade-python-deps",
-			PythonVersion: "3.13.1",
 			AuthToken:     "tok123",
 			ProviderName:  "github",
 			Changelog:     support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
+			PythonVersion: "3.13.1",
 			Project:       pyUpdater.NewPythonProject(true, true, false, false),
 			PythonBinary:  "/usr/bin/python3",
 		}
@@ -635,9 +635,9 @@ func TestBuildEnv(t *testing.T) {
 			BranchName:    "chore/upgrade-python-deps",
 			DefaultBranch: "main",
 			AuthToken:     "tok123",
+			Changelog:     support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
 			PythonBinary:  "/usr/bin/python3",
 			PythonVersion: "3.13.1",
-			Changelog:     support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
 		}
 		repoDir := "/tmp/repo"
 
@@ -666,9 +666,9 @@ func TestBuildEnv(t *testing.T) {
 			BranchName:    "chore/upgrade-python-deps",
 			DefaultBranch: "main",
 			AuthToken:     "tok",
+			Changelog:     support.StagedChangelog{},
 			PythonBinary:  "/usr/bin/python3",
 			PythonVersion: "",
-			Changelog:     support.StagedChangelog{},
 		}
 
 		// when
@@ -753,140 +753,34 @@ func TestLogDryRun(t *testing.T) {
 	})
 }
 
-func TestOpenPullRequest(t *testing.T) {
+func TestUpgradeSubject(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should create PR with deps title when python version was not updated", func(t *testing.T) {
+	t.Run("should describe only the dependencies when the version did not move", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithCreatedPR(&entities.PullRequest{ID: 42, URL: "https://example.com/pr/42"}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
-		opts := entities.UpdateOptions{}
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-python-deps",
-		}
-		result := &pyUpdater.UpgradeResultExported{
-			HasChanges:           true,
-			PythonVersionUpdated: false,
-		}
+		const pyVersion = "3.13.1"
 
 		// when
-		prs, err := pyUpdater.OpenPullRequest(t.Context(), provider, repo, opts, vCtx, result)
+		subject := pyUpdater.UpgradeSubject(pyVersion, false)
 
 		// then
-		require.NoError(t, err)
-		require.Len(t, prs, 1)
-		assert.Equal(t, 42, prs[0].ID)
-		assert.Equal(t, "chore(deps): updated Python dependencies", provider.PRInputs[0].Title)
+		assert.Equal(t, "chore(deps): updated Python dependencies", subject)
 	})
 
-	t.Run("should create PR with version title when python version was updated", func(t *testing.T) {
+	t.Run("should name the version when the version moved", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithCreatedPR(&entities.PullRequest{ID: 43, URL: "https://example.com/pr/43"}).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
-		opts := entities.UpdateOptions{}
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: true,
-			BranchName:          "chore/upgrade-python-3.13.1",
-		}
-		result := &pyUpdater.UpgradeResultExported{
-			HasChanges:           true,
-			PythonVersionUpdated: true,
-		}
+		const pyVersion = "3.13.1"
 
 		// when
-		prs, err := pyUpdater.OpenPullRequest(t.Context(), provider, repo, opts, vCtx, result)
+		subject := pyUpdater.UpgradeSubject(pyVersion, true)
 
 		// then
-		require.NoError(t, err)
-		require.Len(t, prs, 1)
-		assert.Contains(t, provider.PRInputs[0].Title, "3.13.1")
-	})
-
-	t.Run("should return error when CreatePullRequest fails", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
-			WithCreatePRErr(errors.New("api error")).
-			BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
-		opts := entities.UpdateOptions{}
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-python-deps",
-		}
-		result := &pyUpdater.UpgradeResultExported{
-			HasChanges: true,
-		}
-
-		// when
-		prs, err := pyUpdater.OpenPullRequest(t.Context(), provider, repo, opts, vCtx, result)
-
-		// then
-		require.Error(t, err)
-		assert.Nil(t, prs)
-		assert.Contains(t, err.Error(), "failed to create PR")
-	})
-
-	t.Run("should use target branch from opts when provided", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
-		opts := entities.UpdateOptions{TargetBranch: "develop"}
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-python-deps",
-		}
-		result := &pyUpdater.UpgradeResultExported{
-			HasChanges: true,
-		}
-
-		// when
-		prs, err := pyUpdater.OpenPullRequest(t.Context(), provider, repo, opts, vCtx, result)
-
-		// then
-		require.NoError(t, err)
-		require.Len(t, prs, 1)
-		assert.Equal(t, "refs/heads/develop", provider.PRInputs[0].TargetBranch)
-	})
-
-	t.Run("should set AutoComplete from opts", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().BuildSpy()
-		repo := entities.Repository{Organization: "org", Name: "repo", DefaultBranch: "refs/heads/main"}
-		opts := entities.UpdateOptions{AutoComplete: true}
-		vCtx := &pyUpdater.VersionContext{
-			LatestVersion:       "3.13.1",
-			NeedsVersionUpgrade: false,
-			BranchName:          "chore/upgrade-python-deps",
-		}
-		result := &pyUpdater.UpgradeResultExported{
-			HasChanges: true,
-		}
-
-		// when
-		_, err := pyUpdater.OpenPullRequest(t.Context(), provider, repo, opts, vCtx, result)
-
-		// then
-		require.NoError(t, err)
-		assert.True(t, provider.PRInputs[0].AutoComplete)
+		assert.Contains(t, subject, pyVersion)
+		assert.Contains(t, subject, "upgraded Python")
 	})
 }
 
@@ -988,9 +882,9 @@ func TestBuildLocalUpgradeScript(t *testing.T) {
 		// given
 		params := pyUpdater.LocalUpgradeParamsExported{
 			BranchName:    "chore/upgrade-python-deps",
-			PythonVersion: "3.13.1",
 			AuthToken:     "tok123",
 			ProviderName:  "github",
+			PythonVersion: "3.13.1",
 			Project:       pyUpdater.NewPythonProject(true, false, false, false),
 			PythonBinary:  "/usr/bin/python3",
 		}
@@ -1111,10 +1005,10 @@ func TestBuildLocalEnv(t *testing.T) {
 		// given
 		params := pyUpdater.LocalUpgradeParamsExported{
 			BranchName:    "chore/upgrade-python-deps",
-			PythonVersion: "3.13.1",
 			AuthToken:     "tok",
-			PythonBinary:  "/usr/bin/python3",
 			Changelog:     support.StagedChangelog{TempPath: "/tmp/cl.md", RepoPath: "CHANGELOG.md"},
+			PythonVersion: "3.13.1",
+			PythonBinary:  "/usr/bin/python3",
 		}
 
 		// when

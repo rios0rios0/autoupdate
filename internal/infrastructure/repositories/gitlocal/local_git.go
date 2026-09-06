@@ -4,18 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
 
+	"github.com/rios0rios0/autoupdate/internal/support"
 	gitops "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
-	gitHelpers "github.com/rios0rios0/gitforge/pkg/git/infrastructure/helpers"
 	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
-	signingInfra "github.com/rios0rios0/gitforge/pkg/signing/infrastructure"
 )
 
 // PushAuthResolver resolves authentication for git push operations.
@@ -140,10 +137,9 @@ func (c *LocalGitContext) StashIfDirty() (bool, error) {
 	}
 
 	logger.Info("Uncommitted changes detected, stashing...")
-	cmd := exec.CommandContext(
-		context.TODO(), "git", "stash", "push", "--include-untracked", "-m", "autoupdate-auto-stash",
+	cmd := support.GitCommand(
+		context.TODO(), c.repoDir, "stash", "push", "--include-untracked", "-m", "autoupdate-auto-stash",
 	)
-	cmd.Dir = c.repoDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("failed to stash changes: %w\nOutput: %s", err, string(output))
@@ -159,8 +155,7 @@ func (c *LocalGitContext) StashIfDirty() (bool, error) {
 	}
 
 	// Record the stash ref so RestoreStash can verify it pops the right entry.
-	refCmd := exec.CommandContext(context.TODO(), "git", "rev-parse", "stash@{0}")
-	refCmd.Dir = c.repoDir
+	refCmd := support.GitCommand(context.TODO(), c.repoDir, "rev-parse", "stash@{0}")
 	refOut, refErr := refCmd.CombinedOutput()
 	if refErr != nil {
 		return false, fmt.Errorf("failed to read stash ref: %w\nOutput: %s", refErr, string(refOut))
@@ -176,8 +171,7 @@ func (c *LocalGitContext) StashIfDirty() (bool, error) {
 // StashIfDirty returned true.
 func (c *LocalGitContext) RestoreStash() error {
 	if c.stashRef != "" {
-		refCmd := exec.CommandContext(context.TODO(), "git", "rev-parse", "stash@{0}")
-		refCmd.Dir = c.repoDir
+		refCmd := support.GitCommand(context.TODO(), c.repoDir, "rev-parse", "stash@{0}")
 		refOut, refErr := refCmd.CombinedOutput()
 		if refErr != nil {
 			return fmt.Errorf("failed to verify stash ref: %w\nOutput: %s", refErr, string(refOut))
@@ -191,8 +185,7 @@ func (c *LocalGitContext) RestoreStash() error {
 		}
 	}
 
-	cmd := exec.CommandContext(context.TODO(), "git", "stash", "pop")
-	cmd.Dir = c.repoDir
+	cmd := support.GitCommand(context.TODO(), c.repoDir, "stash", "pop")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to restore stash: %w\nOutput: %s", err, string(output))
@@ -265,66 +258,22 @@ func (c *LocalGitContext) StageCommitAndPush(
 
 	logger.Info("Changes detected, committing and pushing...")
 
-	if err = gitops.StageAll(c.workTree); err != nil {
-		return false, fmt.Errorf("failed to stage changes: %w", err)
-	}
-
-	userConfig, err := gitops.ReadUserConfig(c.repo)
+	err = commitAllSigned(c.repo, c.workTree, commitMessage, signedCommit{
+		DefaultName:   "autoupdate",
+		DefaultEmail:  "autoupdate@noreply",
+		GPGPassphrase: os.Getenv("GPG_PASSPHRASE"),
+	})
 	if err != nil {
-		logger.Warnf("Could not read git user config, using defaults: %v", err)
-		userConfig = &gitops.UserConfig{}
+		return false, err
 	}
-
-	name := userConfig.Name
-	email := userConfig.Email
-	if name == "" {
-		name = "autoupdate"
-	}
-	if email == "" {
-		email = "autoupdate@noreply"
-	}
-
-	localCfg, err := c.repo.Config()
-	if err != nil {
-		return false, fmt.Errorf("failed to read repo config: %w", err)
-	}
-
-	globalCfg, err := gitHelpers.GetGlobalGitConfig()
-	if err != nil {
-		logger.Warnf("Could not read global git config, using local only: %v", err)
-		globalCfg = config.NewConfig()
-	}
-
-	gpgSign := gitHelpers.GetOptionFromConfig(localCfg, globalCfg, "commit", "gpgsign")
-	signer, err := signingInfra.ResolveSignerFromGitConfig(
-		gpgSign,
-		userConfig.SigningFormat,
-		userConfig.SigningKey,
-		"",
-		os.Getenv("GPG_PASSPHRASE"),
-		"autoupdate",
-		userConfig.SSHProgram,
-	)
-	if err != nil {
-		return false, fmt.Errorf("failed to resolve commit signer: %w", err)
-	}
-
-	_, err = gitops.CommitChanges(c.repo, c.workTree, commitMessage, signer, name, email)
-	if err != nil {
-		return false, fmt.Errorf("failed to commit changes: %w", err)
-	}
-
-	refSpec := config.RefSpec(
-		fmt.Sprintf("refs/heads/%s:refs/heads/%s", branchName, branchName),
-	)
 
 	authMethods, err := c.collectAuthMethods(authToken)
 	if err != nil {
 		return false, fmt.Errorf("failed to collect auth methods: %w", err)
 	}
 
-	if err = gitops.PushWithTransportDetection(c.repo, refSpec, authMethods); err != nil {
-		return false, fmt.Errorf("failed to push branch %s: %w", branchName, err)
+	if err = pushBranch(c.repo, branchName, authMethods); err != nil {
+		return false, err
 	}
 
 	return true, nil

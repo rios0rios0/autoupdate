@@ -530,47 +530,21 @@ func createUpgradePR(
 	allRefs []imageRef,
 ) ([]entities.PullRequest, error) {
 	branchName := generateBranchName(upgrades)
-
-	exists, prCheckErr := provider.PullRequestExists(ctx, repo, branchName)
-	if prCheckErr != nil {
-		logger.Warnf("[dockerfile] Failed to check existing PRs: %v", prCheckErr)
-	}
-	if exists {
-		logger.Infof("[dockerfile] PR already exists for branch %q, skipping", branchName)
+	if support.PullRequestOpen(ctx, provider, repo, updaterName, branchName) {
 		return []entities.PullRequest{}, nil
 	}
 
 	fileChanges := applyUpgrades(upgrades, allRefs)
 	fileChanges = appendChangelogEntry(ctx, provider, repo, upgrades, fileChanges)
 
-	targetBranch := repo.DefaultBranch
-	if opts.TargetBranch != "" {
-		targetBranch = "refs/heads/" + opts.TargetBranch
-	}
-
-	err := provider.CreateBranchWithChanges(ctx, repo, entities.BranchInput{
+	return support.PushChangesAndOpenPullRequest(ctx, provider, repo, opts, support.BranchPullRequest{
+		LogPrefix:     updaterName,
 		BranchName:    branchName,
-		BaseBranch:    targetBranch,
-		Changes:       fileChanges,
+		Title:         generatePRTitle(upgrades),
+		Description:   generatePRDescription(upgrades),
 		CommitMessage: generateCommitMessage(upgrades),
+		Changes:       fileChanges,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create branch: %w", err)
-	}
-
-	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
-		SourceBranch: "refs/heads/" + branchName,
-		TargetBranch: targetBranch,
-		Title:        generatePRTitle(upgrades),
-		Description:  generatePRDescription(upgrades),
-		AutoComplete: opts.AutoComplete,
-	})
-	if createErr != nil {
-		return nil, fmt.Errorf("failed to create PR: %w", createErr)
-	}
-
-	logger.Infof("[dockerfile] Created PR #%d for %s/%s: %s", pr.ID, repo.Organization, repo.Name, pr.URL)
-	return []entities.PullRequest{*pr}, nil
 }
 
 // --- PR text generation ---

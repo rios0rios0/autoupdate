@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -519,10 +518,7 @@ func generatePRContent(info *localPRInfo) (string, string) {
 
 // parseGitRemote runs `git remote get-url origin` and parses the result.
 func parseGitRemote(ctx context.Context, repoDir string) (*remoteInfo, error) {
-	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
-	cmd.Dir = repoDir
-
-	output, err := cmd.Output()
+	output, err := support.GitCommand(ctx, repoDir, "remote", "get-url", "origin").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git remote get-url origin: %w", err)
 	}
@@ -586,10 +582,7 @@ func resolveLocalSettings(
 }
 
 func detectDefaultBranch(ctx context.Context, repoDir string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = repoDir
-
-	output, err := cmd.Output()
+	output, err := support.GitCommand(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse --abbrev-ref HEAD: %w", err)
 	}
