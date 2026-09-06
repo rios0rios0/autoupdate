@@ -108,3 +108,76 @@ func TestRunCloneScript(t *testing.T) {
 		assert.NotContains(t, err.Error(), "s3cr3t")
 	})
 }
+
+func TestRunUpgradeScript(t *testing.T) {
+	t.Parallel()
+
+	scriptRun := func(output string) (*repositorydoubles.SpyScriptRunner, cmdrunner.UpgradeScriptRun) {
+		return repositorydoubles.NewSpyScriptRunner(output), cmdrunner.UpgradeScriptRun{
+			VersionMarker: "PYTHON_VERSION",
+			Body:          "#!/bin/bash\n",
+			TempPattern:   "autoupdate-test-*",
+			Env:           func(_ string) []string { return nil },
+		}
+	}
+
+	markers := []struct {
+		scenario       string
+		output         string
+		hasChanges     bool
+		versionUpdated bool
+	}{
+		{
+			scenario:       "it pushed a branch and moved the version pin",
+			output:         "CHANGES_PUSHED=true\nPYTHON_VERSION_UPDATED=true\n",
+			hasChanges:     true,
+			versionUpdated: true,
+		},
+		{
+			scenario:   "it pushed a branch without moving the version pin",
+			output:     "CHANGES_PUSHED=true\nPYTHON_VERSION_UPDATED=false\n",
+			hasChanges: true,
+		},
+		{
+			scenario: "it found nothing to push",
+			output:   "PYTHON_VERSION_UPDATED=false\n",
+		},
+		{
+			scenario: "the only marker on the output belongs to another updater",
+			output:   "NODE_VERSION_UPDATED=true\n",
+		},
+	}
+
+	for _, marker := range markers {
+		t.Run("should report what the script did when "+marker.scenario, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			runner, run := scriptRun(marker.output)
+
+			// when
+			result, err := cmdrunner.RunUpgradeScript(t.Context(), runner, run)
+
+			// then
+			require.NoError(t, err)
+			assert.Equal(t, marker.output, result.Output)
+			assert.Equal(t, marker.hasChanges, result.HasChanges)
+			assert.Equal(t, marker.versionUpdated, result.VersionUpdated)
+		})
+	}
+
+	t.Run("should report no markers when the script fails", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		_, run := scriptRun("")
+		runner := &failingRunner{output: "CHANGES_PUSHED=true\nfatal: clone refused"}
+
+		// when
+		result, err := cmdrunner.RunUpgradeScript(t.Context(), runner, run)
+
+		// then
+		require.Error(t, err)
+		assert.Equal(t, cmdrunner.UpgradeScriptResult{}, result)
+	})
+}

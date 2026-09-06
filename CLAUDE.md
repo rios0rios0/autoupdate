@@ -72,10 +72,13 @@ An updater owns what is specific to its ecosystem; everything the ten of them do
 identically lives in one place, so a new updater is written by calling into it
 rather than by copying a sibling.
 
-- **Clone-and-push flow** (`internal/support/remote_upgrade.go`): `RunRemoteUpgrade`
-  drives one run -- skip the branch that already has a pull request open, honour a
-  dry run, run the upgrade, open the pull request when something was pushed.
-  `LogRemoteDryRun` prints the dry run.
+- **Clone-and-push flow** (`internal/support/remote_upgrade.go`):
+  `RunRemoteUpgradeRun` is what an updater calls -- it stages the changelog, hands
+  the upgrade the `CloneTarget` it works on, removes the staged changelog whatever
+  the outcome, and turns the `UpgradeOutcome` into the pull request.
+  `RunRemoteUpgrade` underneath it skips a branch that already has a pull request
+  open, honours a dry run and opens the pull request; `LogRemoteDryRun` prints the
+  dry run.
 - **Clone identity** (`internal/support/remote_clone.go`): `CloneTargetFor` builds
   the `CloneTarget` an updater embeds in its `upgradeParams`; `RemoteCloneScript`
   emits the bash that clones onto the upgrade branch and `CloneEnv` the
@@ -83,7 +86,9 @@ rather than by copying a sibling.
 - **Script execution** (`internal/infrastructure/repositories/cmdrunner`):
   `RunScript` writes and runs a generated script outside the repository;
   `RunCloneScript` adds the throwaway directory the clone-based flow works in and
-  scrubs the auth token from a failed run's output.
+  scrubs the auth token from a failed run's output; `RunUpgradeScript` wraps it
+  and reads the markers the script echoes back -- `CHANGES_PUSHED` and the
+  updater's own `<VERSION_VAR>_UPDATED`.
 - **Commit block** (`internal/support/commit_script.go`): `CommitAndPushScript`
   closes every clone-based script -- commit under one of two subjects, push, and
   report `CHANGES_PUSHED`. It escapes the backticks around the version, which

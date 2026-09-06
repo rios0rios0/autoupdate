@@ -27,6 +27,10 @@ const (
 	javaVersionTimeout = 15 * time.Second
 	scriptFileMode     = 0o700
 
+	// javaVersionMarker is the variable the upgrade script spells its
+	// "the version pin moved" marker after.
+	javaVersionMarker = "JAVA_VERSION"
+
 	// Build system identifiers.
 	buildSystemGradle = "gradle"
 	buildSystemMaven  = "maven"
@@ -107,13 +111,14 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 
 	vCtx := resolveVersionContext(ctx, provider, repo, latestJavaVersion)
 
-	return support.RunRemoteUpgrade(ctx, provider, repo, opts, support.RemoteUpgrade{
+	return support.RunRemoteUpgradeRun(ctx, provider, repo, opts, support.RemoteUpgradeRun{
 		LogPrefix:  updaterName,
 		BranchName: vCtx.BranchName,
 		DryRun:     func() { logDryRun(vCtx, repo) },
-		Upgrade: func(ctx context.Context) (support.RemoteUpgradeResult, error) {
+		Changelog:  changelogEntries(vCtx),
+		Upgrade: func(ctx context.Context, target support.CloneTarget) (support.UpgradeOutcome, error) {
 			buildSys := detectRemoteBuildSystem(ctx, provider, repo)
-			return cloneAndUpgrade(ctx, provider, repo, vCtx, buildSys, opts.AllowMajorUpdates)
+			return cloneAndUpgrade(ctx, vCtx, target, buildSys, opts.AllowMajorUpdates)
 		},
 	})
 }
@@ -128,38 +133,30 @@ func logDryRun(vCtx *versionContext, repo entities.Repository) {
 	})
 }
 
-// cloneAndUpgrade prepares the changelog, clones the repository, runs the
-// upgrade script, and describes the pull request the upgrade earned.
+// cloneAndUpgrade clones the repository into target, runs the upgrade script,
+// and describes the pull request the upgrade earned.
 func cloneAndUpgrade(
 	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
 	vCtx *versionContext,
+	target support.CloneTarget,
 	buildSys string,
 	allowMajorUpdates bool,
-) (support.RemoteUpgradeResult, error) {
-	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
-	defer changelog.Remove()
-
+) (support.UpgradeOutcome, error) {
 	result, err := upgradeRepo(ctx, upgradeParams{
-		CloneTarget: support.CloneTargetFor(provider, repo, vCtx.BranchName, changelog),
+		CloneTarget: target,
 		JavaVersion: vCtx.LatestVersion,
 		BuildSystem: buildSys,
 
 		AllowMajorUpdates: allowMajorUpdates,
 	})
 	if err != nil {
-		return support.RemoteUpgradeResult{}, fmt.Errorf("failed to upgrade: %w", err)
+		return support.UpgradeOutcome{}, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	return support.RemoteUpgradeResult{
-		Pushed: result.HasChanges,
-		PullRequest: support.PullRequestSpec{
-			LogPrefix:   updaterName,
-			BranchName:  vCtx.BranchName,
-			Title:       upgradeSubject(vCtx.LatestVersion, result.JavaVersionUpdated),
-			Description: GeneratePRDescription(vCtx.LatestVersion, buildSys, result.JavaVersionUpdated),
-		},
+	return support.UpgradeOutcome{
+		Pushed:      result.HasChanges,
+		Title:       upgradeSubject(vCtx.LatestVersion, result.JavaVersionUpdated),
+		Description: GeneratePRDescription(vCtx.LatestVersion, buildSys, result.JavaVersionUpdated),
 	}, nil
 }
 
@@ -210,7 +207,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, runErr
 	}
 
-	javaVersionUpdated := strings.Contains(outputStr, "JAVA_VERSION_UPDATED=true")
+	javaVersionUpdated := strings.Contains(outputStr, javaVersionMarker+"_UPDATED=true")
 
 	// Return early if the upgrade script made no filesystem changes
 	if !support.HasUncommittedChanges(ctx, repoDir) {
@@ -433,20 +430,21 @@ func upgradeRepo(
 	ctx context.Context,
 	params upgradeParams,
 ) (*upgradeResult, error) {
-	output, err := cmdrunner.RunCloneScript(ctx, defaultRunner, cmdrunner.CloneScriptRun{
-		Body:        buildUpgradeScript(params, ""),
-		TempPattern: "autoupdate-java-*",
-		Env:         func(repoDir string) []string { return buildEnv(params, repoDir) },
-		Secrets:     []string{params.AuthToken},
+	run, err := cmdrunner.RunUpgradeScript(ctx, defaultRunner, cmdrunner.UpgradeScriptRun{
+		VersionMarker: javaVersionMarker,
+		Body:          buildUpgradeScript(params, ""),
+		TempPattern:   "autoupdate-java-*",
+		Env:           func(repoDir string) []string { return buildEnv(params, repoDir) },
+		Secrets:       []string{params.AuthToken},
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &upgradeResult{
-		HasChanges:         strings.Contains(output, "CHANGES_PUSHED=true"),
-		JavaVersionUpdated: strings.Contains(output, "JAVA_VERSION_UPDATED=true"),
-		Output:             output,
+		HasChanges:         run.HasChanges,
+		JavaVersionUpdated: run.VersionUpdated,
+		Output:             run.Output,
 	}, nil
 }
 
@@ -495,7 +493,7 @@ func writeJavaUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 		VersionVar: "JAVA_VERSION",
 		CurrentVar: "CURRENT_JAVA_VERSION",
 		ChangedVar: "JAVA_VERSION_CHANGED",
-		MarkerVar:  "JAVA_VERSION",
+		MarkerVar:  javaVersionMarker,
 	}))
 
 	// Build system specific commands

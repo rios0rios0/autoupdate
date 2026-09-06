@@ -25,6 +25,10 @@ const (
 	rbVersionTimeout = 15 * time.Second
 	scriptFileMode   = 0o700
 
+	// rubyVersionMarker is the variable the upgrade script spells its
+	// "the version pin moved" marker after.
+	rubyVersionMarker = "RUBY_VERSION"
+
 	// Branch name patterns for Ruby updates. One format is used when the
 	// Ruby runtime version itself is being bumped; the other is used when
 	// only gem dependencies are being refreshed.
@@ -93,12 +97,13 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 
 	vCtx := resolveVersionContext(ctx, provider, repo, latestRbVersion, opts.AllowMajorUpdates)
 
-	return support.RunRemoteUpgrade(ctx, provider, repo, opts, support.RemoteUpgrade{
+	return support.RunRemoteUpgradeRun(ctx, provider, repo, opts, support.RemoteUpgradeRun{
 		LogPrefix:  updaterName,
 		BranchName: vCtx.BranchName,
 		DryRun:     func() { logDryRun(vCtx, repo) },
-		Upgrade: func(ctx context.Context) (support.RemoteUpgradeResult, error) {
-			return cloneAndUpgrade(ctx, provider, repo, vCtx, opts.AllowMajorUpdates)
+		Changelog:  changelogEntries(vCtx),
+		Upgrade: func(ctx context.Context, target support.CloneTarget) (support.UpgradeOutcome, error) {
+			return cloneAndUpgrade(ctx, vCtx, target, opts.AllowMajorUpdates)
 		},
 	})
 }
@@ -113,36 +118,28 @@ func logDryRun(vCtx *versionContext, repo entities.Repository) {
 	})
 }
 
-// cloneAndUpgrade prepares the changelog, clones the repository, runs the
-// upgrade script, and describes the pull request the upgrade earned.
+// cloneAndUpgrade clones the repository into target, runs the upgrade script,
+// and describes the pull request the upgrade earned.
 func cloneAndUpgrade(
 	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
 	vCtx *versionContext,
+	target support.CloneTarget,
 	allowMajorUpdates bool,
-) (support.RemoteUpgradeResult, error) {
-	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
-	defer changelog.Remove()
-
+) (support.UpgradeOutcome, error) {
 	result, err := upgradeRepo(ctx, upgradeParams{
-		CloneTarget: support.CloneTargetFor(provider, repo, vCtx.BranchName, changelog),
+		CloneTarget: target,
 		RubyVersion: rubyVersionFor(vCtx),
 	}, allowMajorUpdates)
 	if err != nil {
-		return support.RemoteUpgradeResult{}, fmt.Errorf("failed to upgrade: %w", err)
+		return support.UpgradeOutcome{}, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	return support.RemoteUpgradeResult{
+	return support.UpgradeOutcome{
 		Pushed: result.HasChanges,
-		PullRequest: support.PullRequestSpec{
-			LogPrefix:  updaterName,
-			BranchName: vCtx.BranchName,
-			Title:      upgradeSubject(vCtx.LatestVersion, result.RubyVersionUpdated),
-			Description: GeneratePRDescription(
-				vCtx.LatestVersion, result.RubyVersionUpdated, allowMajorUpdates,
-			),
-		},
+		Title:  upgradeSubject(vCtx.LatestVersion, result.RubyVersionUpdated),
+		Description: GeneratePRDescription(
+			vCtx.LatestVersion, result.RubyVersionUpdated, allowMajorUpdates,
+		),
 	}, nil
 }
 
@@ -191,7 +188,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, runErr
 	}
 
-	rbVersionUpdated := strings.Contains(outputStr, "RUBY_VERSION_UPDATED=true")
+	rbVersionUpdated := strings.Contains(outputStr, rubyVersionMarker+"_UPDATED=true")
 
 	// Return early if the upgrade script made no filesystem changes
 	if !support.HasUncommittedChanges(ctx, repoDir) {
@@ -328,20 +325,21 @@ func upgradeRepo(
 	params upgradeParams,
 	allowMajorUpdates bool,
 ) (*upgradeResult, error) {
-	output, err := cmdrunner.RunCloneScript(ctx, defaultRunner, cmdrunner.CloneScriptRun{
-		Body:        buildUpgradeScript(params, "", allowMajorUpdates),
-		TempPattern: "autoupdate-ruby-*",
-		Env:         func(repoDir string) []string { return buildEnv(params, repoDir) },
-		Secrets:     []string{params.AuthToken},
+	run, err := cmdrunner.RunUpgradeScript(ctx, defaultRunner, cmdrunner.UpgradeScriptRun{
+		VersionMarker: rubyVersionMarker,
+		Body:          buildUpgradeScript(params, "", allowMajorUpdates),
+		TempPattern:   "autoupdate-ruby-*",
+		Env:           func(repoDir string) []string { return buildEnv(params, repoDir) },
+		Secrets:       []string{params.AuthToken},
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &upgradeResult{
-		HasChanges:         strings.Contains(output, "CHANGES_PUSHED=true"),
-		RubyVersionUpdated: strings.Contains(output, "RUBY_VERSION_UPDATED=true"),
-		Output:             output,
+		HasChanges:         run.HasChanges,
+		RubyVersionUpdated: run.VersionUpdated,
+		Output:             run.Output,
 	}, nil
 }
 
@@ -410,7 +408,7 @@ func writeRubyUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 		VersionVar: "TARGET_RUBY_VERSION",
 		CurrentVar: "CURRENT_RB_VERSION",
 		ChangedVar: "RUBY_VERSION_CHANGED",
-		MarkerVar:  "RUBY_VERSION",
+		MarkerVar:  rubyVersionMarker,
 	}))
 
 	// Update bundler and bundle update

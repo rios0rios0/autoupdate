@@ -22,6 +22,10 @@ const (
 	sdkVersionTimeout = 15 * time.Second
 	pubspecFile       = "pubspec.yaml"
 
+	// sdkVersionMarker is the variable the upgrade script spells its
+	// "the SDK pin moved" marker after.
+	sdkVersionMarker = "SDK_VERSION"
+
 	// Toolchain executables. A Flutter project must be driven through the
 	// flutter wrapper: `dart pub get` cannot resolve the SDK-sourced packages
 	// (flutter, flutter_test, flutter_localizations) that every Flutter project
@@ -101,12 +105,13 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 
 	vCtx := u.resolveVersionContext(ctx, provider, repo)
 
-	return support.RunRemoteUpgrade(ctx, provider, repo, opts, support.RemoteUpgrade{
+	return support.RunRemoteUpgradeRun(ctx, provider, repo, opts, support.RemoteUpgradeRun{
 		LogPrefix:  updaterName,
 		BranchName: vCtx.BranchName,
 		DryRun:     func() { logDryRun(vCtx, repo) },
-		Upgrade: func(ctx context.Context) (support.RemoteUpgradeResult, error) {
-			return cloneAndUpgrade(ctx, u.cmdRunner, provider, repo, vCtx, opts)
+		Changelog:  changelogEntries(vCtx, vCtx.NeedsVersionUpgrade),
+		Upgrade: func(ctx context.Context, target support.CloneTarget) (support.UpgradeOutcome, error) {
+			return cloneAndUpgrade(ctx, u.cmdRunner, vCtx, target, opts)
 		},
 	})
 }
@@ -345,40 +350,32 @@ func logDryRun(vCtx *versionContext, repo entities.Repository) {
 
 // --- clone + upgrade ---
 
-// cloneAndUpgrade prepares the changelog, clones the repository, runs the
-// upgrade script, and returns the result.
+// cloneAndUpgrade clones the repository into target, runs the upgrade script,
+// and describes the pull request the upgrade earned.
 func cloneAndUpgrade(
 	ctx context.Context,
 	runner cmdrunner.Runner,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
 	vCtx *versionContext,
+	target support.CloneTarget,
 	opts entities.UpdateOptions,
-) (support.RemoteUpgradeResult, error) {
-	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx, vCtx.NeedsVersionUpgrade))
-	defer changelog.Remove()
-
+) (support.UpgradeOutcome, error) {
 	result, err := upgradeRepo(ctx, runner, upgradeParams{
-		CloneTarget: support.CloneTargetFor(provider, repo, vCtx.BranchName, changelog),
+		CloneTarget: target,
 		Toolchain:   vCtx.Toolchain,
 		SDKVersion:  sdkVersionFor(vCtx),
 
 		AllowMajorUpdates: opts.AllowMajorUpdates,
 	})
 	if err != nil {
-		return support.RemoteUpgradeResult{}, fmt.Errorf("failed to upgrade: %w", err)
+		return support.UpgradeOutcome{}, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	return support.RemoteUpgradeResult{
+	return support.UpgradeOutcome{
 		Pushed: result.HasChanges,
-		PullRequest: support.PullRequestSpec{
-			LogPrefix:  updaterName,
-			BranchName: vCtx.BranchName,
-			Title:      commitMessage(vCtx, result.SDKUpdated),
-			Description: GeneratePRDescription(
-				vCtx.LatestVersion, vCtx.Toolchain, result.SDKUpdated, opts.AllowMajorUpdates,
-			),
-		},
+		Title:  commitMessage(vCtx, result.SDKUpdated),
+		Description: GeneratePRDescription(
+			vCtx.LatestVersion, vCtx.Toolchain, result.SDKUpdated, opts.AllowMajorUpdates,
+		),
 	}, nil
 }
 
@@ -392,20 +389,21 @@ func sdkVersionFor(vCtx *versionContext) string {
 }
 
 func upgradeRepo(ctx context.Context, runner cmdrunner.Runner, params upgradeParams) (*upgradeResult, error) {
-	output, runErr := cmdrunner.RunCloneScript(ctx, runner, cmdrunner.CloneScriptRun{
-		Body:        buildUpgradeScript(params),
-		TempPattern: "autoupdate-dart-*",
-		Env:         func(repoDir string) []string { return buildEnv(params, repoDir) },
-		Secrets:     []string{params.AuthToken},
+	run, runErr := cmdrunner.RunUpgradeScript(ctx, runner, cmdrunner.UpgradeScriptRun{
+		VersionMarker: sdkVersionMarker,
+		Body:          buildUpgradeScript(params),
+		TempPattern:   "autoupdate-dart-*",
+		Env:           func(repoDir string) []string { return buildEnv(params, repoDir) },
+		Secrets:       []string{params.AuthToken},
 	})
 	if runErr != nil {
 		return nil, runErr
 	}
 
 	return &upgradeResult{
-		Output:     output,
-		HasChanges: strings.Contains(output, "CHANGES_PUSHED=true"),
-		SDKUpdated: strings.Contains(output, "SDK_VERSION_UPDATED=true"),
+		Output:     run.Output,
+		HasChanges: run.HasChanges,
+		SDKUpdated: run.VersionUpdated,
 	}, nil
 }
 

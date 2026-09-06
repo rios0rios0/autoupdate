@@ -27,6 +27,10 @@ const (
 	scriptFileMode    = 0o700
 	goDirectiveFields = 2 // expected number of fields in "go <version>"
 
+	// goVersionMarker is the variable the upgrade script spells its
+	// "the go directive moved" marker after.
+	goVersionMarker = "GO_VERSION"
+
 	// Branch name patterns for Go updates. One format is used when the Go
 	// version (go directive) itself is being bumped; the other is used when
 	// the go directive is already at the desired version and only module
@@ -113,12 +117,13 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 
 	vCtx := resolveVersionContext(ctx, provider, repo, latestGoVersion)
 
-	return support.RunRemoteUpgrade(ctx, provider, repo, opts, support.RemoteUpgrade{
+	return support.RunRemoteUpgradeRun(ctx, provider, repo, opts, support.RemoteUpgradeRun{
 		LogPrefix:  updaterName,
 		BranchName: vCtx.BranchName,
 		DryRun:     func() { logDryRun(vCtx, repo) },
-		Upgrade: func(ctx context.Context) (support.RemoteUpgradeResult, error) {
-			return cloneAndUpgrade(ctx, provider, repo, vCtx, opts)
+		Changelog:  changelogEntries(vCtx),
+		Upgrade: func(ctx context.Context, target support.CloneTarget) (support.UpgradeOutcome, error) {
+			return cloneAndUpgrade(ctx, provider, repo, vCtx, target, opts)
 		},
 	})
 }
@@ -217,7 +222,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, outputStr)
 	}
 
-	goVersionUpdated := strings.Contains(outputStr, "GO_VERSION_UPDATED=true")
+	goVersionUpdated := strings.Contains(outputStr, goVersionMarker+"_UPDATED=true")
 
 	if goVersionUpdated {
 		rewriteDockerfileGoTags(ctx, repoDir, vCtx.LatestVersion)
@@ -324,40 +329,35 @@ func fileExistsLocally(path string) bool {
 	return err == nil
 }
 
-// cloneAndUpgrade prepares the changelog, clones the repository, runs the
-// upgrade script, and returns the result.
+// cloneAndUpgrade clones the repository into target, runs the upgrade script,
+// and describes the pull request the upgrade earned.
 func cloneAndUpgrade(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
+	target support.CloneTarget,
 	opts entities.UpdateOptions,
-) (support.RemoteUpgradeResult, error) {
+) (support.UpgradeOutcome, error) {
 	hasConfigSH := provider.HasFile(ctx, repo, "config.sh")
-	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
-	defer changelog.Remove()
 
 	result, err := upgradeGoRepo(ctx, upgradeParams{
-		CloneTarget: support.CloneTargetFor(provider, repo, vCtx.BranchName, changelog),
+		CloneTarget: target,
 		GoVersion:   vCtx.LatestVersion,
 		HasConfigSH: hasConfigSH,
 
 		AllowMajorUpdates: opts.AllowMajorUpdates,
 	})
 	if err != nil {
-		return support.RemoteUpgradeResult{}, fmt.Errorf("failed to upgrade: %w", err)
+		return support.UpgradeOutcome{}, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	return support.RemoteUpgradeResult{
+	return support.UpgradeOutcome{
 		Pushed: result.HasChanges,
-		PullRequest: support.PullRequestSpec{
-			LogPrefix:  updaterName,
-			BranchName: vCtx.BranchName,
-			Title:      upgradeSubject(vCtx.LatestVersion, result.GoVersionUpdated),
-			Description: GenerateGoPRDescription(
-				vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated, opts.AllowMajorUpdates,
-			),
-		},
+		Title:  upgradeSubject(vCtx.LatestVersion, result.GoVersionUpdated),
+		Description: GenerateGoPRDescription(
+			vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated, opts.AllowMajorUpdates,
+		),
 	}, nil
 }
 
@@ -500,20 +500,21 @@ func upgradeGoRepo(
 		return nil, fmt.Errorf("go binary not found: %w", err)
 	}
 
-	output, runErr := cmdrunner.RunCloneScript(ctx, defaultRunner, cmdrunner.CloneScriptRun{
-		Body:        buildUpgradeScript(params, "", goBinary),
-		TempPattern: "autoupdate-go-*",
-		Env:         func(repoDir string) []string { return buildEnv(params, repoDir, goBinary) },
-		Secrets:     []string{params.AuthToken},
+	run, runErr := cmdrunner.RunUpgradeScript(ctx, defaultRunner, cmdrunner.UpgradeScriptRun{
+		VersionMarker: goVersionMarker,
+		Body:          buildUpgradeScript(params, "", goBinary),
+		TempPattern:   "autoupdate-go-*",
+		Env:           func(repoDir string) []string { return buildEnv(params, repoDir, goBinary) },
+		Secrets:       []string{params.AuthToken},
 	})
 	if runErr != nil {
 		return nil, runErr
 	}
 
 	return &upgradeResult{
-		HasChanges:       strings.Contains(output, "CHANGES_PUSHED=true"),
-		GoVersionUpdated: strings.Contains(output, "GO_VERSION_UPDATED=true"),
-		Output:           output,
+		HasChanges:       run.HasChanges,
+		GoVersionUpdated: run.VersionUpdated,
+		Output:           run.Output,
 	}, nil
 }
 

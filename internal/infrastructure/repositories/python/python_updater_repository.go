@@ -106,12 +106,13 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 
 	vCtx := resolveVersionContext(ctx, provider, repo, latestPyVersion)
 
-	return support.RunRemoteUpgrade(ctx, provider, repo, opts, support.RemoteUpgrade{
+	return support.RunRemoteUpgradeRun(ctx, provider, repo, opts, support.RemoteUpgradeRun{
 		LogPrefix:  updaterName,
 		BranchName: vCtx.BranchName,
 		DryRun:     func() { logDryRun(vCtx, repo) },
-		Upgrade: func(ctx context.Context) (support.RemoteUpgradeResult, error) {
-			return cloneAndUpgrade(ctx, provider, repo, vCtx, opts.AllowMajorUpdates)
+		Changelog:  changelogEntries(vCtx),
+		Upgrade: func(ctx context.Context, target support.CloneTarget) (support.UpgradeOutcome, error) {
+			return cloneAndUpgrade(ctx, provider, repo, vCtx, target, opts.AllowMajorUpdates)
 		},
 	})
 }
@@ -126,26 +127,25 @@ func logDryRun(vCtx *versionContext, repo entities.Repository) {
 	})
 }
 
-// cloneAndUpgrade prepares the changelog, clones the repository, runs the
-// upgrade script, and describes the pull request the upgrade earned.
+// cloneAndUpgrade clones the repository into target, runs the upgrade script,
+// and describes the pull request the upgrade earned.
 func cloneAndUpgrade(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
+	target support.CloneTarget,
 	allowMajorUpdates bool,
-) (support.RemoteUpgradeResult, error) {
-	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
-	defer changelog.Remove()
+) (support.UpgradeOutcome, error) {
 	project := detectRemoteProject(ctx, provider, repo)
 
 	pythonBinary, err := findPythonBinary()
 	if err != nil {
-		return support.RemoteUpgradeResult{}, fmt.Errorf("python binary not found: %w", err)
+		return support.UpgradeOutcome{}, fmt.Errorf("python binary not found: %w", err)
 	}
 
 	result, err := upgradeRepo(ctx, upgradeParams{
-		CloneTarget:   support.CloneTargetFor(provider, repo, vCtx.BranchName, changelog),
+		CloneTarget:   target,
 		PythonVersion: vCtx.LatestVersion,
 		Project:       project,
 		PythonBinary:  pythonBinary,
@@ -153,19 +153,15 @@ func cloneAndUpgrade(
 		AllowMajorUpdates: allowMajorUpdates,
 	})
 	if err != nil {
-		return support.RemoteUpgradeResult{}, fmt.Errorf("failed to upgrade: %w", err)
+		return support.UpgradeOutcome{}, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	return support.RemoteUpgradeResult{
+	return support.UpgradeOutcome{
 		Pushed: result.HasChanges,
-		PullRequest: support.PullRequestSpec{
-			LogPrefix:  updaterName,
-			BranchName: vCtx.BranchName,
-			Title:      upgradeSubject(vCtx.LatestVersion, result.PythonVersionUpdated),
-			Description: GeneratePRDescription(
-				vCtx.LatestVersion, project.Toolchain(), result.PythonVersionUpdated,
-			),
-		},
+		Title:  upgradeSubject(vCtx.LatestVersion, result.PythonVersionUpdated),
+		Description: GeneratePRDescription(
+			vCtx.LatestVersion, project.Toolchain(), result.PythonVersionUpdated,
+		),
 	}, nil
 }
 
@@ -221,7 +217,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, runErr
 	}
 
-	pyVersionUpdated := strings.Contains(outputStr, "PYTHON_VERSION_UPDATED=true")
+	pyVersionUpdated := strings.Contains(outputStr, pythonVersionVar+"_UPDATED=true")
 
 	// Return early if the upgrade script made no filesystem changes
 	if !support.HasUncommittedChanges(ctx, repoDir) {
@@ -470,21 +466,22 @@ func upgradeRepo(
 	ctx context.Context,
 	params upgradeParams,
 ) (*upgradeResult, error) {
-	output, err := cmdrunner.RunCloneScript(ctx, defaultRunner, cmdrunner.CloneScriptRun{
-		Body:        buildUpgradeScript(params, ""),
-		TempPattern: "autoupdate-python-*",
-		Env:         func(repoDir string) []string { return buildEnv(params, repoDir) },
-		Secrets:     []string{params.AuthToken},
+	run, err := cmdrunner.RunUpgradeScript(ctx, defaultRunner, cmdrunner.UpgradeScriptRun{
+		VersionMarker: pythonVersionVar,
+		Body:          buildUpgradeScript(params, ""),
+		TempPattern:   "autoupdate-python-*",
+		Env:           func(repoDir string) []string { return buildEnv(params, repoDir) },
+		Secrets:       []string{params.AuthToken},
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &upgradeResult{
-		HasChanges:           strings.Contains(output, "CHANGES_PUSHED=true"),
-		PythonVersionUpdated: strings.Contains(output, "PYTHON_VERSION_UPDATED=true"),
+		HasChanges:           run.HasChanges,
+		PythonVersionUpdated: run.VersionUpdated,
 		Toolchain:            params.Project.Toolchain(),
-		Output:               output,
+		Output:               run.Output,
 	}, nil
 }
 
