@@ -147,7 +147,8 @@ rather than by copying a sibling.
   the newest release or the empty string, which is how every updater says "the
   feed was unreachable, refresh the dependencies but leave the pin alone".
 - **git** (`internal/support/git_command.go`): `GitCommand` is the only place this
-  program looks git up on `PATH`, resolved once with `exec.LookPath`.
+  program looks git up on `PATH`, resolved with `exec.LookPath` on every call
+  and deliberately not cached.
 
 ### Configuration System
 - **Configuration is layered.** Four sources, each overriding only the keys its document declares: built-in defaults (`configs/autoupdate.yaml`, embedded via `configs/embed.go`) → published defaults (the same file fetched from `entities.DefaultConfigURL`, best effort) → the operator's file (`--config`, else `~/` then `~/.config/`, names `.autoupdate.{yml,yaml}` and `autoupdate.{yml,yaml}`) → the target repository's own `.autoupdate.yaml`

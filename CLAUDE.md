@@ -100,7 +100,8 @@ rather than by copying a sibling.
   the newest release or the empty string, which is how every updater says "the
   feed was unreachable, refresh the dependencies but leave the pin alone".
 - **git** (`internal/support/git_command.go`): `GitCommand` is the only place this
-  program looks git up on `PATH`, resolved once with `exec.LookPath`.
+  program looks git up on `PATH`, resolved with `exec.LookPath` on every call
+  and deliberately not cached.
 
 ### Commit Signing
 
