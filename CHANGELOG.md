@@ -22,6 +22,18 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-09-06
+
+### Changed
+
+- extracted the clone, commit, pull request and release-feed steps every language updater repeated into shared helpers under `internal/support` and `cmdrunner`
+- routed every git invocation through a single audited lookup so the program resolves git on PATH in one place
+
+### Fixed
+
+- declared test files as test sources for SonarCloud Automatic Analysis so duplicated test setup no longer fails the quality gate
+- escaped the backticks around the version in the commit subject of the C#, Java, JavaScript, Python and Ruby upgrade scripts, which bash read as command substitution and silently dropped
+
 ## [1.1.0] - 2026-09-04
 
 ### Added

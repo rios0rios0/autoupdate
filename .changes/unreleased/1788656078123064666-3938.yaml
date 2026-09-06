@@ -1,3 +1,0 @@
-kind: 'Changed'
-body: 'routed every git invocation through a single audited lookup so the program resolves git on PATH in one place'
-time: '2026-09-06T00:54:38.123024093Z'

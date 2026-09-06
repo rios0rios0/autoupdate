@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'escaped the backticks around the version in the commit subject of the C#, Java, JavaScript, Python and Ruby upgrade scripts, which bash read as command substitution and silently dropped'
-time: '2026-09-06T00:54:38.131969509Z'
