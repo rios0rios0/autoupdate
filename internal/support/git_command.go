@@ -11,13 +11,17 @@ const gitExecutable = "git"
 // GitCommand returns a command that runs git with args inside dir.
 //
 // It is the one place git is looked up. The executable is resolved through PATH
-// here, once, with [exec.LookPath], and the absolute path that comes back is
-// what the command runs -- rather than every call site handing a bare "git" to
-// the child process to resolve again. Keeping the PATH reliance in a single
-// function is what makes it reviewable: this program drives whichever git the
-// operator installed, on whichever platform, so a fixed absolute path cannot
-// be assumed, and the same holds for the language toolchains it reaches
+// here, on every call, with [exec.LookPath], and the absolute path that comes
+// back is what the command runs -- rather than every call site handing a bare
+// "git" to the child process to resolve again. Keeping the PATH reliance in a
+// single function is what makes it reviewable: this program drives whichever
+// git the operator installed, on whichever platform, so a fixed absolute path
+// cannot be assumed, and the same holds for the language toolchains it reaches
 // through the command runner.
+//
+// The lookup is deliberately not cached: a PATH scan costs nothing next to the
+// process spawn that follows it, and a cached path would be package state that
+// outlives whatever PATH a caller set up.
 //
 // A failed lookup falls back to the bare name, so the failure surfaces where
 // the command runs -- as the usual "executable file not found" error, next to
