@@ -94,18 +94,6 @@ func LogDryRun(vCtx *VersionContext, repo entities.Repository) {
 	logDryRun(vCtx, repo)
 }
 
-// OpenPullRequest is exported for testing.
-func OpenPullRequest(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	opts entities.UpdateOptions,
-	vCtx *VersionContext,
-	result *UpgradeResultExported,
-) ([]entities.PullRequest, error) {
-	return openPullRequest(ctx, provider, repo, opts, vCtx, result)
-}
-
 // WriteDockerfileUpdate is exported for testing.
 func WriteDockerfileUpdate(sb *strings.Builder) {
 	writeDockerfileUpdate(sb)

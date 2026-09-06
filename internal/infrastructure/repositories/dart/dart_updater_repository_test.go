@@ -396,9 +396,8 @@ func TestBuildUpgradeScript(t *testing.T) {
 			CloneURL:      "https://github.com/org/repo.git",
 			DefaultBranch: "main",
 			BranchName:    "chore/upgrade-dart-deps",
-			Toolchain:     "flutter",
 			ProviderName:  "github",
-
+			Toolchain:     "flutter",
 			// The production default; without it the params zero value refuses
 			// majors and pub is asked for a plain re-resolution instead.
 			AllowMajorUpdates: true,
@@ -446,7 +445,7 @@ func TestBuildEnv(t *testing.T) {
 		t.Parallel()
 
 		// given
-		params := dartUpdater.UpgradeParamsExported{Toolchain: "flutter", BranchName: "b"}
+		params := dartUpdater.UpgradeParamsExported{BranchName: "b", Toolchain: "flutter"}
 
 		// when
 		env := dartUpdater.BuildEnv(params, "/tmp/repo")

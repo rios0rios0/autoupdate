@@ -112,27 +112,9 @@ func SetDefaultRunner(r cmdrunner.Runner) func() {
 	return func() { defaultRunner = old }
 }
 
-// WriteAzureDevOpsAuth is exported for testing.
-func WriteAzureDevOpsAuth(sb *strings.Builder) {
-	writeAzureDevOpsAuth(sb)
-}
-
-// WriteGitLabAuth is exported for testing.
-func WriteGitLabAuth(sb *strings.Builder) {
-	writeGitLabAuth(sb)
-}
-
-// OpenPullRequest is exported for testing.
-func OpenPullRequest(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	opts entities.UpdateOptions,
-	vCtx *versionContext,
-	result *upgradeResult,
-	hasConfigSH bool,
-) ([]entities.PullRequest, error) {
-	return openPullRequest(ctx, provider, repo, opts, vCtx, result, hasConfigSH)
+// UpgradeSubject is exported for testing.
+func UpgradeSubject(goVersion string, goVersionUpdated bool) string {
+	return upgradeSubject(goVersion, goVersionUpdated)
 }
 
 // FileExistsLocally is exported for testing.

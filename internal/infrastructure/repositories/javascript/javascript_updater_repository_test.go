@@ -417,9 +417,9 @@ func TestBuildUpgradeScript(t *testing.T) {
 			CloneURL:       "https://example.com/org/repo.git",
 			DefaultBranch:  "main",
 			BranchName:     "chore/upgrade-js-deps",
-			NodeVersion:    "20.18.0",
 			AuthToken:      "test-token",
 			ProviderName:   "github",
+			NodeVersion:    "20.18.0",
 			PackageManager: "npm",
 		}
 
@@ -721,9 +721,9 @@ func TestBuildEnv(t *testing.T) {
 			CloneURL:       "https://example.com/org/repo.git",
 			DefaultBranch:  "main",
 			BranchName:     "chore/upgrade-js-deps",
-			NodeVersion:    "20.18.0",
 			AuthToken:      "test-token",
 			ProviderName:   "github",
+			NodeVersion:    "20.18.0",
 			PackageManager: "npm",
 		}
 
@@ -750,9 +750,9 @@ func TestBuildEnv(t *testing.T) {
 			CloneURL:       "https://example.com/org/repo.git",
 			DefaultBranch:  "main",
 			BranchName:     "chore/upgrade-js-deps",
-			NodeVersion:    "",
 			AuthToken:      "test-token",
 			ProviderName:   "github",
+			NodeVersion:    "",
 			PackageManager: "npm",
 		}
 
@@ -775,8 +775,8 @@ func TestBuildEnv(t *testing.T) {
 			BranchName:     "chore/upgrade-js-deps",
 			AuthToken:      "test-token",
 			ProviderName:   "github",
-			PackageManager: "npm",
 			Changelog:      support.StagedChangelog{},
+			PackageManager: "npm",
 		}
 
 		// when
@@ -798,8 +798,8 @@ func TestBuildEnv(t *testing.T) {
 			BranchName:     "chore/upgrade-js-deps",
 			AuthToken:      "test-token",
 			ProviderName:   "github",
-			PackageManager: "npm",
 			Changelog:      support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
+			PackageManager: "npm",
 		}
 
 		// when
@@ -818,9 +818,9 @@ func TestBuildEnv(t *testing.T) {
 			CloneURL:       "https://example.com/org/repo.git",
 			DefaultBranch:  "main",
 			BranchName:     "chore/upgrade-js-deps",
-			NodeVersion:    "22.0.0",
 			AuthToken:      "test-token",
 			ProviderName:   "github",
+			NodeVersion:    "22.0.0",
 			PackageManager: "pnpm",
 		}
 

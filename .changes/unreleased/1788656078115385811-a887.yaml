@@ -1,0 +1,3 @@
+kind: 'Changed'
+body: 'extracted the clone, commit, pull request and release-feed steps every language updater repeated into shared helpers under `internal/support` and `cmdrunner`'
+time: '2026-09-06T00:54:38.115332061Z'

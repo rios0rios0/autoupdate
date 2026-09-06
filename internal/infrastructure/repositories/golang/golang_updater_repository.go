@@ -27,6 +27,10 @@ const (
 	scriptFileMode    = 0o700
 	goDirectiveFields = 2 // expected number of fields in "go <version>"
 
+	// goVersionMarker is the variable the upgrade script spells its
+	// "the go directive moved" marker after.
+	goVersionMarker = "GO_VERSION"
+
 	// Branch name patterns for Go updates. One format is used when the Go
 	// version (go directive) itself is being bumped; the other is used when
 	// the go directive is already at the desired version and only module
@@ -37,11 +41,6 @@ const (
 	// Commit/PR messages and changelog entries used across remote and local modes.
 	goCommitMsgDeps      = "chore(deps): update Go module dependencies"
 	goChangelogEntryDeps = "- changed the Go module dependencies to their latest versions"
-
-	// Git provider names for auth setup.
-	providerAzureDevOps = "azuredevops"
-	providerGitHub      = "github"
-	providerGitLab      = "gitlab"
 )
 
 // defaultRunner is the package-level command runner for remote-mode functions.
@@ -118,45 +117,32 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 
 	vCtx := resolveVersionContext(ctx, provider, repo, latestGoVersion)
 
-	// Check if PR already exists
-	exists, prCheckErr := provider.PullRequestExists(ctx, repo, vCtx.BranchName)
-	if prCheckErr != nil {
-		logger.Warnf("[golang] Failed to check existing PRs: %v", prCheckErr)
-	}
-	if exists {
+	return support.RunRemoteUpgradeRun(ctx, provider, repo, opts, support.RemoteUpgradeRun{
+		LogPrefix:  updaterName,
+		BranchName: vCtx.BranchName,
+		DryRun:     func() { logDryRun(vCtx, repo) },
+		Changelog:  changelogEntries(vCtx),
+		Upgrade: func(ctx context.Context, target support.CloneTarget) (support.UpgradeOutcome, error) {
+			return cloneAndUpgrade(ctx, provider, repo, vCtx, target, opts)
+		},
+	})
+}
+
+// logDryRun logs what would happen without actually performing the upgrade.
+func logDryRun(vCtx *versionContext, repo entities.Repository) {
+	if vCtx.NeedsVersionUpgrade {
 		logger.Infof(
-			"[golang] PR already exists for branch %q, skipping",
-			vCtx.BranchName,
+			"[golang] [DRY RUN] Would upgrade Go to %s and update deps for %s/%s",
+			vCtx.LatestVersion, repo.Organization, repo.Name,
 		)
-		return []entities.PullRequest{}, nil
+
+		return
 	}
 
-	if opts.DryRun {
-		if vCtx.NeedsVersionUpgrade {
-			logger.Infof(
-				"[golang] [DRY RUN] Would upgrade Go to %s and update deps for %s/%s",
-				vCtx.LatestVersion, repo.Organization, repo.Name,
-			)
-		} else {
-			logger.Infof(
-				"[golang] [DRY RUN] Would update Go module deps for %s/%s (already at Go %s)",
-				repo.Organization, repo.Name, vCtx.LatestVersion,
-			)
-		}
-		return []entities.PullRequest{}, nil
-	}
-
-	result, hasConfigSH, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, opts.AllowMajorUpdates)
-	if upgradeErr != nil {
-		return nil, upgradeErr
-	}
-
-	if !result.HasChanges {
-		logger.Infof("[golang] %s/%s: already up to date", repo.Organization, repo.Name)
-		return []entities.PullRequest{}, nil
-	}
-
-	return openPullRequest(ctx, provider, repo, opts, vCtx, result, hasConfigSH)
+	logger.Infof(
+		"[golang] [DRY RUN] Would update Go module deps for %s/%s (already at Go %s)",
+		repo.Organization, repo.Name, vCtx.LatestVersion,
+	)
 }
 
 // rewriteDockerfileGoTags rewrites the golang base-image tags in Go, verifying
@@ -236,7 +222,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, outputStr)
 	}
 
-	goVersionUpdated := strings.Contains(outputStr, "GO_VERSION_UPDATED=true")
+	goVersionUpdated := strings.Contains(outputStr, goVersionMarker+"_UPDATED=true")
 
 	if goVersionUpdated {
 		rewriteDockerfileGoTags(ctx, repoDir, vCtx.LatestVersion)
@@ -321,21 +307,7 @@ func buildLocalGoScript(providerName string, hasConfigSH, allowMajorUpdates bool
 	sb.WriteString("set -euo pipefail\n\n")
 
 	// Set up git credentials for `go get` with private modules
-	sb.WriteString("# Set up isolated git config for auth (needed for private modules)\n")
-	sb.WriteString("TEMP_GITCONFIG=$(mktemp)\n")
-	sb.WriteString("cp ~/.gitconfig \"$TEMP_GITCONFIG\" 2>/dev/null || true\n")
-
-	switch providerName {
-	case providerAzureDevOps:
-		writeAzureDevOpsAuth(&sb)
-	case providerGitHub:
-		writeGitHubAuth(&sb)
-	case providerGitLab:
-		writeGitLabAuth(&sb)
-	}
-
-	sb.WriteString("export GIT_CONFIG_GLOBAL=\"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("trap 'rm -f \"$TEMP_GITCONFIG\"' EXIT\n\n")
+	sb.WriteString(support.GitAuthScript(providerName))
 
 	if hasConfigSH {
 		sb.WriteString("echo \"Running config.sh...\"\n")
@@ -357,84 +329,49 @@ func fileExistsLocally(path string) bool {
 	return err == nil
 }
 
-// cloneAndUpgrade prepares the changelog, clones the repository, runs the
-// upgrade script, and returns the result.
+// cloneAndUpgrade clones the repository into target, runs the upgrade script,
+// and describes the pull request the upgrade earned.
 func cloneAndUpgrade(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	vCtx *versionContext,
-	allowMajorUpdates bool,
-) (*upgradeResult, bool, error) {
+	target support.CloneTarget,
+	opts entities.UpdateOptions,
+) (support.UpgradeOutcome, error) {
 	hasConfigSH := provider.HasFile(ctx, repo, "config.sh")
-	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
-	defer changelog.Remove()
-
-	cloneURL := provider.CloneURL(repo)
-	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
 
 	result, err := upgradeGoRepo(ctx, upgradeParams{
-		CloneURL:      cloneURL,
-		DefaultBranch: defaultBranch,
-		BranchName:    vCtx.BranchName,
-		GoVersion:     vCtx.LatestVersion,
-		AuthToken:     provider.AuthToken(),
-		HasConfigSH:   hasConfigSH,
-		ProviderName:  provider.Name(),
-		Changelog:     changelog,
+		CloneTarget: target,
+		GoVersion:   vCtx.LatestVersion,
+		HasConfigSH: hasConfigSH,
 
-		AllowMajorUpdates: allowMajorUpdates,
+		AllowMajorUpdates: opts.AllowMajorUpdates,
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to upgrade: %w", err)
+		return support.UpgradeOutcome{}, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	return result, hasConfigSH, nil
+	return support.UpgradeOutcome{
+		Pushed: result.HasChanges,
+		Title:  upgradeSubject(vCtx.LatestVersion, result.GoVersionUpdated),
+		Description: GenerateGoPRDescription(
+			vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated, opts.AllowMajorUpdates,
+		),
+	}, nil
 }
 
-// openPullRequest creates the PR on the hosting provider after a successful
-// upgrade.
-func openPullRequest(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	opts entities.UpdateOptions,
-	vCtx *versionContext,
-	result *upgradeResult,
-	hasConfigSH bool,
-) ([]entities.PullRequest, error) {
-	targetBranch := repo.DefaultBranch
-	if opts.TargetBranch != "" {
-		targetBranch = "refs/heads/" + opts.TargetBranch
-	}
-
-	prTitle := goCommitMsgDeps
-	if result.GoVersionUpdated {
-		prTitle = fmt.Sprintf(
+// upgradeSubject is the one-line summary of what the run changed, used as both
+// the commit subject and the pull request title.
+func upgradeSubject(goVersion string, goVersionUpdated bool) string {
+	if goVersionUpdated {
+		return fmt.Sprintf(
 			"chore(deps): upgraded Go version to `%s` and updated all dependencies",
-			vCtx.LatestVersion,
+			goVersion,
 		)
 	}
-	prDesc := GenerateGoPRDescription(
-		vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated, opts.AllowMajorUpdates,
-	)
 
-	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
-		SourceBranch: "refs/heads/" + vCtx.BranchName,
-		TargetBranch: targetBranch,
-		Title:        prTitle,
-		Description:  prDesc,
-		AutoComplete: opts.AutoComplete,
-	})
-	if createErr != nil {
-		return nil, fmt.Errorf("failed to create PR: %w", createErr)
-	}
-
-	logger.Infof(
-		"[golang] Created PR #%d for %s/%s: %s",
-		pr.ID, repo.Organization, repo.Name, pr.URL,
-	)
-	return []entities.PullRequest{*pr}, nil
+	return goCommitMsgDeps
 }
 
 // versionContext holds the pre-resolved Go version information and the
@@ -508,16 +445,12 @@ func changelogEntries(vCtx *versionContext) []string {
 // --- internal types ---
 
 type upgradeParams struct {
-	CloneURL      string
-	DefaultBranch string
-	BranchName    string
-	GoVersion     string
-	AuthToken     string
-	HasConfigSH   bool
-	ProviderName  string
-	// Changelog is the staged changelog payload the script copies into the
-	// clone; an empty value leaves the repository's changelog untouched.
-	Changelog support.StagedChangelog
+	// CloneTarget identifies the repository the script clones and how it
+	// authenticates against it, and carries the staged changelog.
+	support.CloneTarget
+
+	GoVersion   string
+	HasConfigSH bool
 	// AllowMajorUpdates decides whether the major-version guard is emitted and
 	// called at all.
 	//
@@ -562,48 +495,27 @@ func upgradeGoRepo(
 	ctx context.Context,
 	params upgradeParams,
 ) (*upgradeResult, error) {
-	result := &upgradeResult{}
-
-	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "autoupdate-go-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	repoDir := filepath.Join(tmpDir, "repo")
-
-	// Find the go binary
 	goBinary, err := findGoBinary()
 	if err != nil {
 		return nil, fmt.Errorf("go binary not found: %w", err)
 	}
 
-	// Build and run the upgrade script
-	script := buildUpgradeScript(params, repoDir, goBinary)
-	scriptPath := filepath.Join(tmpDir, "upgrade.sh")
-
-	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return nil, fmt.Errorf("failed to write script: %w", writeErr)
-	}
-
-	runResult, runErr := defaultRunner.Run(ctx, "bash", []string{scriptPath}, cmdrunner.RunOptions{
-		Dir: tmpDir,
-		Env: buildEnv(params, repoDir, goBinary),
+	run, runErr := cmdrunner.RunUpgradeScript(ctx, defaultRunner, cmdrunner.UpgradeScriptRun{
+		VersionMarker: goVersionMarker,
+		Body:          buildUpgradeScript(params, "", goBinary),
+		TempPattern:   "autoupdate-go-*",
+		Env:           func(repoDir string) []string { return buildEnv(params, repoDir, goBinary) },
+		Secrets:       []string{params.AuthToken},
 	})
-	if runResult != nil {
-		result.Output = runResult.Output
-	}
-
 	if runErr != nil {
-		return result, fmt.Errorf(
-			"upgrade script failed: %w\nOutput:\n%s", runErr, result.Output,
-		)
+		return nil, runErr
 	}
 
-	result.HasChanges = strings.Contains(result.Output, "CHANGES_PUSHED=true")
-	result.GoVersionUpdated = strings.Contains(result.Output, "GO_VERSION_UPDATED=true")
-	return result, nil
+	return &upgradeResult{
+		HasChanges:       run.HasChanges,
+		GoVersionUpdated: run.VersionUpdated,
+		Output:           run.Output,
+	}, nil
 }
 
 func buildUpgradeScript(
@@ -618,41 +530,9 @@ func buildUpgradeScript(
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 
-	// Set up git credentials based on provider
-	sb.WriteString("# Set up isolated git config for auth\n")
-	sb.WriteString("TEMP_GITCONFIG=$(mktemp)\n")
-	sb.WriteString("cp ~/.gitconfig \"$TEMP_GITCONFIG\" 2>/dev/null || true\n")
-
-	switch params.ProviderName {
-	case providerAzureDevOps:
-		writeAzureDevOpsAuth(&sb)
-	case providerGitHub:
-		writeGitHubAuth(&sb)
-	case providerGitLab:
-		writeGitLabAuth(&sb)
-	}
-
-	sb.WriteString("export GIT_CONFIG_GLOBAL=\"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("trap 'rm -f \"$TEMP_GITCONFIG\"' EXIT\n\n")
-
-	// Ensure git user identity is configured for committing. Only set
-	// defaults when the values are missing so that any user-provided
-	// configuration (e.g. from ~/.gitconfig) is preserved.
-	sb.WriteString("# Ensure git user identity is configured\n")
-	sb.WriteString("if ! git config --global user.name > /dev/null 2>&1; then\n")
-	sb.WriteString("    git config --global user.name \"autoupdate[bot]\"\n")
-	sb.WriteString("fi\n")
-	sb.WriteString("if ! git config --global user.email > /dev/null 2>&1; then\n")
-	sb.WriteString("    git config --global user.email \"autoupdate[bot]@users.noreply.github.com\"\n")
-	sb.WriteString("fi\n\n")
-
-	// Clone
-	sb.WriteString("echo \"Cloning repository...\"\n")
-	sb.WriteString("git clone --depth=1 --branch \"$DEFAULT_BRANCH\" \"$CLONE_URL\" \"$REPO_DIR\" 2>&1\n")
-	sb.WriteString("cd \"$REPO_DIR\"\n\n")
-
-	// Create branch
-	sb.WriteString("git checkout -b \"$BRANCH_NAME\" 2>&1\n\n")
+	// Set up git credentials based on provider, then clone onto the branch.
+	sb.WriteString(support.GitAuthScript(params.ProviderName))
+	sb.WriteString(support.RemoteCloneScript())
 
 	// Source config.sh if present
 	if params.HasConfigSH {
@@ -678,23 +558,6 @@ func buildUpgradeScript(
 	writeCommitAndPush(&sb)
 
 	return sb.String()
-}
-
-func writeAzureDevOpsAuth(sb *strings.Builder) {
-	sb.WriteString("echo '[url \"https://pat:'\"${AUTH_TOKEN}\"'@dev.azure.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("echo '    insteadOf = https://dev.azure.com/' >> \"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("echo '[url \"https://pat:'\"${AUTH_TOKEN}\"'@dev.azure.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("echo '    insteadOf = git@ssh.dev.azure.com:v3/' >> \"$TEMP_GITCONFIG\"\n")
-}
-
-func writeGitHubAuth(sb *strings.Builder) {
-	sb.WriteString("echo '[url \"https://x-access-token:'\"${AUTH_TOKEN}\"'@github.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("echo '    insteadOf = https://github.com/' >> \"$TEMP_GITCONFIG\"\n")
-}
-
-func writeGitLabAuth(sb *strings.Builder) {
-	sb.WriteString("echo '[url \"https://oauth2:'\"${AUTH_TOKEN}\"'@gitlab.com/\"]' >> \"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("echo '    insteadOf = https://gitlab.com/' >> \"$TEMP_GITCONFIG\"\n")
 }
 
 // writeGoUpgradeCommands emits the Go upgrade commands for every module in
@@ -877,42 +740,19 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 }
 
 func writeCommitAndPush(sb *strings.Builder) {
-	sb.WriteString("if [ -n \"$(git status --porcelain)\" ]; then\n")
-	sb.WriteString("    echo \"Changes detected, committing and pushing...\"\n")
-	sb.WriteString("    git add -A\n")
-	sb.WriteString("    if [ \"$GO_VERSION_CHANGED\" = \"true\" ]; then\n")
-	// The backticks must be escaped: unescaped, bash treats them as command
-	// substitution and the version silently vanishes from the commit subject.
-	sb.WriteString(
-		"        git commit -m \"chore(deps): upgraded Go version to \\`$GO_VERSION\\` " +
-			"and updated all dependencies\"\n",
-	)
-	sb.WriteString("    else\n")
-	sb.WriteString("        git commit -m \"chore(deps): update Go module dependencies\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("    git push origin \"$BRANCH_NAME\" 2>&1\n")
-	sb.WriteString("    echo \"CHANGES_PUSHED=true\"\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"No changes detected.\"\n")
-	sb.WriteString("    echo \"CHANGES_PUSHED=false\"\n")
-	sb.WriteString("fi\n")
+	sb.WriteString(support.CommitAndPushScript(support.CommitAndPush{
+		UpgradedWhen: `[ "$GO_VERSION_CHANGED" = "true" ]`,
+		UpgradeMessage: "chore(deps): upgraded Go version to `$GO_VERSION` " +
+			"and updated all dependencies",
+		DepsMessage: "chore(deps): update Go module dependencies",
+	}))
 }
 
 func buildEnv(params upgradeParams, repoDir, goBinary string) []string {
-	env := append(os.Environ(),
-		"AUTH_TOKEN="+params.AuthToken,
-		// Export the token under common aliases so that repository-specific
-		// scripts (e.g. config.sh) can reference it by their expected name.
-		"GIT_HTTPS_TOKEN="+params.AuthToken,
-		"CLONE_URL="+params.CloneURL,
-		"BRANCH_NAME="+params.BranchName,
+	return append(support.CloneEnv(params.CloneTarget, repoDir),
 		"GO_VERSION="+params.GoVersion,
-		"REPO_DIR="+repoDir,
 		"GO_BINARY="+goBinary,
-		"DEFAULT_BRANCH="+params.DefaultBranch,
 	)
-	env = append(env, params.Changelog.Env()...)
-	return env
 }
 
 func findGoBinary() (string, error) {

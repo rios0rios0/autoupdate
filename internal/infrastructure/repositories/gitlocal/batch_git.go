@@ -4,22 +4,19 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
-	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	"github.com/rios0rios0/autoupdate/internal/support"
 	gitops "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
-	gitHelpers "github.com/rios0rios0/gitforge/pkg/git/infrastructure/helpers"
-	signingInfra "github.com/rios0rios0/gitforge/pkg/signing/infrastructure"
 )
 
 // BatchGitContext wraps a cloned go-git repository for batch mode operations.
@@ -193,61 +190,18 @@ func (c *BatchGitContext) CommitSignedAndPush(
 
 	logger.Info("Changes detected, committing and pushing...")
 
-	if err = gitops.StageAll(c.workTree); err != nil {
-		return false, fmt.Errorf("failed to stage changes: %w", err)
-	}
-
-	userConfig, err := gitops.ReadUserConfig(c.repo)
+	err = commitAllSigned(c.repo, c.workTree, commitMessage, signedCommit{
+		DefaultName:   "autoupdate[bot]",
+		DefaultEmail:  "autoupdate[bot]@users.noreply.github.com",
+		GPGKeyPath:    settings.GpgKeyPath,
+		GPGPassphrase: settings.GpgKeyPassphrase,
+	})
 	if err != nil {
-		logger.Warnf("Could not read git user config, using defaults: %v", err)
-		userConfig = &gitops.UserConfig{}
+		return false, err
 	}
 
-	name := userConfig.Name
-	email := userConfig.Email
-	if name == "" {
-		name = "autoupdate[bot]"
-	}
-	if email == "" {
-		email = "autoupdate[bot]@users.noreply.github.com"
-	}
-
-	localCfg, err := c.repo.Config()
-	if err != nil {
-		return false, fmt.Errorf("failed to read repo config: %w", err)
-	}
-
-	globalCfg, err := gitHelpers.GetGlobalGitConfig()
-	if err != nil {
-		logger.Warnf("Could not read global git config, using local only: %v", err)
-		globalCfg = gitconfig.NewConfig()
-	}
-
-	gpgSign := gitHelpers.GetOptionFromConfig(localCfg, globalCfg, "commit", "gpgsign")
-	signer, err := signingInfra.ResolveSignerFromGitConfig(
-		gpgSign,
-		userConfig.SigningFormat,
-		userConfig.SigningKey,
-		settings.GpgKeyPath,
-		settings.GpgKeyPassphrase,
-		"autoupdate",
-		userConfig.SSHProgram,
-	)
-	if err != nil {
-		return false, fmt.Errorf("failed to resolve commit signer: %w", err)
-	}
-
-	_, err = gitops.CommitChanges(c.repo, c.workTree, commitMessage, signer, name, email)
-	if err != nil {
-		return false, fmt.Errorf("failed to commit changes: %w", err)
-	}
-
-	refSpec := gitconfig.RefSpec(
-		fmt.Sprintf("refs/heads/%s:refs/heads/%s", branchName, branchName),
-	)
-
-	if err = gitops.PushWithTransportDetection(c.repo, refSpec, authMethods); err != nil {
-		return false, fmt.Errorf("failed to push branch %s: %w", branchName, err)
+	if err = pushBranch(c.repo, branchName, authMethods); err != nil {
+		return false, err
 	}
 
 	return true, nil
@@ -259,10 +213,9 @@ func (c *BatchGitContext) CommitSignedAndPush(
 // worktree was already clean. The caller must only call PopStash when
 // this method returned true.
 func (c *BatchGitContext) StashChanges() (bool, error) {
-	cmd := exec.CommandContext(
-		context.TODO(), "git", "stash", "push", "--include-untracked", "-m", "autoupdate-batch-stash",
+	cmd := support.GitCommand(
+		context.TODO(), c.tmpDir, "stash", "push", "--include-untracked", "-m", "autoupdate-batch-stash",
 	)
-	cmd.Dir = c.tmpDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("failed to stash changes: %w\nOutput: %s", err, string(output))
@@ -274,8 +227,7 @@ func (c *BatchGitContext) StashChanges() (bool, error) {
 	}
 
 	// Record the stash ref so PopStash can verify it pops the right entry.
-	refCmd := exec.CommandContext(context.TODO(), "git", "rev-parse", "stash@{0}")
-	refCmd.Dir = c.tmpDir
+	refCmd := support.GitCommand(context.TODO(), c.tmpDir, "rev-parse", "stash@{0}")
 	refOut, refErr := refCmd.CombinedOutput()
 	if refErr != nil {
 		return false, fmt.Errorf("failed to read stash ref: %w\nOutput: %s", refErr, string(refOut))
@@ -290,8 +242,7 @@ func (c *BatchGitContext) StashChanges() (bool, error) {
 // restoring an unrelated stash entry.
 func (c *BatchGitContext) PopStash() error {
 	if c.stashRef != "" {
-		refCmd := exec.CommandContext(context.TODO(), "git", "rev-parse", "stash@{0}")
-		refCmd.Dir = c.tmpDir
+		refCmd := support.GitCommand(context.TODO(), c.tmpDir, "rev-parse", "stash@{0}")
 		refOut, refErr := refCmd.CombinedOutput()
 		if refErr != nil {
 			return fmt.Errorf("failed to verify stash ref: %w\nOutput: %s", refErr, string(refOut))
@@ -305,8 +256,7 @@ func (c *BatchGitContext) PopStash() error {
 		}
 	}
 
-	cmd := exec.CommandContext(context.TODO(), "git", "stash", "pop")
-	cmd.Dir = c.tmpDir
+	cmd := support.GitCommand(context.TODO(), c.tmpDir, "stash", "pop")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to pop stash: %w\nOutput: %s", err, string(output))
@@ -321,9 +271,7 @@ func (c *BatchGitContext) DropStash() {
 	if c.stashRef == "" {
 		return
 	}
-	cmd := exec.CommandContext(context.TODO(), "git", "stash", "drop")
-	cmd.Dir = c.tmpDir
-	_ = cmd.Run()
+	_ = support.GitCommand(context.TODO(), c.tmpDir, "stash", "drop").Run()
 	c.stashRef = ""
 }
 

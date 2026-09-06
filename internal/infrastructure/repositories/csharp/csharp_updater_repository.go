@@ -26,6 +26,10 @@ const (
 	dotnetVersionTimeout = 15 * time.Second
 	scriptFileMode       = 0o700
 
+	// dotnetVersionMarker is the variable the upgrade script spells its
+	// "the SDK pin moved" marker after.
+	dotnetVersionMarker = "DOTNET_VERSION"
+
 	// Branch name patterns for C# updates. One format is used when the
 	// .NET SDK version itself is being bumped; the other is used when
 	// only NuGet dependencies are being refreshed.
@@ -87,138 +91,73 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 ) ([]entities.PullRequest, error) {
 	logger.Infof("[csharp] Processing %s/%s", repo.Organization, repo.Name)
 
-	latestDotnetVersion, err := u.versionFetcher.FetchLatestVersion(ctx)
-	if err != nil {
-		logger.Warnf("[csharp] Failed to fetch latest .NET version: %v (continuing without version upgrade)", err)
-		latestDotnetVersion = ""
-	} else {
-		logger.Infof("[csharp] Latest stable .NET SDK version: %s", latestDotnetVersion)
-	}
+	latestDotnetVersion := support.LatestVersion(
+		support.VersionFeed{LogPrefix: updaterName, Runtime: ".NET", Release: "stable .NET SDK"},
+		func() (string, error) { return u.versionFetcher.FetchLatestVersion(ctx) },
+	)
 
 	vCtx := resolveVersionContext(ctx, provider, repo, latestDotnetVersion, opts.AllowMajorUpdates)
 
-	// Check if PR already exists
-	exists, prCheckErr := provider.PullRequestExists(ctx, repo, vCtx.BranchName)
-	if prCheckErr != nil {
-		logger.Warnf("[csharp] Failed to check existing PRs: %v", prCheckErr)
-	}
-	if exists {
-		logger.Infof(
-			"[csharp] PR already exists for branch %q, skipping",
-			vCtx.BranchName,
-		)
-		return []entities.PullRequest{}, nil
-	}
-
-	if opts.DryRun {
-		logDryRun(vCtx, repo)
-		return []entities.PullRequest{}, nil
-	}
-
-	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx)
-	if upgradeErr != nil {
-		return nil, upgradeErr
-	}
-
-	if !result.HasChanges {
-		logger.Infof("[csharp] %s/%s: already up to date", repo.Organization, repo.Name)
-		return []entities.PullRequest{}, nil
-	}
-
-	return openPullRequest(ctx, provider, repo, opts, vCtx, result)
+	return support.RunRemoteUpgradeRun(ctx, provider, repo, opts, support.RemoteUpgradeRun{
+		LogPrefix:  updaterName,
+		BranchName: vCtx.BranchName,
+		DryRun:     func() { logDryRun(vCtx, repo) },
+		Changelog:  changelogEntries(vCtx),
+		Upgrade: func(ctx context.Context, target support.CloneTarget) (support.UpgradeOutcome, error) {
+			return cloneAndUpgrade(ctx, vCtx, target)
+		},
+	})
 }
 
 // logDryRun logs what would happen without actually performing the upgrade.
 func logDryRun(vCtx *versionContext, repo entities.Repository) {
-	if vCtx.NeedsVersionUpgrade {
-		logger.Infof(
-			"[csharp] [DRY RUN] Would upgrade .NET SDK to %s and update deps for %s/%s",
-			vCtx.LatestVersion, repo.Organization, repo.Name,
-		)
-	} else {
-		logger.Infof(
-			"[csharp] [DRY RUN] Would update NuGet dependencies for %s/%s",
-			repo.Organization, repo.Name,
-		)
-	}
+	support.LogRemoteDryRun(updaterName, repo, support.DryRunPlan{
+		Runtime:         ".NET SDK",
+		Version:         vCtx.LatestVersion,
+		UpgradesVersion: vCtx.NeedsVersionUpgrade,
+		Dependencies:    "NuGet dependencies",
+	})
 }
 
-// cloneAndUpgrade prepares the changelog, clones the repository, runs the
-// upgrade script, and returns the result.
+// cloneAndUpgrade clones the repository into target, runs the upgrade script,
+// and describes the pull request the upgrade earned.
 func cloneAndUpgrade(
 	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
 	vCtx *versionContext,
-) (*upgradeResult, error) {
-	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
-	defer changelog.Remove()
-
-	cloneURL := provider.CloneURL(repo)
-	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
-
+	target support.CloneTarget,
+) (support.UpgradeOutcome, error) {
 	dotnetBinary, err := findDotnetBinary()
 	if err != nil {
-		return nil, fmt.Errorf("dotnet binary not found: %w", err)
+		return support.UpgradeOutcome{}, fmt.Errorf("dotnet binary not found: %w", err)
 	}
 
 	result, err := upgradeRepo(ctx, upgradeParams{
-		CloneURL:      cloneURL,
-		DefaultBranch: defaultBranch,
-		BranchName:    vCtx.BranchName,
+		CloneTarget:   target,
 		DotnetVersion: dotnetVersionFor(vCtx),
-		AuthToken:     provider.AuthToken(),
-		ProviderName:  provider.Name(),
-		Changelog:     changelog,
 		DotnetBinary:  dotnetBinary,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to upgrade: %w", err)
+		return support.UpgradeOutcome{}, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	return result, nil
+	return support.UpgradeOutcome{
+		Pushed:      result.HasChanges,
+		Title:       upgradeSubject(vCtx.LatestVersion, result.DotnetVersionUpdated),
+		Description: GeneratePRDescription(vCtx.LatestVersion, result.DotnetVersionUpdated),
+	}, nil
 }
 
-// openPullRequest creates the PR on the hosting provider after a successful
-// upgrade.
-func openPullRequest(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	opts entities.UpdateOptions,
-	vCtx *versionContext,
-	result *upgradeResult,
-) ([]entities.PullRequest, error) {
-	targetBranch := repo.DefaultBranch
-	if opts.TargetBranch != "" {
-		targetBranch = "refs/heads/" + opts.TargetBranch
-	}
-
-	prTitle := dotnetCommitMsgDeps
-	if result.DotnetVersionUpdated {
-		prTitle = fmt.Sprintf(
+// upgradeSubject is the one-line summary of what the run changed, used as both
+// the commit subject and the pull request title.
+func upgradeSubject(dotnetVersion string, dotnetVersionUpdated bool) string {
+	if dotnetVersionUpdated {
+		return fmt.Sprintf(
 			"chore(deps): upgraded .NET SDK to `%s` and updated all NuGet dependencies",
-			vCtx.LatestVersion,
+			dotnetVersion,
 		)
 	}
-	prDesc := GeneratePRDescription(vCtx.LatestVersion, result.DotnetVersionUpdated)
 
-	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
-		SourceBranch: "refs/heads/" + vCtx.BranchName,
-		TargetBranch: targetBranch,
-		Title:        prTitle,
-		Description:  prDesc,
-		AutoComplete: opts.AutoComplete,
-	})
-	if createErr != nil {
-		return nil, fmt.Errorf("failed to create PR: %w", createErr)
-	}
-
-	logger.Infof(
-		"[csharp] Created PR #%d for %s/%s: %s",
-		pr.ID, repo.Organization, repo.Name, pr.URL,
-	)
-	return []entities.PullRequest{*pr}, nil
+	return dotnetCommitMsgDeps
 }
 
 // ApplyUpdates implements repositories.LocalUpdater. It runs language-specific
@@ -241,33 +180,24 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, fmt.Errorf("dotnet binary not found: %w", binErr)
 	}
 
-	script := buildBatchDotnetScript()
-	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
-	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return nil, fmt.Errorf("failed to write script: %w", writeErr)
-	}
-	defer func() { _ = os.Remove(scriptPath) }()
-
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = repoDir
 	env := append(os.Environ(), "DOTNET_BINARY="+dotnetBinary)
 	if pinVersion := dotnetVersionFor(vCtx); pinVersion != "" {
 		env = append(env, "DOTNET_VERSION="+pinVersion)
 	}
-	cmd.Env = env
 
-	output, cmdErr := cmd.CombinedOutput()
-	outputStr := string(output)
-	logger.Debugf("[csharp] Upgrade script output:\n%s", outputStr)
-
-	if cmdErr != nil {
-		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, outputStr)
+	outputStr, runErr := cmdrunner.RunScript(ctx, u.cmdRunner, cmdrunner.ScriptRun{
+		Body:        buildBatchDotnetScript(),
+		TempPattern: "autoupdate-csharp-local-*",
+		Dir:         repoDir,
+		Env:         env,
+		LogPrefix:   updaterName,
+		Verbose:     true,
+	})
+	if runErr != nil {
+		return nil, runErr
 	}
 
-	// Remove the script before checking worktree state so it does not
-	// appear as an untracked file in the git status check below.
-	_ = os.Remove(scriptPath)
-	dotnetVersionUpdated := strings.Contains(outputStr, "DOTNET_VERSION_UPDATED=true")
+	dotnetVersionUpdated := strings.Contains(outputStr, dotnetVersionMarker+"_UPDATED=true")
 
 	// Return early if the upgrade script made no filesystem changes
 	if !support.HasUncommittedChanges(ctx, repoDir) {
@@ -287,20 +217,12 @@ func (u *UpdaterRepository) ApplyUpdates(
 	}
 	support.LocalChangelogUpdate(repoDir, []string{entry})
 
-	commitMsg := dotnetCommitMsgDeps
-	prTitle := commitMsg
-	if dotnetVersionUpdated {
-		commitMsg = fmt.Sprintf(
-			"chore(deps): upgraded .NET SDK to `%s` and updated all NuGet dependencies",
-			vCtx.LatestVersion,
-		)
-		prTitle = commitMsg
-	}
+	commitMsg := upgradeSubject(vCtx.LatestVersion, dotnetVersionUpdated)
 
 	return &repositories.LocalUpdateResult{
 		BranchName:    vCtx.BranchName,
 		CommitMessage: commitMsg,
-		PRTitle:       prTitle,
+		PRTitle:       commitMsg,
 		PRDescription: GeneratePRDescription(vCtx.LatestVersion, dotnetVersionUpdated),
 	}, nil
 }
@@ -328,16 +250,12 @@ type versionContext struct {
 }
 
 type upgradeParams struct {
-	CloneURL      string
-	DefaultBranch string
-	BranchName    string
+	// CloneTarget identifies the repository the script clones and how it
+	// authenticates against it, and carries the staged changelog.
+	support.CloneTarget
+
 	DotnetVersion string
-	AuthToken     string
-	ProviderName  string
-	// Changelog is the staged changelog payload the script copies into
-	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog    support.StagedChangelog
-	DotnetBinary string
+	DotnetBinary  string
 }
 
 type upgradeResult struct {
@@ -461,41 +379,22 @@ func upgradeRepo(
 	ctx context.Context,
 	params upgradeParams,
 ) (*upgradeResult, error) {
-	result := &upgradeResult{}
-
-	tmpDir, err := os.MkdirTemp("", "autoupdate-csharp-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	repoDir := filepath.Join(tmpDir, "repo")
-
-	script := buildUpgradeScript(params, repoDir)
-	scriptPath := filepath.Join(tmpDir, "upgrade.sh")
-
-	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return nil, fmt.Errorf("failed to write script: %w", writeErr)
-	}
-
-	runResult, runErr := defaultRunner.Run(ctx, "bash", []string{scriptPath}, cmdrunner.RunOptions{
-		Dir: tmpDir,
-		Env: buildEnv(params, repoDir),
+	run, err := cmdrunner.RunUpgradeScript(ctx, defaultRunner, cmdrunner.UpgradeScriptRun{
+		VersionMarker: dotnetVersionMarker,
+		Body:          buildUpgradeScript(params, ""),
+		TempPattern:   "autoupdate-csharp-*",
+		Env:           func(repoDir string) []string { return buildEnv(params, repoDir) },
+		Secrets:       []string{params.AuthToken},
 	})
-	if runResult != nil {
-		result.Output = runResult.Output
+	if err != nil {
+		return nil, err
 	}
 
-	if runErr != nil {
-		redactedOutput := support.RedactTokens(result.Output, params.AuthToken)
-		return result, fmt.Errorf(
-			"upgrade script failed: %w\nOutput:\n%s", runErr, redactedOutput,
-		)
-	}
-
-	result.HasChanges = strings.Contains(result.Output, "CHANGES_PUSHED=true")
-	result.DotnetVersionUpdated = strings.Contains(result.Output, "DOTNET_VERSION_UPDATED=true")
-	return result, nil
+	return &upgradeResult{
+		HasChanges:           run.HasChanges,
+		DotnetVersionUpdated: run.VersionUpdated,
+		Output:               run.Output,
+	}, nil
 }
 
 func buildUpgradeScript(
@@ -509,25 +408,9 @@ func buildUpgradeScript(
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 
-	// Set up git credentials based on provider
+	// Set up git credentials based on provider, then clone onto the branch.
 	writeGitAuth(&sb, params)
-
-	// Ensure git user identity is configured
-	sb.WriteString("# Ensure git user identity is configured\n")
-	sb.WriteString("if ! git config --global user.name > /dev/null 2>&1; then\n")
-	sb.WriteString("    git config --global user.name \"autoupdate[bot]\"\n")
-	sb.WriteString("fi\n")
-	sb.WriteString("if ! git config --global user.email > /dev/null 2>&1; then\n")
-	sb.WriteString("    git config --global user.email \"autoupdate[bot]@users.noreply.github.com\"\n")
-	sb.WriteString("fi\n\n")
-
-	// Clone
-	sb.WriteString("echo \"Cloning repository...\"\n")
-	sb.WriteString("git clone --depth=1 --branch \"$DEFAULT_BRANCH\" \"$CLONE_URL\" \"$REPO_DIR\" 2>&1\n")
-	sb.WriteString("cd \"$REPO_DIR\"\n\n")
-
-	// Create branch
-	sb.WriteString("git checkout -b \"$BRANCH_NAME\" 2>&1\n\n")
+	sb.WriteString(support.RemoteCloneScript())
 
 	// .NET upgrade commands
 	writeDotnetUpgradeCommands(&sb)
@@ -644,38 +527,22 @@ func writeDockerfileUpdate(sb *strings.Builder) {
 }
 
 func writeCommitAndPush(sb *strings.Builder) {
-	sb.WriteString("if [ -n \"$(git status --porcelain)\" ]; then\n")
-	sb.WriteString("    echo \"Changes detected, committing and pushing...\"\n")
-	sb.WriteString("    git add -A\n")
-	sb.WriteString("    if [ \"$DOTNET_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString(
-		"        git commit -m \"chore(deps): upgraded .NET SDK to `$DOTNET_VERSION` and updated all NuGet dependencies\"\n",
-	)
-	sb.WriteString("    else\n")
-	sb.WriteString("        git commit -m \"chore(deps): updated NuGet dependencies\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("    git push origin \"$BRANCH_NAME\" 2>&1\n")
-	sb.WriteString("    echo \"CHANGES_PUSHED=true\"\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"No changes detected.\"\n")
-	sb.WriteString("    echo \"CHANGES_PUSHED=false\"\n")
-	sb.WriteString("fi\n")
+	sb.WriteString(support.CommitAndPushScript(support.CommitAndPush{
+		UpgradedWhen: `[ "$DOTNET_VERSION_CHANGED" = "true" ]`,
+		UpgradeMessage: "chore(deps): upgraded .NET SDK to `$DOTNET_VERSION` " +
+			"and updated all NuGet dependencies",
+		DepsMessage: dotnetCommitMsgDeps,
+	}))
 }
 
 func buildEnv(params upgradeParams, repoDir string) []string {
-	env := append(os.Environ(),
-		"AUTH_TOKEN="+params.AuthToken,
-		"GIT_HTTPS_TOKEN="+params.AuthToken,
-		"CLONE_URL="+params.CloneURL,
-		"BRANCH_NAME="+params.BranchName,
-		"REPO_DIR="+repoDir,
-		"DEFAULT_BRANCH="+params.DefaultBranch,
+	env := append(support.CloneEnv(params.CloneTarget, repoDir),
 		"DOTNET_BINARY="+params.DotnetBinary,
 	)
 	if params.DotnetVersion != "" {
 		env = append(env, "DOTNET_VERSION="+params.DotnetVersion)
 	}
-	env = append(env, params.Changelog.Env()...)
+
 	return env
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -50,9 +49,7 @@ func hasOnlyLockfileVersionChanges(ctx context.Context, repoDir string) bool {
 // gitChangedFiles returns the list of modified (unstaged) file paths
 // relative to the repository root.
 func gitChangedFiles(ctx context.Context, repoDir string) []string {
-	cmd := exec.CommandContext(ctx, "git", "diff", "--name-only")
-	cmd.Dir = repoDir
-	output, err := cmd.Output()
+	output, err := support.GitCommand(ctx, repoDir, "diff", "--name-only").Output()
 	if err != nil {
 		return nil
 	}
@@ -142,10 +139,7 @@ func clearPackagesRootVersion(m map[string]json.RawMessage) {
 
 // gitShowHEAD returns the content of a file at HEAD.
 func gitShowHEAD(ctx context.Context, repoDir, filePath string) ([]byte, error) {
-	//nolint:gosec // filePath is always a hardcoded constant from internal callers
-	cmd := exec.CommandContext(ctx, "git", "show", "HEAD:"+filePath)
-	cmd.Dir = repoDir
-	return cmd.Output()
+	return support.GitCommand(ctx, repoDir, "show", "HEAD:"+filePath).Output()
 }
 
 // revertWorkingTreeChanges discards all unstaged changes in the working tree,
@@ -161,9 +155,7 @@ func revertWorkingTreeChanges(
 ) {
 	changelog.Discard(repoDir)
 
-	cmd := exec.CommandContext(ctx, "git", "checkout", "--", ".")
-	cmd.Dir = repoDir
-	if err := cmd.Run(); err != nil {
+	if err := support.GitCommand(ctx, repoDir, "checkout", "--", ".").Run(); err != nil {
 		logger.Warnf("[javascript] Failed to revert working tree changes: %v", err)
 	}
 }

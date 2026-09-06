@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,9 +18,16 @@ import (
 )
 
 const (
-	updaterName        = "javascript"
+	updaterName = "javascript"
+	// runtimeName is how the runtime is spelled in log lines, commit subjects
+	// and pull request text.
+	runtimeName        = "Node.js"
 	nodeVersionTimeout = 15 * time.Second
 	scriptFileMode     = 0o700
+
+	// nodeVersionMarker is the variable the upgrade script spells its
+	// "the version pin moved" marker after.
+	nodeVersionMarker = "NODE_VERSION"
 
 	// Package manager identifiers.
 	pkgMgrPnpm = "pnpm"
@@ -37,6 +42,9 @@ const (
 	jsCommitMsgDeps      = "chore(deps): updated JavaScript dependencies"
 	jsChangelogEntryDeps = "- changed the JavaScript dependencies to their latest versions"
 )
+
+// defaultRunner is the package-level command runner for remote-mode functions.
+var defaultRunner cmdrunner.Runner = cmdrunner.NewDefaultRunner() //nolint:gochecknoglobals // test override
 
 // UpdaterRepository implements repositories.UpdaterRepository for JavaScript/Node.js dependencies.
 // It clones the repository locally, runs the appropriate package manager
@@ -86,142 +94,73 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 ) ([]entities.PullRequest, error) {
 	logger.Infof("[javascript] Processing %s/%s", repo.Organization, repo.Name)
 
-	latestNodeVersion, err := u.versionFetcher.FetchLatestVersion(ctx)
-	if err != nil {
-		logger.Warnf(
-			"[javascript] Failed to fetch latest Node.js version: %v (continuing without version upgrade)",
-			err,
-		)
-		latestNodeVersion = ""
-	} else {
-		logger.Infof("[javascript] Latest Node.js LTS version: %s", latestNodeVersion)
-	}
+	latestNodeVersion := support.LatestVersion(
+		support.VersionFeed{LogPrefix: updaterName, Runtime: runtimeName, Release: "Node.js LTS"},
+		func() (string, error) { return u.versionFetcher.FetchLatestVersion(ctx) },
+	)
 
 	vCtx := resolveVersionContext(ctx, provider, repo, latestNodeVersion)
 
-	// Check if PR already exists
-	exists, prCheckErr := provider.PullRequestExists(ctx, repo, vCtx.BranchName)
-	if prCheckErr != nil {
-		logger.Warnf("[javascript] Failed to check existing PRs: %v", prCheckErr)
-	}
-	if exists {
-		logger.Infof(
-			"[javascript] PR already exists for branch %q, skipping",
-			vCtx.BranchName,
-		)
-		return []entities.PullRequest{}, nil
-	}
-
-	if opts.DryRun {
-		logDryRun(vCtx, repo)
-		return []entities.PullRequest{}, nil
-	}
-
-	pkgMgr := detectPackageManager(ctx, provider, repo)
-	result, upgradeErr := cloneAndUpgrade(ctx, provider, repo, vCtx, pkgMgr, opts.AllowMajorUpdates)
-	if upgradeErr != nil {
-		return nil, upgradeErr
-	}
-
-	if !result.HasChanges {
-		logger.Infof("[javascript] %s/%s: already up to date", repo.Organization, repo.Name)
-		return []entities.PullRequest{}, nil
-	}
-
-	return openPullRequest(ctx, provider, repo, opts, vCtx, result, pkgMgr)
+	return support.RunRemoteUpgradeRun(ctx, provider, repo, opts, support.RemoteUpgradeRun{
+		LogPrefix:  updaterName,
+		BranchName: vCtx.BranchName,
+		DryRun:     func() { logDryRun(vCtx, repo) },
+		Changelog:  changelogEntries(vCtx),
+		Upgrade: func(ctx context.Context, target support.CloneTarget) (support.UpgradeOutcome, error) {
+			pkgMgr := detectPackageManager(ctx, provider, repo)
+			return cloneAndUpgrade(ctx, vCtx, target, pkgMgr, opts.AllowMajorUpdates)
+		},
+	})
 }
 
 // logDryRun logs what would happen without actually performing the upgrade.
 func logDryRun(vCtx *versionContext, repo entities.Repository) {
-	if vCtx.NeedsVersionUpgrade {
-		logger.Infof(
-			"[javascript] [DRY RUN] Would upgrade Node.js to %s and update deps for %s/%s",
-			vCtx.LatestVersion, repo.Organization, repo.Name,
-		)
-	} else {
-		logger.Infof(
-			"[javascript] [DRY RUN] Would update JavaScript dependencies for %s/%s",
-			repo.Organization, repo.Name,
-		)
-	}
+	support.LogRemoteDryRun(updaterName, repo, support.DryRunPlan{
+		Runtime:         runtimeName,
+		Version:         vCtx.LatestVersion,
+		UpgradesVersion: vCtx.NeedsVersionUpgrade,
+		Dependencies:    "JavaScript dependencies",
+	})
 }
 
-// cloneAndUpgrade prepares the changelog, clones the repository, runs the
-// upgrade script, and returns the result.
+// cloneAndUpgrade clones the repository into target, runs the upgrade script,
+// and describes the pull request the upgrade earned.
 func cloneAndUpgrade(
 	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
 	vCtx *versionContext,
+	target support.CloneTarget,
 	pkgMgr string,
 	allowMajorUpdates bool,
-) (*upgradeResult, error) {
-	changelog := support.StageRemoteChangelog(ctx, provider, repo, changelogEntries(vCtx))
-	defer changelog.Remove()
-
-	cloneURL := provider.CloneURL(repo)
-	defaultBranch := strings.TrimPrefix(repo.DefaultBranch, "refs/heads/")
-
+) (support.UpgradeOutcome, error) {
 	result, err := upgradeRepo(ctx, upgradeParams{
-		CloneURL:       cloneURL,
-		DefaultBranch:  defaultBranch,
-		BranchName:     vCtx.BranchName,
+		CloneTarget:    target,
 		NodeVersion:    vCtx.LatestVersion,
-		AuthToken:      provider.AuthToken(),
-		ProviderName:   provider.Name(),
-		Changelog:      changelog,
 		PackageManager: pkgMgr,
 
 		AllowMajorUpdates: allowMajorUpdates,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to upgrade: %w", err)
+		return support.UpgradeOutcome{}, fmt.Errorf("failed to upgrade: %w", err)
 	}
 
-	return result, nil
+	return support.UpgradeOutcome{
+		Pushed:      result.HasChanges,
+		Title:       upgradeSubject(vCtx.LatestVersion, result.NodeVersionUpdated),
+		Description: GeneratePRDescription(vCtx.LatestVersion, pkgMgr, result.NodeVersionUpdated),
+	}, nil
 }
 
-// openPullRequest creates the PR on the hosting provider after a successful
-// upgrade.
-func openPullRequest(
-	ctx context.Context,
-	provider repositories.ProviderRepository,
-	repo entities.Repository,
-	opts entities.UpdateOptions,
-	vCtx *versionContext,
-	result *upgradeResult,
-	pkgMgr string,
-) ([]entities.PullRequest, error) {
-	targetBranch := repo.DefaultBranch
-	if opts.TargetBranch != "" {
-		targetBranch = "refs/heads/" + opts.TargetBranch
-	}
-
-	prTitle := jsCommitMsgDeps
-	if result.NodeVersionUpdated {
-		prTitle = fmt.Sprintf(
+// upgradeSubject is the one-line summary of what the run changed, used as both
+// the commit subject and the pull request title.
+func upgradeSubject(nodeVersion string, nodeVersionUpdated bool) string {
+	if nodeVersionUpdated {
+		return fmt.Sprintf(
 			"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
-			vCtx.LatestVersion,
+			nodeVersion,
 		)
 	}
-	prDesc := GeneratePRDescription(vCtx.LatestVersion, pkgMgr, result.NodeVersionUpdated)
 
-	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
-		SourceBranch: "refs/heads/" + vCtx.BranchName,
-		TargetBranch: targetBranch,
-		Title:        prTitle,
-		Description:  prDesc,
-		AutoComplete: opts.AutoComplete,
-	})
-	if createErr != nil {
-		return nil, fmt.Errorf("failed to create PR: %w", createErr)
-	}
-
-	logger.Infof(
-		"[javascript] Created PR #%d for %s/%s: %s",
-		pr.ID, repo.Organization, repo.Name, pr.URL,
-	)
-	return []entities.PullRequest{*pr}, nil
+	return jsCommitMsgDeps
 }
 
 // ApplyUpdates implements repositories.LocalUpdater. It runs language-specific
@@ -240,33 +179,24 @@ func (u *UpdaterRepository) ApplyUpdates(
 	vCtx := resolveLocalVersionContext(ctx, repoDir)
 	pkgMgr := detectLocalPackageManager(repoDir)
 
-	script := buildBatchJSScript(opts.AllowMajorUpdates)
-	scriptPath := filepath.Join(repoDir, ".autoupdate-upgrade.sh")
-	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return nil, fmt.Errorf("failed to write script: %w", writeErr)
-	}
-	defer func() { _ = os.Remove(scriptPath) }()
-
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = repoDir
 	env := append(os.Environ(), "PACKAGE_MANAGER="+pkgMgr)
 	if vCtx.LatestVersion != "" {
 		env = append(env, "NODE_VERSION="+vCtx.LatestVersion)
 	}
-	cmd.Env = env
 
-	output, cmdErr := cmd.CombinedOutput()
-	outputStr := string(output)
-	logger.Debugf("[javascript] Upgrade script output:\n%s", outputStr)
-
-	// Remove the script before checking worktree state so it does not
-	// appear as an untracked file in the git status check below.
-	_ = os.Remove(scriptPath)
-	if cmdErr != nil {
-		return nil, fmt.Errorf("upgrade script failed: %w\nOutput:\n%s", cmdErr, outputStr)
+	outputStr, runErr := cmdrunner.RunScript(ctx, u.cmdRunner, cmdrunner.ScriptRun{
+		Body:        buildBatchJSScript(opts.AllowMajorUpdates),
+		TempPattern: "autoupdate-js-local-*",
+		Dir:         repoDir,
+		Env:         env,
+		LogPrefix:   updaterName,
+		Verbose:     true,
+	})
+	if runErr != nil {
+		return nil, runErr
 	}
 
-	nodeVersionUpdated := strings.Contains(outputStr, "NODE_VERSION_UPDATED=true")
+	nodeVersionUpdated := strings.Contains(outputStr, nodeVersionMarker+"_UPDATED=true")
 
 	// Return early if the upgrade script made no filesystem changes
 	if !support.HasUncommittedChanges(ctx, repoDir) {
@@ -299,20 +229,12 @@ func (u *UpdaterRepository) ApplyUpdates(
 	}
 	support.LocalChangelogUpdate(repoDir, []string{entry})
 
-	commitMsg := jsCommitMsgDeps
-	prTitle := commitMsg
-	if nodeVersionUpdated {
-		commitMsg = fmt.Sprintf(
-			"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
-			vCtx.LatestVersion,
-		)
-		prTitle = commitMsg
-	}
+	commitMsg := upgradeSubject(vCtx.LatestVersion, nodeVersionUpdated)
 
 	return &repositories.LocalUpdateResult{
 		BranchName:    vCtx.BranchName,
 		CommitMessage: commitMsg,
-		PRTitle:       prTitle,
+		PRTitle:       commitMsg,
 		PRDescription: GeneratePRDescription(vCtx.LatestVersion, pkgMgr, nodeVersionUpdated),
 	}, nil
 }
@@ -342,15 +264,11 @@ type versionContext struct {
 }
 
 type upgradeParams struct {
-	CloneURL      string
-	DefaultBranch string
-	BranchName    string
-	NodeVersion   string
-	AuthToken     string
-	ProviderName  string
-	// Changelog is the staged changelog payload the script copies into
-	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog      support.StagedChangelog
+	// CloneTarget identifies the repository the script clones and how it
+	// authenticates against it, and carries the staged changelog.
+	support.CloneTarget
+
+	NodeVersion    string
 	PackageManager string // "npm", "yarn", or "pnpm"
 	// AllowMajorUpdates raises the ranges declared in package.json rather than
 	// re-resolving inside them. The zero value is the restrictive case; resolve
@@ -491,39 +409,22 @@ func upgradeRepo(
 	ctx context.Context,
 	params upgradeParams,
 ) (*upgradeResult, error) {
-	result := &upgradeResult{}
-
-	tmpDir, err := os.MkdirTemp("", "autoupdate-js-*")
+	run, err := cmdrunner.RunUpgradeScript(ctx, defaultRunner, cmdrunner.UpgradeScriptRun{
+		VersionMarker: nodeVersionMarker,
+		Body:          buildUpgradeScript(params, ""),
+		TempPattern:   "autoupdate-js-*",
+		Env:           func(repoDir string) []string { return buildEnv(params, repoDir) },
+		Secrets:       []string{params.AuthToken},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	repoDir := filepath.Join(tmpDir, "repo")
-
-	script := buildUpgradeScript(params, repoDir)
-	scriptPath := filepath.Join(tmpDir, "upgrade.sh")
-
-	if writeErr := os.WriteFile(scriptPath, []byte(script), scriptFileMode); writeErr != nil {
-		return nil, fmt.Errorf("failed to write script: %w", writeErr)
+		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", scriptPath)
-	cmd.Dir = tmpDir
-	cmd.Env = buildEnv(params, repoDir)
-
-	output, err := cmd.CombinedOutput()
-	result.Output = string(output)
-
-	if err != nil {
-		return result, fmt.Errorf(
-			"upgrade script failed: %w\nOutput:\n%s", err, result.Output,
-		)
-	}
-
-	result.HasChanges = strings.Contains(result.Output, "CHANGES_PUSHED=true")
-	result.NodeVersionUpdated = strings.Contains(result.Output, "NODE_VERSION_UPDATED=true")
-	return result, nil
+	return &upgradeResult{
+		HasChanges:         run.HasChanges,
+		NodeVersionUpdated: run.VersionUpdated,
+		Output:             run.Output,
+	}, nil
 }
 
 func buildUpgradeScript(
@@ -537,25 +438,9 @@ func buildUpgradeScript(
 	sb.WriteString("#!/bin/bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 
-	// Set up git credentials based on provider
+	// Set up git credentials based on provider, then clone onto the branch.
 	writeGitAuth(&sb, params)
-
-	// Ensure git user identity is configured
-	sb.WriteString("# Ensure git user identity is configured\n")
-	sb.WriteString("if ! git config --global user.name > /dev/null 2>&1; then\n")
-	sb.WriteString("    git config --global user.name \"autoupdate[bot]\"\n")
-	sb.WriteString("fi\n")
-	sb.WriteString("if ! git config --global user.email > /dev/null 2>&1; then\n")
-	sb.WriteString("    git config --global user.email \"autoupdate[bot]@users.noreply.github.com\"\n")
-	sb.WriteString("fi\n\n")
-
-	// Clone
-	sb.WriteString("echo \"Cloning repository...\"\n")
-	sb.WriteString("git clone --depth=1 --branch \"$DEFAULT_BRANCH\" \"$CLONE_URL\" \"$REPO_DIR\" 2>&1\n")
-	sb.WriteString("cd \"$REPO_DIR\"\n\n")
-
-	// Create branch
-	sb.WriteString("git checkout -b \"$BRANCH_NAME\" 2>&1\n\n")
+	sb.WriteString(support.RemoteCloneScript())
 
 	// JavaScript upgrade commands
 	writeJSUpgradeCommands(&sb, params)
@@ -702,85 +587,70 @@ func writeDockerfileUpdate(sb *strings.Builder) {
 	sb.WriteString(support.DockerfileTagUpdateScript(support.DockerfileTagUpdate{
 		ChangedVar: "NODE_VERSION_CHANGED",
 		VersionVar: "NODE_VERSION",
-		Subject:    "Node.js",
+		Subject:    runtimeName,
 		Images:     []support.DockerfileImage{{Name: "node"}},
 	}))
 }
 
 func writeCommitAndPush(sb *strings.Builder) {
-	sb.WriteString("if [ -n \"$(git status --porcelain)\" ]; then\n")
+	// The lockfile guard runs before anything is staged: `npm update` may sync
+	// the root "version" field in package-lock.json to match package.json even
+	// when no dependency version changed, and that alone is not worth a pull
+	// request.
+	var guard strings.Builder
+	writeLockfileOnlyCheck(&guard)
 
-	// Detect cosmetic-only lockfile changes (project version sync with zero
-	// actual dependency updates). When `npm update` runs, it may sync the
-	// root "version" field in package-lock.json to match package.json even
-	// when no dependency versions changed. We compare the diff lines that
-	// are NOT "version" fields; if none remain, skip the commit.
-	writeLockfileOnlyCheck(sb)
-
-	sb.WriteString("    echo \"Changes detected, committing and pushing...\"\n")
-	sb.WriteString("    git add -A\n")
-	sb.WriteString("    if [ \"$NODE_VERSION_CHANGED\" = \"true\" ]; then\n")
-	sb.WriteString(
-		"        git commit -m \"chore(deps): upgraded Node.js to `$NODE_VERSION` and updated all dependencies\"\n",
-	)
-	sb.WriteString("    else\n")
-	sb.WriteString("        git commit -m \"chore(deps): updated JavaScript dependencies\"\n")
-	sb.WriteString("    fi\n")
-	sb.WriteString("    git push origin \"$BRANCH_NAME\" 2>&1\n")
-	sb.WriteString("    echo \"CHANGES_PUSHED=true\"\n")
-	sb.WriteString("else\n")
-	sb.WriteString("    echo \"No changes detected.\"\n")
-	sb.WriteString("    echo \"CHANGES_PUSHED=false\"\n")
-	sb.WriteString("fi\n")
+	sb.WriteString(support.CommitAndPushScript(support.CommitAndPush{
+		Guard:        guard.String(),
+		UpgradedWhen: `[ "$NODE_VERSION_CHANGED" = "true" ]`,
+		UpgradeMessage: "chore(deps): upgraded Node.js to `$NODE_VERSION` " +
+			"and updated all dependencies",
+		DepsMessage: jsCommitMsgDeps,
+	}))
 }
 
 // writeLockfileOnlyCheck emits a bash guard that reverts and exits early
 // when the only change is a package-lock.json project-version sync.
+//
+// The comparison is delegated to Node rather than done with grep: it strips
+// only the root "version" and packages[""]["version"] and compares the rest,
+// where a grep-based filter would also drop the dependency "version" fields
+// this guard exists to notice. It mirrors isPackageLockOnlyVersionSync, which
+// makes the same decision in Go for the local flow.
+//
+// CHANGELOG.md is filtered out of the changed-file list because the changelog
+// copy runs before this guard, and its presence would otherwise hide a
+// lockfile-only change.
 func writeLockfileOnlyCheck(sb *strings.Builder) {
-	sb.WriteString("    # Skip cosmetic lockfile-only version sync\n")
-	sb.WriteString("    CHANGED_FILES=$(git diff --name-only)\n")
-	// Filter out CHANGELOG.md because writeChangelogUpdate may have copied it
-	// even when the only real change is a cosmetic lockfile version sync.
-	sb.WriteString("    SIGNIFICANT_FILES=$(echo \"$CHANGED_FILES\" | grep -v '^CHANGELOG.md$')\n")
-	sb.WriteString("    if [ \"$SIGNIFICANT_FILES\" = \"package-lock.json\" ]; then\n")
-	// Use Node.js for a precise JSON comparison matching the Go-based
-	// isPackageLockOnlyVersionSync: strip only root "version" and
-	// packages[""]["version"], then compare the rest. This avoids the
-	// imprecision of grep-based filtering which would also exclude
-	// dependency "version" fields.
-	sb.WriteString("        if node -e '")
-	sb.WriteString("const fs=require(\"fs\"),{execSync:e}=require(\"child_process\");")
-	sb.WriteString("try{")
-	sb.WriteString("const h=JSON.parse(e(\"git show HEAD:package-lock.json\",{encoding:\"utf8\"})),")
-	sb.WriteString("c=JSON.parse(fs.readFileSync(\"package-lock.json\",\"utf8\"));")
-	sb.WriteString("delete h.version;delete c.version;")
-	sb.WriteString("if(h.packages&&h.packages[\"\"])delete h.packages[\"\"].version;")
-	sb.WriteString("if(c.packages&&c.packages[\"\"])delete c.packages[\"\"].version;")
-	sb.WriteString("process.exit(JSON.stringify(h)===JSON.stringify(c)?0:1)")
-	sb.WriteString("}catch(x){process.exit(1)}")
-	sb.WriteString("' 2>/dev/null; then\n")
-	sb.WriteString("            echo \"Only cosmetic lockfile version changes detected, skipping.\"\n")
-	sb.WriteString("            git checkout -- .\n")
-	sb.WriteString("            echo \"CHANGES_PUSHED=false\"\n")
-	sb.WriteString("            exit 0\n")
-	sb.WriteString("        fi\n")
-	sb.WriteString("    fi\n\n")
+	sb.WriteString(`    # Skip cosmetic lockfile-only version sync
+    CHANGED_FILES=$(git diff --name-only)
+    SIGNIFICANT_FILES=$(echo "$CHANGED_FILES" | grep -v '^` + support.ChangelogFileName + `$')
+    if [ "$SIGNIFICANT_FILES" = "package-lock.json" ]; then
+        if node -e 'const fs=require("fs"),{execSync:e}=require("child_process");` +
+		`try{const h=JSON.parse(e("git show HEAD:package-lock.json",{encoding:"utf8"})),` +
+		`c=JSON.parse(fs.readFileSync("package-lock.json","utf8"));` +
+		`delete h.version;delete c.version;` +
+		`if(h.packages&&h.packages[""])delete h.packages[""].version;` +
+		`if(c.packages&&c.packages[""])delete c.packages[""].version;` +
+		`process.exit(JSON.stringify(h)===JSON.stringify(c)?0:1)}catch(x){process.exit(1)}' 2>/dev/null; then
+            echo "Only cosmetic lockfile version changes detected, skipping."
+            git checkout -- .
+            echo "CHANGES_PUSHED=false"
+            exit 0
+        fi
+    fi
+
+`)
 }
 
 func buildEnv(params upgradeParams, repoDir string) []string {
-	env := append(os.Environ(),
-		"AUTH_TOKEN="+params.AuthToken,
-		"GIT_HTTPS_TOKEN="+params.AuthToken,
-		"CLONE_URL="+params.CloneURL,
-		"BRANCH_NAME="+params.BranchName,
-		"REPO_DIR="+repoDir,
-		"DEFAULT_BRANCH="+params.DefaultBranch,
+	env := append(support.CloneEnv(params.CloneTarget, repoDir),
 		"PACKAGE_MANAGER="+params.PackageManager,
 	)
 	if params.NodeVersion != "" {
 		env = append(env, "NODE_VERSION="+params.NodeVersion)
 	}
-	env = append(env, params.Changelog.Env()...)
+
 	return env
 }
 

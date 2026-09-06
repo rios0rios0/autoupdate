@@ -318,21 +318,7 @@ func writeLocalAuth(sb *strings.Builder, params localUpgradeParams) {
 		return
 	}
 
-	sb.WriteString("# Set up git credentials for private module access\n")
-	sb.WriteString("TEMP_GITCONFIG=$(mktemp)\n")
-	sb.WriteString("cp ~/.gitconfig \"$TEMP_GITCONFIG\" 2>/dev/null || true\n")
-
-	switch params.ProviderName {
-	case providerAzureDevOps:
-		writeAzureDevOpsAuth(sb)
-	case providerGitHub:
-		writeGitHubAuth(sb)
-	case providerGitLab:
-		writeGitLabAuth(sb)
-	}
-
-	sb.WriteString("export GIT_CONFIG_GLOBAL=\"$TEMP_GITCONFIG\"\n")
-	sb.WriteString("trap 'rm -f \"$TEMP_GITCONFIG\"' EXIT\n\n")
+	sb.WriteString(support.GitAuthScript(params.ProviderName))
 }
 
 // buildLocalEnv returns the environment for the local upgrade script.
