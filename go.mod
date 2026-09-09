@@ -5,17 +5,17 @@ go 1.27.1
 require (
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/hashicorp/hcl/v2 v2.24.0
-	github.com/rios0rios0/cliforge v0.4.4
+	github.com/rios0rios0/cliforge v0.4.5
 	github.com/rios0rios0/gitforge v1.0.1-0.20260827000225-8c05a4730240
-	github.com/rios0rios0/langforge v1.1.5
-	github.com/rios0rios0/testkit v0.3.3
+	github.com/rios0rios0/langforge v1.1.6
+	github.com/rios0rios0/testkit v0.3.4
 	github.com/sirupsen/logrus v1.10.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	github.com/zclconf/go-cty v1.19.0
 	go.uber.org/dig v1.19.0
-	golang.org/x/mod v0.40.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/mod v0.41.0
+	golang.org/x/sync v0.23.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -49,13 +49,13 @@ require (
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	gitlab.com/gitlab-org/api/client-go v1.46.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/crypto v0.56.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
-	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.49.0 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/oauth2 v0.37.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/term v0.46.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/time v0.16.0 // indirect
+	golang.org/x/tools v0.50.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
