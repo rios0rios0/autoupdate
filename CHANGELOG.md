@@ -22,6 +22,12 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-09-10
+
+### Changed
+
+- changed the Go module dependencies to their latest versions
+
 ## [1.1.3] - 2026-09-09
 
 ### Changed
@@ -143,10 +149,7 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Added
 
-- added the `@sha256:` digest of a digest-pinned `Dockerfile` base image to what the Dockerfile updater
-  rewrites. The digest is taken from the same registry listing that already answers whether the new tag
-  exists, so re-pinning it costs no extra request. A tag the registry reports no digest for leaves the
-  clause untouched rather than half-rewritten
+- added the `@sha256:` digest of a digest-pinned `Dockerfile` base image to what the Dockerfile updater rewrites. The digest is taken from the same registry listing that already answers whether the new tag exists, so re-pinning it costs no extra request. A tag the registry reports no digest for leaves the clause untouched rather than half-rewritten
 
 ### Changed
 
@@ -154,63 +157,29 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Fixed
 
-- fixed the base image rewrites moving the tag of a digest-pinned `FROM` clause and leaving the digest
-  behind. The digest is what Docker resolves, so the pull request read as an upgrade while the build
-  kept pulling the previous image -- and nothing downstream caught it, because the version pin really
-  had moved. The Dockerfile updater now rewrites both halves together, and the rewrites that have no
-  registry to ask (the shared bash emitter used by the Go, Python, JavaScript, Java, C# and Ruby
-  updaters) skip a digest-pinned clause and report that they did
-- fixed changelog entries being restated on every run. AutoUpdate runs unattended and on a schedule, so
-  the entry it wrote yesterday is already merged by the time it looks again -- and it was appended
-  again, verbatim, until the next release moved the `[Unreleased]` section away. An entry the target
-  repository already records as pending is no longer written a second time, whether it records it as a
-  bullet under `[Unreleased]` or as a chlog fragment. An entry naming a different version is a second,
-  real upgrade and is still recorded
+- fixed changelog entries being restated on every run. AutoUpdate runs unattended and on a schedule, so the entry it wrote yesterday is already merged by the time it looks again -- and it was appended again, verbatim, until the next release moved the `[Unreleased]` section away. An entry the target repository already records as pending is no longer written a second time, whether it records it as a bullet under `[Unreleased]` or as a chlog fragment. An entry naming a different version is a second, real upgrade and is still recorded
+- fixed the base image rewrites moving the tag of a digest-pinned `FROM` clause and leaving the digest behind. The digest is what Docker resolves, so the pull request read as an upgrade while the build kept pulling the previous image -- and nothing downstream caught it, because the version pin really had moved. The Dockerfile updater now rewrites both halves together, and the rewrites that have no registry to ask (the shared bash emitter used by the Go, Python, JavaScript, Java, C# and Ruby updaters) skip a digest-pinned clause and report that they did
 
 ## [0.21.3] - 2026-08-24
 
 ### Changed
 
-- refreshed `.github/copilot-instructions.md` to document the version-pin-only-moves-forward and
-  repository-walking invariants, matching the guidance already in `CLAUDE.md`
-- changed the Go version to `1.27.0` and updated all module dependencies
-- changed the per-ecosystem version pin rewrites to share one emitter, `support.VersionPinUpdateScript`,
-  covering `.java-version`, `.python-version` and `.ruby-version`
-- changed the five per-ecosystem `Dockerfile` base-image rewrites to share one emitter,
-  `support.DockerfileTagUpdateScript`, so the walk and the version guard it depends on have a single
-  spelling -- five hand-copied versions of that loop is how the guard came to be missing from some
-  of them in the first place
+- changed the five per-ecosystem `Dockerfile` base-image rewrites to share one emitter, `support.DockerfileTagUpdateScript`, so the walk and the version guard it depends on have a single spelling -- five hand-copied versions of that loop is how the guard came to be missing from some of them in the first place
 - changed the Go module dependencies to their latest versions
+- changed the Go version to `1.27.0` and updated all module dependencies
+- changed the per-ecosystem version pin rewrites to share one emitter, `support.VersionPinUpdateScript`, covering `.java-version`, `.python-version` and `.ruby-version`
+- refreshed `.github/copilot-instructions.md` to document the version-pin-only-moves-forward and repository-walking invariants, matching the guidance already in `CLAUDE.md`
 
 ### Fixed
 
-- fixed the bash half of the version guard ordering pre-release identifiers as plain strings while the
-  Go half followed Semantic Versioning precedence. `rc.10` sorts below `rc.9` as text but above it as a
-  version, so for a pin like a .NET SDK preview the two halves disagreed: Go named the branch, the
-  commit and the pull request after an upgrade the script then declined to write. Both halves now
-  compare identifiers left to right, numerically where they are numeric, ranking a numeric identifier
-  below an alphanumeric one and a longer set above its own prefix
-- fixed the version pin rewrites downgrading a repository that tracks a release ahead of the one the
-  release feed reports. Every pin was compared with a plain "is it different?" check, so a `.nvmrc`
-  reading `26.7.0` was rewritten to the `24.19.0` LTS the Node.js feed returns -- inside a pull request
-  titled as an upgrade. A rewrite now requires the fetched release to be strictly newer, and the rule
-  lives in one place (`support.IsNewerVersion` and the bash guard it emits for the generated upgrade
-  scripts) rather than being restated per ecosystem. It covers `.nvmrc`, `.node-version`,
-  `.python-version`, `.ruby-version`, `.java-version`, `global.json`, `.fvmrc`, the `go` directive, the
-  base image tags in a `Dockerfile` and the language versions in a CI pipeline
-- fixed the Go directive being written back to the target version after `go mod tidy` raised it, which
-  turned a dependency's Go requirement into a downgrade on the next run
-- fixed the base image tags in a `Dockerfile` being rewritten whenever the language pin moved, even when
-  the image was already newer than the version being rolled out
-- fixed pins that name no version at all -- `lts/*` in a `.nvmrc`, `system` in a `.ruby-version`, a JRuby
-  or TruffleRuby release -- being replaced with a version number from an unrelated release channel
-- fixed `isDockerHubImage` splitting an image name with `strings.SplitN` where `strings.Cut` says the
-  same thing, which `golangci-lint` 2.13 reports as a `modernize` finding
-- fixed build metadata being read as a pre-release when two pins are compared. Semantic Versioning
-  excludes everything after a `+` from precedence, so `1.0.0+build.1` and `1.0.0` name the same release;
-  reading it as a pre-release instead rewrote one to the other as though a pre-release were being
-  promoted, and refused the genuine upgrade from `1.0.0-rc.1` to `1.0.0+build.1`
+- fixed `isDockerHubImage` splitting an image name with `strings.SplitN` where `strings.Cut` says the same thing, which `golangci-lint` 2.13 reports as a `modernize` finding
+- fixed build metadata being read as a pre-release when two pins are compared. Semantic Versioning excludes everything after a `+` from precedence, so `1.0.0+build.1` and `1.0.0` name the same release; reading it as a pre-release instead rewrote one to the other as though a pre-release were being promoted, and refused the genuine upgrade from `1.0.0-rc.1` to `1.0.0+build.1`
 - fixed GitHub Actions workflows never being upgraded on the clone-based path. `support.WalkFilesByExtension` and `support.WalkFilesByPredicate` refused to descend into any directory whose name began with a dot, which put `.github/workflows/` out of reach of the pipeline updater's local scan. Because the pipeline updater implements `LocalUpdater`, `autoupdate run` always takes that clone-based path, so a repository was matched by the detector, cloned, scanned to no effect and reported as up to date — only a root `azure-pipelines.yml` / `.azure-pipelines.yml` and `azure-devops/` were ever reachable on disk. Both action pins (`uses: owner/repo@v4`) and language versions (`go-version:`, `python-version:`) inside workflows were affected
+- fixed pins that name no version at all -- `lts/*` in a `.nvmrc`, `system` in a `.ruby-version`, a JRuby or TruffleRuby release -- being replaced with a version number from an unrelated release channel
+- fixed the base image tags in a `Dockerfile` being rewritten whenever the language pin moved, even when the image was already newer than the version being rolled out
+- fixed the bash half of the version guard ordering pre-release identifiers as plain strings while the Go half followed Semantic Versioning precedence. `rc.10` sorts below `rc.9` as text but above it as a version, so for a pin like a .NET SDK preview the two halves disagreed: Go named the branch, the commit and the pull request after an upgrade the script then declined to write. Both halves now compare identifiers left to right, numerically where they are numeric, ranking a numeric identifier below an alphanumeric one and a longer set above its own prefix
+- fixed the Go directive being written back to the target version after `go mod tidy` raised it, which turned a dependency's Go requirement into a downgrade on the next run
+- fixed the version pin rewrites downgrading a repository that tracks a release ahead of the one the release feed reports. Every pin was compared with a plain "is it different?" check, so a `.nvmrc` reading `26.7.0` was rewritten to the `24.19.0` LTS the Node.js feed returns -- inside a pull request titled as an upgrade. A rewrite now requires the fetched release to be strictly newer, and the rule lives in one place (`support.IsNewerVersion` and the bash guard it emits for the generated upgrade scripts) rather than being restated per ecosystem. It covers `.nvmrc`, `.node-version`, `.python-version`, `.ruby-version`, `.java-version`, `global.json`, `.fvmrc`, the `go` directive, the base image tags in a `Dockerfile` and the language versions in a CI pipeline
 - fixed the walkers conflating "hidden" with "not the repository's own source". The blanket dot-directory rule is replaced by an explicit deny list of trees a repository does not author — version-control metadata (`.git`, `.hg`, `.svn`), vendored code (`vendor`, `node_modules`) and tool caches (`.terraform`, `.terragrunt-cache`, `.venv`, `.gradle`, `.dart_tool`, `.next` and friends) — shared by both walkers through a single traversal so the rule cannot drift between them. A deny list was chosen over an allow list of hidden directories that matter because the bug being fixed *is* a missing entry in an implicit allow list: `.gitea/workflows/`, `.forgejo/workflows/` and `.woodpecker/` would each have been invisible in turn. As a consequence the Dockerfile updater now also sees committed hidden sources such as `.devcontainer/Dockerfile`, and no longer rewrites base images in `node_modules/` or `vendor/` copies that could never reach the pull request while still being counted in the changelog and PR body. Go module discovery is unchanged: `moduleDirsFromPaths` keeps dropping hidden and vendored segments so it stays in step with the `find` in the generated upgrade script
 
 ## [0.21.2] - 2026-08-17
@@ -272,43 +241,24 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Fixed
 
-- fixed the Python package-manager selection so a repository that installs from a `requirements.txt`
-  and has never committed a `pdm.lock` keeps pip, even when its `pyproject.toml` declares
-  `[tool.pdm]` — that table is also how a pip project states its package layout. Those repositories
-  were upgraded through PDM, which resolved a lock file from scratch (the whole of the resulting
-  pull request, since `pdm update` leaves the pyproject's own constraints alone) and never touched
-  the `requirements.txt` the build installs from. A committed `pdm.lock` still selects PDM
+- fixed the Python package-manager selection so a repository that installs from a `requirements.txt` and has never committed a `pdm.lock` keeps pip, even when its `pyproject.toml` declares `[tool.pdm]` — that table is also how a pip project states its package layout. Those repositories were upgraded through PDM, which resolved a lock file from scratch (the whole of the resulting pull request, since `pdm update` leaves the pyproject's own constraints alone) and never touched the `requirements.txt` the build installs from. A committed `pdm.lock` still selects PDM
 
 ## [0.20.3] - 2026-08-04
 
 ### Changed
 
-- refreshed `.github/copilot-instructions.md` to document the shared chlog/changelog writer and the
-  Python package-manager selection invariant, bringing it in line with `CLAUDE.md`
+- refreshed `.github/copilot-instructions.md` to document the shared chlog/changelog writer and the Python package-manager selection invariant, bringing it in line with `CLAUDE.md`
 
 ## [0.20.2] - 2026-07-31
 
 ### Changed
 
-- changed the Python PDM detection to stop re-fetching a `pyproject.toml` the repository does not
-  have. A provider's `HasFile` is itself a file fetch, so every `requirements.txt`-only repository —
-  the common pip layout — spent a second request per run to rediscover the same absence, for nothing
-  but the provider's rate limit
+- changed the Python PDM detection to stop re-fetching a `pyproject.toml` the repository does not have. A provider's `HasFile` is itself a file fetch, so every `requirements.txt`-only repository — the common pip layout — spent a second request per run to rediscover the same absence, for nothing but the provider's rate limit
 
 ### Fixed
 
-- fixed the Python updater being able to migrate a repository to a different package manager while
-  bumping its dependencies. A repository whose only manifest is a `requirements.txt` is managed by
-  pip, and PDM is now selected only when a `pyproject.toml` is actually present — that file is PDM's
-  project definition, so running `pdm update` without one makes PDM write a fresh `pyproject.toml`,
-  turning a pip project into a PDM project inside what was meant to be a dependency bump. A
-  `pdm.lock` with no `pyproject.toml` beside it no longer counts as a PDM project. The pip upgrade
-  additionally discards a `pyproject.toml` or `pdm.lock` that appeared while it ran, so no manifest
-  the repository did not already own can reach the pull request
-- fixed local mode reporting PDM in the pull request description and dry-run log for a repository it
-  had upgraded with pip. The dependency manager was resolved once for the commands to run and a
-  second time, under a weaker rule, for the report; both now read the same value, resolved once from
-  the manifests the repository carried before the upgrade started
+- fixed local mode reporting PDM in the pull request description and dry-run log for a repository it had upgraded with pip. The dependency manager was resolved once for the commands to run and a second time, under a weaker rule, for the report; both now read the same value, resolved once from the manifests the repository carried before the upgrade started
+- fixed the Python updater being able to migrate a repository to a different package manager while bumping its dependencies. A repository whose only manifest is a `requirements.txt` is managed by pip, and PDM is now selected only when a `pyproject.toml` is actually present — that file is PDM's project definition, so running `pdm update` without one makes PDM write a fresh `pyproject.toml`, turning a pip project into a PDM project inside what was meant to be a dependency bump. A `pdm.lock` with no `pyproject.toml` beside it no longer counts as a PDM project. The pip upgrade additionally discards a `pyproject.toml` or `pdm.lock` that appeared while it ran, so no manifest the repository did not already own can reach the pull request
 
 ## [0.20.1] - 2026-07-30
 
@@ -320,89 +270,43 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ### Added
 
-- added support for [chlog](https://github.com/luizjhonata/chlog), the fragment-based changelog
-  tool. A repository that commits a `.chlog.yaml` (or simply carries a `.changes/unreleased/`
-  directory) now gets one fragment file per update instead of an edit to the `[Unreleased]` section
-  of its `CHANGELOG.md`. chlog exists precisely to keep that file out of the merge path, so the
-  previous behaviour put automated pull requests back into conflict with every hand-written entry.
-  Detection is automatic, honours the `changesDir`, `unreleasedDir` and `kinds` declared by
-  `.chlog.yaml`, and covers every ecosystem in both local and batch mode. A repository that does not
-  use chlog is unaffected
+- added support for [chlog](https://github.com/luizjhonata/chlog), the fragment-based changelog tool. A repository that commits a `.chlog.yaml` (or simply carries a `.changes/unreleased/` directory) now gets one fragment file per update instead of an edit to the `[Unreleased]` section of its `CHANGELOG.md`. chlog exists precisely to keep that file out of the merge path, so the previous behaviour put automated pull requests back into conflict with every hand-written entry. Detection is automatic, honours the `changesDir`, `unreleasedDir` and `kinds` declared by `.chlog.yaml`, and covers every ecosystem in both local and batch mode. A repository that does not use chlog is unaffected
 
 ### Changed
 
-- changed the changelog handling of all nine ecosystems to run through one shared implementation
-  instead of a near-identical copy per ecosystem, so the two formats cannot drift apart. The bash
-  fragment the language updaters generate now takes its destination from the environment, which is
-  what lets the same script write either a `CHANGELOG.md` or a chlog fragment
+- changed the changelog handling of all nine ecosystems to run through one shared implementation instead of a near-identical copy per ecosystem, so the two formats cannot drift apart. The bash fragment the language updaters generate now takes its destination from the environment, which is what lets the same script write either a `CHANGELOG.md` or a chlog fragment
 
 ## [0.19.0] - 2026-07-28
 
 ### Added
 
-- added automatic PDM detection to the Python updater: a repository carrying a `pdm.lock`, a
-  `[tool.pdm]` table or the `pdm.backend` build backend is now upgraded with
-  `pdm update --update-all --no-sync` instead of raw pip. PDM resolves against its own lock file,
-  which pip cannot see, so a PDM project previously had its lock left untouched no matter how often
-  the updater ran. `--no-sync` keeps the run to a resolution, because the refreshed `pdm.lock` is the
-  only artefact worth committing
+- added automatic PDM detection to the Python updater: a repository carrying a `pdm.lock`, a `[tool.pdm]` table or the `pdm.backend` build backend is now upgraded with `pdm update --update-all --no-sync` instead of raw pip. PDM resolves against its own lock file, which pip cannot see, so a PDM project previously had its lock left untouched no matter how often the updater ran. `--no-sync` keeps the run to a resolution, because the refreshed `pdm.lock` is the only artefact worth committing
 
 ### Changed
 
-- changed the Python pull request description and changelog entry to name the dependency manager the
-  run actually used. The description previously advertised `pip install --upgrade -r
-  requirements.txt` and asked reviewers to review `requirements.txt` even for projects that have no
-  such file
+- changed the Python pull request description and changelog entry to name the dependency manager the run actually used. The description previously advertised `pip install --upgrade -r requirements.txt` and asked reviewers to review `requirements.txt` even for projects that have no such file
 
 ### Fixed
 
-- fixed the Python updater committing the `*.egg-info/` directory as though it were a dependency
-  change. Installing a `pyproject.toml` project locally makes setuptools generate that directory;
-  because it was untracked but not ignored, `git add -A` swept it into the commit, so a repository
-  with no dependency movement at all still produced a pull request. The pattern is now added to
-  `.gitignore`, and only when such a directory actually exists, so repositories that never build the
-  project keep their `.gitignore` untouched
-- fixed the pipeline updater leaving a stale version behind in `displayName` labels. Upgrading a
-  task from `3.11` to `3.14` rewrote `versionSpec` but left `displayName: 'Use Python 3.11'`
-  untouched, so the file described a version it no longer used. The label is now upgraded alongside
-  the version field rather than having its version stripped out, and it is upgraded whether it is
-  written above or below that field — a label written below sat outside the scan match and was never
-  reached at all. The rewrite stops at the end of the enclosing step, so a later step mentioning the
-  same version keeps its own label — including a non-task step such as `- script:`, which owns a
-  label of its own — and a label reading `3.110` is left alone when the upgrade is from `3.11`
+- fixed the pipeline updater leaving a stale version behind in `displayName` labels. Upgrading a task from `3.11` to `3.14` rewrote `versionSpec` but left `displayName: 'Use Python 3.11'` untouched, so the file described a version it no longer used. The label is now upgraded alongside the version field rather than having its version stripped out, and it is upgraded whether it is written above or below that field — a label written below sat outside the scan match and was never reached at all. The rewrite stops at the end of the enclosing step, so a later step mentioning the same version keeps its own label — including a non-task step such as `- script:`, which owns a label of its own — and a label reading `3.110` is left alone when the upgrade is from `3.11`
+- fixed the Python updater committing the `*.egg-info/` directory as though it were a dependency change. Installing a `pyproject.toml` project locally makes setuptools generate that directory; because it was untracked but not ignored, `git add -A` swept it into the commit, so a repository with no dependency movement at all still produced a pull request. The pattern is now added to `.gitignore`, and only when such a directory actually exists, so repositories that never build the project keep their `.gitignore` untouched
 
 ## [0.18.0] - 2026-07-27
 
 ### Added
 
-- added an automatic cleanup of the dated branches left behind by earlier runs: before creating the
-  branch for the current run, every remote branch carrying the aggregate prefix is deleted and the
-  pull request attached to each one is closed (on Azure DevOps, abandoned). Because the aggregate
-  branch is dated, an unattended daily run previously stacked up one abandoned branch per day for as
-  long as nobody merged. A branch with no pull request at all is still deleted, because having
-  nothing to close is a no-op rather than a failure; only a branch whose pull request could not be
-  closed is left in place, so the pair stays retryable instead of stranding an open pull request
-  whose source branch is gone. Each close call is bounded by a timeout, so an unresponsive provider
-  degrades cleanup to best-effort rather than stalling the update run behind housekeeping
-- added the `cleanup_stale_branches` configuration key and the `--skip-cleanup` flag to turn that
-  cleanup off. Cleanup is opt-out, so it runs unless explicitly disabled; the flag overrides the
-  configuration for a single run
-- added the `aggregate_branch_prefix` configuration key to customise the `chore/autoupdate-` branch
-  prefix. The same value names the branch a run creates and selects the branches cleanup removes, so
-  the two can never point at different branches
+- added an automatic cleanup of the dated branches left behind by earlier runs: before creating the branch for the current run, every remote branch carrying the aggregate prefix is deleted and the pull request attached to each one is closed (on Azure DevOps, abandoned). Because the aggregate branch is dated, an unattended daily run previously stacked up one abandoned branch per day for as long as nobody merged. A branch with no pull request at all is still deleted, because having nothing to close is a no-op rather than a failure; only a branch whose pull request could not be closed is left in place, so the pair stays retryable instead of stranding an open pull request whose source branch is gone. Each close call is bounded by a timeout, so an unresponsive provider degrades cleanup to best-effort rather than stalling the update run behind housekeeping
+- added the `aggregate_branch_prefix` configuration key to customise the `chore/autoupdate-` branch prefix. The same value names the branch a run creates and selects the branches cleanup removes, so the two can never point at different branches
+- added the `cleanup_stale_branches` configuration key and the `--skip-cleanup` flag to turn that cleanup off. Cleanup is opt-out, so it runs unless explicitly disabled; the flag overrides the configuration for a single run
 
 ### Changed
 
 - changed cleanup to run only after the same-day pull request check has passed, so a pull request is
-- changed the Go module dependencies to their latest versions
-  never closed without a replacement being opened for it
+- changed the Go module dependencies to their latest versions never closed without a replacement being opened for it
 
 ### Fixed
 
-- fixed the Gitleaks stage failing every build on `main`. The allowlisted fingerprints in
-  `.gitleaksignore` embed the hash of the commit a finding came from, so when a rebase moved the two
-  commits holding the historical git-remote URL false positives, all 14 entries stopped matching and
-  the long-suppressed findings came back. Re-pointed every entry at the commits' current hashes
+- fixed the Gitleaks stage failing every build on `main`. The allowlisted fingerprints in `.gitleaksignore` embed the hash of the commit a finding came from, so when a rebase moved the two commits holding the historical git-remote URL false positives, all 14 entries stopped matching and the long-suppressed findings came back. Re-pointed every entry at the commits' current hashes
 
 ## [0.17.0] - 2026-07-22
 
