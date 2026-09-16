@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/go-git/go-git/v5 v5.19.2
-	github.com/hashicorp/hcl/v2 v2.24.0
+	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/rios0rios0/cliforge v0.4.6
 	github.com/rios0rios0/gitforge v1.0.1-0.20260827000225-8c05a4730240
 	github.com/rios0rios0/langforge v1.1.7
