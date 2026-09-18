@@ -449,8 +449,11 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 					info.LatestVersion,
 				)
 			}
+			// This path builds the description from the summary the CLI
+			// already has; the upgrade script's output does not reach it, so
+			// there are no newer-major findings to report here.
 			desc := goRepo.GenerateGoPRDescription(
-				info.LatestVersion, false, info.VersionUpdated, info.AllowMajorUpdates,
+				info.LatestVersion, false, info.VersionUpdated, info.AllowMajorUpdates, nil,
 			)
 			return title, desc
 		},

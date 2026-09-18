@@ -236,7 +236,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		result := goUpdater.GenerateGoPRDescription("1.25.7", false, true, true)
+		result := goUpdater.GenerateGoPRDescription("1.25.7", false, true, true, nil)
 
 		// then
 		assert.Contains(t, result, "1.25.7")
@@ -246,7 +246,7 @@ func TestGenerateGoPRDescription(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		result := goUpdater.GenerateGoPRDescription("1.25.7", false, false, true)
+		result := goUpdater.GenerateGoPRDescription("1.25.7", false, false, true, nil)
 
 		// then
 		assert.Contains(t, result, "dependencies")
