@@ -263,6 +263,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		PRTitle:       prTitle,
 		PRDescription: GenerateGoPRDescription(
 			vCtx.LatestVersion, hasConfigSH, goVersionUpdated, opts.AllowMajorUpdates,
+			ParseMajorsAvailable(outputStr),
 		),
 	}, nil
 }
@@ -357,6 +358,7 @@ func cloneAndUpgrade(
 		Title:  upgradeSubject(vCtx.LatestVersion, result.GoVersionUpdated),
 		Description: GenerateGoPRDescription(
 			vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated, opts.AllowMajorUpdates,
+			ParseMajorsAvailable(result.Output),
 		),
 	}, nil
 }
@@ -573,6 +575,14 @@ func writeGoUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 	if !allowMajorUpdates {
 		sb.WriteString(support.GoMajorGuardScript())
 	}
+	// Emitted unconditionally, unlike the major guard: it answers a question no
+	// version comparison can, so the default path -- majors allowed, major guard
+	// absent -- is exactly the path that has nothing else watching it.
+	sb.WriteString(support.GoCompileGuardScript())
+	// Reports the majors `go get -u` structurally cannot reach, whatever
+	// allow_major_updates says: that setting governs the one boundary `-u` does
+	// cross, and a `/vN` path is not it.
+	sb.WriteString(support.GoMajorAvailableScript())
 
 	writeGoModuleDiscovery(sb)
 
@@ -682,6 +692,18 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 		)
 	}
 
+	// Snapshot the manifests themselves, taken here so the compile guard judges
+	// the dependency change alone: the go directive above is already settled, and
+	// a revert therefore keeps it. A module with no go.sum is recorded by the
+	// snapshot not being there, which is how the restore knows to remove the one
+	// the upgrade wrote rather than leave it behind.
+	sb.WriteString("    GO_MOD_BEFORE=\"$(mktemp)\"\n")
+	sb.WriteString("    GO_SUM_BEFORE=\"$(mktemp)\"\n")
+	sb.WriteString("    cp go.mod \"$GO_MOD_BEFORE\"\n")
+	sb.WriteString(
+		"    if [ -f go.sum ]; then cp go.sum \"$GO_SUM_BEFORE\"; else rm -f \"$GO_SUM_BEFORE\"; fi\n\n",
+	)
+
 	sb.WriteString("    echo \"Running go get -u -t ./...\"\n")
 	sb.WriteString(
 		"    \"$GO_BINARY\" get -u -t ./... 2>&1 || " +
@@ -720,6 +742,8 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 		sb.WriteString("    rm -f \"$MODULE_VERSIONS_BEFORE\"\n\n")
 	}
 
+	writeGoModulePostUpgradeChecks(sb)
+
 	// Re-apply the Go version after go mod tidy, because older Go binaries
 	// may normalise the three-part version back to two-part during tidy.
 	sb.WriteString("    # Re-apply Go version if go mod tidy normalised it\n")
@@ -737,6 +761,43 @@ func writeGoModuleUpgradeCommands(sb *strings.Builder, allowMajorUpdates bool) {
 	sb.WriteString("        echo \"Running go mod vendor...\"\n")
 	sb.WriteString("        \"$GO_BINARY\" mod vendor 2>&1 || echo \"WARNING: go mod vendor had some errors\"\n")
 	sb.WriteString("    fi\n\n")
+}
+
+// writeGoModulePostUpgradeChecks emits the two passes that read the module
+// after `go get -u` and `go mod tidy` have settled the graph, and after the
+// major hold has run its own tidy -- anything earlier would be reading a
+// go.mod that is not the one being committed.
+//
+// Neither changes the upgrade. The first decides whether an indirect
+// requirement has to be held back for the module to compile at all; the second
+// only asks the registry a question.
+func writeGoModulePostUpgradeChecks(sb *strings.Builder) {
+	// Branched rather than bare, for the reason the major guard already is:
+	// under `set -e` a bare call would abandon every module queued behind the
+	// first one it failed on.
+	//
+	// A module it could not fix still ships, and the pull request is expected
+	// to go red. That is the point -- it removes the breakage nobody chose and
+	// leaves the breakage somebody has to decide about.
+	sb.WriteString("    echo \"Verifying the module still compiles...\"\n")
+	sb.WriteString("    if ! autoupdate_go_hold_breaking_bumps " +
+		"\"$GO_BINARY\" \"$GO_MOD_BEFORE\" \"$GO_SUM_BEFORE\"; then\n")
+	sb.WriteString(
+		"        echo \"  WARNING: ${MODULE_DIR} does not compile with this upgrade; " +
+			"the pull request will fail CI so it can be reviewed (see above)\"\n",
+	)
+	sb.WriteString("    fi\n")
+	sb.WriteString("    rm -f \"$GO_MOD_BEFORE\" \"$GO_SUM_BEFORE\"\n\n")
+
+	// Read against the go.mod that is actually going to be committed, so the
+	// "in use" version in the report is the one the reader will find there. A
+	// registry that cannot be reached costs the run a notice, never the
+	// upgrade.
+	sb.WriteString("    echo \"Checking for newer majors published under a different path...\"\n")
+	sb.WriteString(
+		"    autoupdate_go_report_new_majors \"$GO_BINARY\" go.mod \"$MODULE_DIR\" || " +
+			"echo \"  WARNING: could not check for newer majors (continuing anyway)\"\n\n",
+	)
 }
 
 func writeCommitAndPush(sb *strings.Builder) {
@@ -808,9 +869,15 @@ func findGoBinaryInGVM(home string) (string, bool) {
 // GenerateGoPRDescription builds a markdown PR description for a Go
 // dependency upgrade.  Exported so that the local-mode CLI handler can
 // reuse the same description format.
+//
+// majorsAvailable are the newer majors the run found published under a
+// different module path, from ParseMajorsAvailable over the script output. A
+// caller without that output passes nil and the section is simply absent --
+// which is honest, because a run that did not look has nothing to report.
 func GenerateGoPRDescription(
 	goVersion string,
 	hasConfigSH, goVersionUpdated, allowMajorUpdates bool,
+	majorsAvailable []MajorAvailable,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("## Summary\n\n")
@@ -847,6 +914,7 @@ func GenerateGoPRDescription(
 	if hasConfigSH {
 		sb.WriteString("- `config.sh` was sourced before running Go commands (private package settings)\n")
 	}
+	writeMajorsAvailableSection(&sb, majorsAvailable)
 	sb.WriteString("\n### Review Checklist\n\n")
 	sb.WriteString("- [ ] Verify build passes\n")
 	sb.WriteString("- [ ] Verify tests pass\n")

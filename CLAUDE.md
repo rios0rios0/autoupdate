@@ -393,8 +393,10 @@ How the script-emitting Go and Java updaters act on it:
 `java` passes it through as `-DallowMajorUpdates` on both versions-maven-plugin goals, and
 `golang` emits `support.GoMajorGuardScript()` **only when it is false** -- an unused bash
 function in a generated script is a thing a reader has to rule out. The allowed branch is
-deliberately not an early return: the Go-directive re-apply and `go mod vendor` follow it
-and run either way.
+deliberately not an early return: the Go-directive re-apply, `support.GoCompileGuardScript()`
+and `go mod vendor` follow it and run either way. That compile guard is emitted whatever this
+setting says — it answers a question no version comparison can, so the allowed path is exactly
+the one that would otherwise be left unguarded.
 
 `UpdateOptions`'s zero value is therefore the *restrictive* case. Construct it through the
 run command, which resolves the flag, rather than by hand.
@@ -473,6 +475,86 @@ says the run *checked and held*, never that every hold succeeded, because the Go
 writes it has no access to the script's result. Both halves are exercised in
 `internal/support/`, the bash one against a stub `go` binary that records what it was asked
 for.
+
+**Whether it still compiles — always.** `support.GoCompileGuardScript()` is the major guard's
+sibling and covers its blind spot: an indirect dependency that breaks the build without moving
+a major at all. It is emitted unconditionally, because majors are allowed by default and the
+default path is therefore the one with nothing else watching it.
+
+`go get -u` raises indirect requirements past what anything in the graph asks for, and when the
+module they belong to is one half of a pair that has to move together, raising one half is
+enough. `k8s.io/kube-openapi` is untagged, so every upgrade of it is a pseudo-version — same
+major, same minor, nothing for a version comparison to catch — and the revision `-u` reached
+for had moved `schemaconv` onto `structured-merge-diff/v7` while the `k8s.io/apimachinery`
+release requiring it still builds `managedfields` on v6. Minimal version selection picks the
+compatible revision by itself; the explicit raise is what breaks it.
+
+There is nothing in a version string to predict that from, so the guard verifies instead. It
+asks `go vet ./...` — **not** `go build ./...`: a module can hold no non-test Go files at all
+(a test harness is exactly that shape), and for one of those `go build ./...` compiles nothing,
+finds nothing wrong and exits zero while the test packages fail to build. Checking with
+`go build` is how this reached released pull requests.
+
+When the answer changed from yes to no it puts back the indirect requirements this run raised
+— the derived half of the graph, which `go mod tidy` recomputes anyway, so the direct upgrades
+the pull request exists for are kept — re-tidies and asks again. `go mod edit -require`, not
+`-droprequire`: it sets a floor, so an indirect requirement the repository deliberately pinned
+above its graph stays where its owner put it. A requirement the run *introduced* is left to
+`go mod tidy`, which drops it once nothing needs it.
+
+**It never reverts an upgrade**, and that is the whole shape of the thing. Holding an indirect
+requirement back costs the run nothing, because nothing in the repository names one and
+`go mod tidy` recomputes them anyway. A *direct* dependency that broke the build is news, and
+the pull request failing CI is how it gets delivered — so when holding the raised requirements
+is not enough, the upgrade is left exactly as `go get -u` wrote it and the guard returns
+non-zero so the caller can say so. Reverting it would leave a branch with nothing in it, and in
+a single-module repository the commit check would then find no changes and open no pull request
+at all: a genuine breaking upgrade turned into silence, repeated on every scheduled run, with a
+line in a log as its only trace. The guard removes the breakage nobody chose and leaves the
+breakage somebody has to decide about.
+
+It also compares against the state the run started from rather than against "clean", so a
+module already failing the check — an unaddressed vet diagnostic, or one declaring no packages
+— keeps its upgrade instead of having its indirect requirements frozen every run over a failure
+the upgrade did not cause. The snapshots exist only for that probe: they are put back to ask
+whether the module compiled *before*, and put back again straight after (`go.mod` and `go.sum`
+together, a missing snapshot `go.sum` meaning the file is removed rather than the upgrade's left
+behind). They are taken after the go directive is settled, so this judges the dependency change
+alone.
+
+**Majors `-u` cannot reach — reported, never applied.** `support.GoMajorAvailableScript()` closes
+the gap the other two guards leave open. Semantic import versioning puts v2 and above behind a
+`/vN` suffix, which makes them a *different module*; `go get -u` upgrades the build list and
+never reaches for a path nothing requires, so a dependency can sit two majors behind for years
+and every run reports the repository as up to date. `GoMajorGuardScript` is about the one
+boundary `-u` does cross (v0 to v1, which share the unsuffixed path) and `GoCompileGuardScript`
+only judges what an upgrade already did, so neither says anything here.
+
+For each **direct** requirement it asks `go list -m -versions <path>/v<next>`, walking up while
+it keeps finding one and stopping at the first miss. Indirect requirements are not probed: which
+major of a transitive dependency the graph needs is the graph's business, and reporting those
+would bury the few lines somebody can act on. Existence is decided on the **version list, not
+the exit status** — `go list -m -versions` answers `0` for a major that was never published,
+printing the path with an empty list, so reading the status would report every dependency as
+having a new major waiting. `gopkg.in`-style paths (`gopkg.in/yaml.v3`) encode the major with a
+dot rather than a path element and are skipped outright rather than probed, because the answer
+is known in advance. The probe is read-only: `-versions` is a query and the module is
+deliberately not added to the build list.
+
+Each hit is echoed as a `GO_MAJOR_AVAILABLE=<dir>|<path>|<version>|<next path>|<next version>`
+marker. `golang.ParseMajorsAvailable` reads the markers rather than the prose beside them, so
+either wording can change without breaking the other; it de-duplicates across modules and sorts,
+because a description that reshuffles between runs reads as a change when nothing changed.
+`GenerateGoPRDescription` renders them as a table above the review checklist, and writes
+**nothing at all** when there are none — a "no newer majors" line on every pull request is one
+readers stop seeing, and it would then be there on the one that mattered. The local CLI path in
+`local_command.go` has no script output and passes `nil`, which is honest: a run that did not
+look has nothing to report.
+
+It reports rather than upgrading, and that is not a half measure. Crossing a major means
+rewriting every import of the module and then fixing whatever the new API renamed — a migration
+someone decides to make, not a diff a bot produces unattended. What a bot can do is make sure
+nobody has to notice on their own.
 
 ### Digest-Pinned Base Images
 
