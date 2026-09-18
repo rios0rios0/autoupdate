@@ -1,11 +1,14 @@
 package support_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -63,12 +66,41 @@ func stubGoBinary(t *testing.T, dir string) (string, string) {
 	// A stub that cannot execute makes every "did not call go" assertion pass
 	// for the wrong reason: the log would simply never exist, and an absent
 	// file contains nothing. Prove it runs here, then truncate that proof.
-	require.NoError(t, exec.Command(binPath, "stub-self-test").Run(),
-		"stub go binary is not executable")
+	requireStubRuns(t, binPath)
 	require.FileExists(t, logPath, "stub go binary did not write its log")
 	require.NoError(t, os.WriteFile(logPath, nil, 0o600))
 
 	return binPath, logPath
+}
+
+// requireStubRuns executes a freshly written stub, retrying while the kernel
+// still considers it busy.
+//
+// Writing an executable and immediately exec'ing it races with any other
+// goroutine in the test binary that forks in between: the child inherits the
+// still-open write descriptor across the fork, and the kernel refuses to exec
+// a file that anything holds open for writing -- "text file busy". O_CLOEXEC
+// does not prevent it, because it closes the descriptor at exec, not at fork.
+//
+// These suites run several parallel tests that each write and then exec their
+// own stub, so the window is hit often enough to fail a run outright. The
+// retry is bounded: a stub that is genuinely not executable still fails, which
+// is the failure this self-test exists to catch.
+func requireStubRuns(t *testing.T, binPath string) {
+	t.Helper()
+
+	var err error
+	for range 50 {
+		if err = exec.Command(binPath, "stub-self-test").Run(); err == nil {
+			return
+		}
+		if !errors.Is(err, syscall.ETXTBSY) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	require.NoError(t, err, "stub go binary is not executable")
 }
 
 // shellQuote wraps a path in single quotes for safe embedding in a script.

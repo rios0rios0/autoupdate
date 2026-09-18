@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed an intermittent `text file busy` failure in the shell-guard test suites. A test that writes an executable stub and immediately runs it races with any other goroutine that forks in between: the child inherits the still-open write descriptor across the fork, and the kernel refuses to exec a file held open for writing. `O_CLOEXEC` does not prevent it, since it closes the descriptor at exec rather than at fork. Each stub now proves it runs through a bounded retry that tolerates only that error, so a stub which genuinely cannot execute still fails the test'
+time: '2026-09-18T20:52:44.501524818Z'

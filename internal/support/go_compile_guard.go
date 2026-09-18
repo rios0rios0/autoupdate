@@ -100,11 +100,33 @@ func goModuleCompilesScript() string {
 # check is why the breakage reached them. "go vet" loads and type-checks every
 # package including its test files, and runs nothing.
 #
+# "-mod=readonly" is load-bearing, not tidiness. "go vet" is a build command,
+# so in a module with a vendor directory and a go directive of 1.14 or above
+# the toolchain defaults to "-mod=vendor" and runs the vendor-consistency check
+# first. That check compares go.mod against "vendor/modules.txt" by path AND
+# version -- and "go get -u" has just rewritten go.mod while "go mod vendor"
+# does not run until after this guard, so the vendor tree is stale by
+# construction. Without the flag the predicate answers "does not compile" for
+# every vendored module on every run:
+#
+#     go: inconsistent vendoring in /module:
+#         golang.org/x/sync@v0.23.0: is explicitly required in go.mod, but not
+#         marked as explicit in vendor/modules.txt
+#
+# The guard is asking about the module graph, which is the state "go mod
+# vendor" regenerates the tree from anyway. "readonly" rather than "mod"
+# because this is a predicate the before-state probe calls while it has the
+# module's manifests swapped out: "-mod=mod" lets the go command write go.mod
+# and go.sum, and a predicate that rewrites the thing it is measuring would
+# corrupt the snapshots around it. It is also the non-vendor default, so
+# nothing changes for a module without a vendor directory.
+#
 # Output is discarded because this is a predicate, asked up to three times per
-# module; the caller prints what it decided. The failing compiler output is
-# reproduced by the caller running "go mod tidy" and by CI on the branch.
+# module; the caller prints what it decided. A module the guard cannot fix now
+# keeps its upgrade, so CI on the branch compiles the failing tree and reports
+# the error in full.
 autoupdate_go_module_compiles() {
-    "$1" vet ./... > /dev/null 2>&1
+    "$1" vet -mod=readonly ./... > /dev/null 2>&1
 }
 `
 }

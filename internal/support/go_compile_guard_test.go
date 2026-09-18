@@ -94,6 +94,13 @@ func stubScriptedGoBinary(t *testing.T, dir string, vetPlan []int) (string, stri
 		"exit 0\n"
 	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o755))
 
+	// Prove it runs before the harness depends on it, and burn through the
+	// "text file busy" window while doing so -- an exec that loses that race
+	// inside bash would surface as the guard taking a branch nobody chose.
+	// A non-"vet" argument leaves the scripted plan untouched.
+	requireStubRuns(t, binPath)
+	require.NoError(t, os.WriteFile(logPath, nil, 0o600))
+
 	return binPath, logPath
 }
 
@@ -358,7 +365,35 @@ func TestGoCompileGuardScriptAsksTheToolchainRatherThanBuilding(t *testing.T) {
 	// `go build ./...` compiles nothing and exits zero while the test packages
 	// fail to build. Checking with `go build` is how the breakage this guard
 	// exists for reached a released pull request.
-	assert.Contains(t, calls, "vet ./...")
+	assert.Contains(t, calls, "vet -mod=readonly ./...")
 	assert.NotContains(t, calls, "build ./...",
 		"the check must type-check test files; got calls:\n%s", calls)
+}
+
+func TestGoCompileGuardScriptIgnoresAStaleVendorTree(t *testing.T) {
+	t.Parallel()
+
+	// given
+	harness := writeCompileGuardHarness(t, []int{0}, true)
+
+	// when
+	runHarness(t, harness.script)
+
+	// then
+	// `go vet` is a build command, so a module with a vendor directory and a go
+	// directive of 1.14 or above defaults to `-mod=vendor` and runs the
+	// vendor-consistency check first. `go get -u` has just rewritten go.mod and
+	// `go mod vendor` does not run until after this guard, so without an
+	// explicit `-mod` the predicate answers "does not compile" for every
+	// vendored module, on a vendor tree that is stale by construction.
+	//
+	// `readonly` rather than `mod`: the before-state probe calls this predicate
+	// while the module's manifests are swapped out, and `-mod=mod` would let the
+	// go command rewrite the go.mod being measured.
+	calls := readTextFile(t, harness.goLog)
+	assert.Contains(t, calls, "-mod=readonly",
+		"the check must ask about the module graph, not the vendor tree")
+	assert.NotContains(t, calls, "-mod=vendor")
+	assert.NotContains(t, calls, "-mod=mod",
+		"a predicate must not be allowed to rewrite the manifests it measures")
 }

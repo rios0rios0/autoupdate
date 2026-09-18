@@ -65,6 +65,12 @@ func stubVersionsGoBinary(t *testing.T, dir, table string) (string, string) {
 		"exit 0\n"
 	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o755))
 
+	// Same reason as the compile-guard stub: prove it executes, and clear the
+	// "text file busy" window before bash depends on it. A non-"list" argument
+	// answers nothing, so the probe table is untouched.
+	requireStubRuns(t, binPath)
+	require.NoError(t, os.WriteFile(logPath, nil, 0o600))
+
 	return binPath, logPath
 }
 
