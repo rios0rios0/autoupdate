@@ -22,6 +22,18 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-23
+
+### Added
+
+- added a report of newer major versions the Go updater structurally cannot apply. Go publishes v2 and above under a different module path (`/v2`, `/v3`, ...), so `go get -u` never reaches one and a dependency could sit majors behind while every run called the repository up to date. Each direct requirement is now probed for the next major and any hit is listed in the pull request description, with the version in use beside it - existence decided on the version list rather than the exit status, because `go list -m -versions` answers successfully with an empty list for a major that was never published. It reports and never applies: crossing a major means rewriting imports and fixing whatever the new API renamed, which is a migration somebody decides to make rather than a diff a bot produces unattended
+
+### Fixed
+
+- fixed an intermittent `text file busy` failure in the shell-guard test suites. A test that writes an executable stub and immediately runs it races with any other goroutine that forks in between: the child inherits the still-open write descriptor across the fork, and the kernel refuses to exec a file held open for writing. `O_CLOEXEC` does not prevent it, since it closes the descriptor at exec rather than at fork. Each stub now proves it runs through a bounded retry that tolerates only that error, so a stub which genuinely cannot execute still fails the test
+- fixed the new compile guard reading a stale vendor tree instead of the module graph. `go vet` is a build command, so in a module with a vendor directory and a `go` directive of 1.14 or above the toolchain defaults to `-mod=vendor` and runs the vendor-consistency check first - and `go get -u` has already rewritten `go.mod` while `go mod vendor` does not run until after the guard, so the tree is stale by construction. Every vendored module would have been judged broken on every run, its indirect upgrades held back and re-tidied away, under a log line blaming a direct dependency. The check now passes `-mod=readonly`, which asks about the module graph the vendor tree is about to be regenerated from, and keeps the predicate from rewriting the manifests the before-state probe has swapped out
+- stopped the Go updater opening pull requests whose modules no longer compile for a reason nobody chose: `go get -u` raises indirect requirements past what anything in the graph asks for, and when the module they belong to must move in step with another, an untagged dependency's pseudo-version breaks the build while moving no major, no minor and nothing a version comparison can catch. Every Go module is now verified with `go vet ./...` after the upgrade - not `go build ./...`, which compiles nothing and exits zero for a module whose only Go files are tests - and a module the upgrade stopped compiling has the indirect requirements this run raised held back, keeping every direct upgrade. It never reverts an upgrade: when holding those back is not enough the cause is a direct dependency, which is a real breaking change, so it ships and the pull request fails CI rather than being silently dropped - reverting would leave an empty branch and, in a single-module repository, no pull request at all
+
 ## [1.1.5] - 2026-09-16
 
 ### Changed
