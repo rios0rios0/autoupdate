@@ -112,7 +112,7 @@ wget -qO- https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.s
 
 ```bash
 # Install specific version
-curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --version v1.0.0
+curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --version 1.2.0
 
 # Install to custom directory
 curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --install-dir /usr/local/bin
