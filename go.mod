@@ -3,7 +3,7 @@ module github.com/rios0rios0/autoupdate
 go 1.27.1
 
 require (
-	github.com/go-git/go-git/v5 v5.19.2
+	github.com/go-git/go-git/v5 v5.19.3
 	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/rios0rios0/cliforge v0.4.6
 	github.com/rios0rios0/gitforge v1.0.1-0.20260827000225-8c05a4730240
