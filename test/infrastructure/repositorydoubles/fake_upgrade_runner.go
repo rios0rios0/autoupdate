@@ -43,6 +43,9 @@ func (f *FakeUpgradeRunner) Run(
 
 	for path, content := range f.files {
 		full := filepath.Join(opts.Dir, filepath.FromSlash(path))
+		// A directory needs the owner search bit, so 0o700 is the
+		// least-privilege mode here.
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		if err := os.MkdirAll(filepath.Dir(full), fakeDirMode); err != nil {
 			return nil, fmt.Errorf("failed to create the directory for %s: %w", path, err)
 		}

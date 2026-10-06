@@ -36,6 +36,9 @@ func Write(t *testing.T, root string, files map[string]string) {
 
 	for path, content := range files {
 		full := filepath.Join(root, filepath.FromSlash(path))
+		// A directory needs the owner search bit, so 0o700 is the
+		// least-privilege mode here.
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		require.NoError(t, os.MkdirAll(filepath.Dir(full), dirMode))
 		require.NoError(t, os.WriteFile(full, []byte(content), fileMode))
 	}
