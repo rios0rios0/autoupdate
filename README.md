@@ -321,11 +321,9 @@ What a line names, per ecosystem, alongside the language's own version pin:
 | Dart / Flutter | the direct dependencies `pubspec.lock` resolves, or the `pubspec.yaml` constraints when no lock is committed |
 | Ruby | the gems the Gemfile names, at the versions `Gemfile.lock` resolves |
 | Java | the artifacts `pom.xml` declares (Maven); the wrapper version (Gradle) |
+| JavaScript | the packages `package.json` declares, at the versions `package-lock.json`, `pnpm-lock.yaml` or `yarn.lock` (Classic or Berry) resolves |
 | C# | the `PackageReference` / `PackageVersion` versions of every project and `Directory.Packages.props` |
 | Terraform, Dockerfile, pipelines | every module, image, runtime and action the run moved |
-
-JavaScript still records one generic sentence per release cycle until its
-lockfile readers land.
 
 Both formats work in every ecosystem and in both local and batch mode.
 

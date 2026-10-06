@@ -30,12 +30,6 @@ func hasOnlyLockfileVersionChanges(ctx context.Context, repoDir string) bool {
 			if !isPackageLockOnlyVersionSync(ctx, repoDir) {
 				return false
 			}
-		case support.ChangelogFileName:
-			// Tolerate auto-generated changelog updates alongside cosmetic
-			// lockfile syncs — the upgrade script copies the changelog whenever
-			// git status is non-empty, even for cosmetic-only changes. A chlog
-			// fragment needs no case here: it is a new untracked file, so
-			// "git diff" never reports it.
 		default:
 			// Any non-lockfile change (or yarn.lock / pnpm-lock.yaml which
 			// do not carry a project version field) is a real change.
@@ -143,18 +137,9 @@ func gitShowHEAD(ctx context.Context, repoDir, filePath string) ([]byte, error) 
 }
 
 // revertWorkingTreeChanges discards all unstaged changes in the working tree,
-// restoring it to the HEAD state.
-//
-// The staged changelog is discarded first: a chlog fragment the upgrade script
-// already copied in is a new untracked file, so the checkout below would leave
-// it behind in the repository this run decided not to touch.
-func revertWorkingTreeChanges(
-	ctx context.Context,
-	repoDir string,
-	changelog support.StagedChangelog,
-) {
-	changelog.Discard(repoDir)
-
+// restoring it to the HEAD state. The changelog is written only after the
+// cosmetic-lockfile check this serves, so there is no fragment to clean up.
+func revertWorkingTreeChanges(ctx context.Context, repoDir string) {
 	if err := support.GitCommand(ctx, repoDir, "checkout", "--", ".").Run(); err != nil {
 		logger.Warnf("[javascript] Failed to revert working tree changes: %v", err)
 	}

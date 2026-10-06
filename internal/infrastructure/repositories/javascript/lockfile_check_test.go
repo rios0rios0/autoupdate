@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
-	"github.com/rios0rios0/autoupdate/internal/support"
 )
 
 // initGitRepo creates a bare-minimum git repo in dir with an initial commit
@@ -123,7 +122,7 @@ func TestHasOnlyLockfileVersionChanges(t *testing.T) {
 		assert.False(t, result)
 	})
 
-	t.Run("should return true when only package-lock.json version fields and CHANGELOG.md changed", func(t *testing.T) {
+	t.Run("should return false when CHANGELOG.md changed alongside the lockfile", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -133,7 +132,9 @@ func TestHasOnlyLockfileVersionChanges(t *testing.T) {
 			"package-lock.json": packageLockWithVersion("1.0.3", "4.17.21"),
 			"CHANGELOG.md":      "# Changelog\n",
 		})
-		// Simulate: cosmetic lockfile version sync + auto-generated changelog update.
+		// Simulate: cosmetic lockfile version sync next to a changelog edit. The
+		// changelog is only written after this check now, so an edit here was
+		// made by something else and is a real change.
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, "package-lock.json"),
 			[]byte(packageLockWithVersion("1.0.4", "4.17.21")),
@@ -149,7 +150,7 @@ func TestHasOnlyLockfileVersionChanges(t *testing.T) {
 		result := javascript.HasOnlyLockfileVersionChanges(t.Context(), dir)
 
 		// then
-		assert.True(t, result)
+		assert.False(t, result)
 	})
 
 	t.Run("should return false when non-lockfile files also changed", func(t *testing.T) {
@@ -287,7 +288,7 @@ func TestRevertWorkingTreeChanges(t *testing.T) {
 		))
 
 		// when
-		javascript.RevertWorkingTreeChanges(t.Context(), dir, support.StagedChangelog{})
+		javascript.RevertWorkingTreeChanges(t.Context(), dir)
 
 		// then
 		content, err := os.ReadFile(filepath.Join(dir, "package-lock.json"))
@@ -295,36 +296,7 @@ func TestRevertWorkingTreeChanges(t *testing.T) {
 		assert.Equal(t, original, string(content))
 	})
 
-	t.Run("should delete the chlog fragment the upgrade script copied in", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		dir := t.TempDir()
-		initGitRepo(t, dir, map[string]string{"package-lock.json": packageLockWithVersion("1.0.0", "4.17.21")})
-
-		fragment := ".changes/unreleased/1748359200-a1b2.yaml"
-		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
-		require.NoError(t, os.MkdirAll(filepath.Join(dir, ".changes", "unreleased"), 0o700))
-		require.NoError(t, os.WriteFile(
-			filepath.Join(dir, filepath.FromSlash(fragment)),
-			[]byte("kind: Changed\nbody: changed a dependency\n"),
-			0o600,
-		))
-
-		// when
-		javascript.RevertWorkingTreeChanges(t.Context(), dir, support.StagedChangelog{
-			TempPath: filepath.Join(t.TempDir(), "staged.yaml"),
-			RepoPath: fragment,
-			Fragment: true,
-		})
-
-		// then
-		_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(fragment)))
-		assert.True(t, os.IsNotExist(err),
-			"an untracked fragment survives the checkout, so it has to be deleted")
-	})
-
-	t.Run("should leave an edited CHANGELOG.md to the checkout", func(t *testing.T) {
+	t.Run("should restore an edited CHANGELOG.md", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -341,10 +313,7 @@ func TestRevertWorkingTreeChanges(t *testing.T) {
 		))
 
 		// when
-		javascript.RevertWorkingTreeChanges(t.Context(), dir, support.StagedChangelog{
-			TempPath: filepath.Join(t.TempDir(), "staged.md"),
-			RepoPath: "CHANGELOG.md",
-		})
+		javascript.RevertWorkingTreeChanges(t.Context(), dir)
 
 		// then
 		content, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))

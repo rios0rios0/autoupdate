@@ -169,12 +169,7 @@ func executeLocalUpgrade(
 	defer restore()
 
 	// --- Language Operations (bash) ---
-	// The changelog is staged here rather than inside the script runner so this
-	// function, which decides whether to keep the run, can also undo it.
-	changelog := support.StageLocalChangelog(repoDir, changelogEntries(vCtx))
-	defer changelog.Remove()
-
-	outputStr, runErr := runLanguageUpgradeScript(ctx, repoDir, vCtx, pkgMgr, opts, changelog)
+	outputStr, runErr := runLanguageUpgradeScript(ctx, repoDir, vCtx, pkgMgr, opts)
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -186,13 +181,23 @@ func executeLocalUpgrade(
 		logger.Infof(
 			"[javascript] Only cosmetic lockfile version changes detected (project version sync), skipping",
 		)
-		revertWorkingTreeChanges(ctx, repoDir, changelog)
+		revertWorkingTreeChanges(ctx, repoDir)
 		return &LocalResult{
 			HasChanges:     false,
 			LatestVersion:  vCtx.LatestVersion,
 			BranchName:     vCtx.BranchName,
 			PackageManager: pkgMgr,
 		}, nil
+	}
+
+	// Record the upgrade in the repository's changelog, naming what moved. It is
+	// written after the cosmetic-lockfile check, so a run that check abandons has
+	// nothing of its own to undo.
+	if support.HasUncommittedChanges(ctx, repoDir) {
+		support.RecordObservedDependencyChanges(
+			ctx, repoDir, observePackageChanges,
+			changelogEntry(nodeVersionUpdated, vCtx.LatestVersion), jsChangelogSummary,
+		)
 	}
 
 	// --- Git Finalize (go-git) ---
@@ -223,19 +228,17 @@ func executeLocalUpgrade(
 
 // runLanguageUpgradeScript builds and executes the bash script that
 // performs JavaScript-specific upgrade operations (npm/yarn/pnpm install,
-// Dockerfile updates, changelog updates).
+// Dockerfile updates).
 func runLanguageUpgradeScript(
 	ctx context.Context,
 	repoDir string,
 	vCtx *versionContext,
 	pkgMgr string,
 	opts LocalUpgradeOptions,
-	changelog support.StagedChangelog,
 ) (string, error) {
 	params := localUpgradeParams{
 		BranchName:     vCtx.BranchName,
 		NodeVersion:    vCtx.LatestVersion,
-		Changelog:      changelog,
 		AuthToken:      opts.AuthToken,
 		ProviderName:   opts.ProviderName,
 		PackageManager: pkgMgr,
@@ -256,11 +259,8 @@ func runLanguageUpgradeScript(
 // --- local-mode internal types & helpers ---
 
 type localUpgradeParams struct {
-	BranchName  string
-	NodeVersion string
-	// Changelog is the staged changelog payload the script copies into
-	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog      support.StagedChangelog
+	BranchName     string
+	NodeVersion    string
 	AuthToken      string
 	ProviderName   string
 	PackageManager string
@@ -270,8 +270,9 @@ type localUpgradeParams struct {
 
 // buildLocalUpgradeScript builds a bash script that performs only the
 // language-specific upgrade operations (auth, npm/yarn/pnpm install,
-// Dockerfile updates, changelog updates). Git operations (branch
-// creation, staging, committing, pushing) are handled by LocalGitContext.
+// Dockerfile updates). The changelog is written in Go once the script has
+// run, and git operations (branch creation, staging, committing, pushing)
+// are handled by LocalGitContext.
 func buildLocalUpgradeScript(params localUpgradeParams) string {
 	var sb strings.Builder
 
@@ -289,9 +290,6 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 
 	// Update Dockerfile node image tags
 	writeDockerfileUpdate(&sb)
-
-	// Changelog update
-	sb.WriteString(support.ChangelogUpdateScript())
 
 	return sb.String()
 }
@@ -321,6 +319,5 @@ func buildLocalEnv(params localUpgradeParams) []string {
 			"GIT_HTTPS_TOKEN="+params.AuthToken,
 		)
 	}
-	env = append(env, params.Changelog.Env()...)
 	return env
 }
