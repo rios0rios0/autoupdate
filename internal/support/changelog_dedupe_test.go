@@ -148,17 +148,22 @@ func TestLocalChangelogUpdateDeduplication(t *testing.T) {
 	})
 }
 
-func TestStageLocalChangelogDeduplication(t *testing.T) {
+func TestStageRemoteChangelogDeduplication(t *testing.T) {
 	t.Parallel()
+
+	repo := entities.Repository{Organization: "org", Name: "repo"}
 
 	t.Run("should stage nothing when the entry is already recorded", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		root := writeChlogRepo(t, map[string]string{"CHANGELOG.md": changelogRecording})
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
+			WithFileContents(map[string]string{"CHANGELOG.md": changelogRecording}).
+			BuildSpy()
 
 		// when
-		staged := support.StageLocalChangelog(root, []string{goDepsEntry})
+		staged := support.StageRemoteChangelog(t.Context(), provider, repo, []string{goDepsEntry})
 		defer staged.Remove()
 
 		// then
@@ -169,10 +174,13 @@ func TestStageLocalChangelogDeduplication(t *testing.T) {
 		t.Parallel()
 
 		// given
-		root := writeChlogRepo(t, map[string]string{"CHANGELOG.md": changelogRecording})
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{"CHANGELOG.md": true}).
+			WithFileContents(map[string]string{"CHANGELOG.md": changelogRecording}).
+			BuildSpy()
 
 		// when
-		staged := support.StageLocalChangelog(root,
+		staged := support.StageRemoteChangelog(t.Context(), provider, repo,
 			[]string{"- changed the Python dependencies to their latest versions"})
 		defer staged.Remove()
 
@@ -214,21 +222,6 @@ func TestChlogFragmentDeduplication(t *testing.T) {
 		// then
 		assert.True(t, updated)
 		assert.Len(t, readChlogFragments(t, root, ".changes/unreleased"), 2)
-	})
-
-	t.Run("should stage nothing when the statement is already pending", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		root := writeChlogRepo(t, map[string]string{".changes/unreleased/": ""})
-		require.True(t, support.LocalChangelogUpdate(root, []string{goDepsEntry}))
-
-		// when
-		staged := support.StageLocalChangelog(root, []string{goDepsEntry})
-		defer staged.Remove()
-
-		// then
-		assert.True(t, staged.IsEmpty())
 	})
 }
 

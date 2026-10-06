@@ -1114,7 +1114,7 @@ func TestBuildLocalUpgradeScript(t *testing.T) {
 		assert.Contains(t, script, "NODE_VERSION")
 		assert.Contains(t, script, "PACKAGE_MANAGER")
 		assert.Contains(t, script, "Dockerfile")
-		assert.Contains(t, script, "CHANGELOG")
+		assert.NotContains(t, script, "CHANGELOG")
 	})
 
 	t.Run("should not contain git clone or push commands", func(t *testing.T) {
@@ -1327,22 +1327,25 @@ func TestBuildLocalEnv(t *testing.T) {
 		assert.False(t, hasAuth)
 	})
 
-	t.Run("should include CHANGELOG_FILE when provided", func(t *testing.T) {
+	t.Run("should leave the changelog to the Go side", func(t *testing.T) {
 		t.Parallel()
 
-		// given
+		// given: which packages moved is only known once the script has run,
+		// so the entry is no longer staged for the script to copy
 		params := jsUpdater.LocalUpgradeParamsExported{
 			BranchName:     "chore/upgrade-js-deps",
 			PackageManager: "npm",
-			Changelog:      support.StagedChangelog{TempPath: "/tmp/changelog.md", RepoPath: "CHANGELOG.md"},
 		}
 
 		// when
 		env := jsUpdater.BuildLocalEnv(params)
+		script := jsUpdater.BuildLocalUpgradeScript(params)
 
 		// then
 		envMap := envToMap(env)
-		assert.Equal(t, "/tmp/changelog.md", envMap["CHANGELOG_FILE"])
+		_, hasChangelog := envMap["CHANGELOG_FILE"]
+		assert.False(t, hasChangelog)
+		assert.NotContains(t, script, "CHANGELOG")
 	})
 }
 
@@ -1620,9 +1623,7 @@ func TestRunLanguageUpgradeScriptMajorMode(t *testing.T) { //nolint:paralleltest
 			}
 
 			// when
-			_, err := jsUpdater.RunLanguageUpgradeScript(
-				t.Context(), repoDir, vCtx, "pnpm", opts, support.StagedChangelog{},
-			)
+			_, err := jsUpdater.RunLanguageUpgradeScript(t.Context(), repoDir, vCtx, "pnpm", opts)
 
 			// then
 			require.NoError(t, err)

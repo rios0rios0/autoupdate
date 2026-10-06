@@ -221,87 +221,6 @@ func TestRemoteChangelogChanges(t *testing.T) {
 	})
 }
 
-func TestStageLocalChangelog(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should stage a fragment aimed at the unreleased directory", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		root := writeChlogRepo(t, map[string]string{".chlog.yaml": "changesDir: .changes\n"})
-
-		// when
-		staged := support.StageLocalChangelog(root, []string{"- changed a dependency"})
-		defer staged.Remove()
-
-		// then
-		require.False(t, staged.IsEmpty())
-		assert.True(t, strings.HasPrefix(staged.RepoPath, ".changes/unreleased/"), staged.RepoPath)
-
-		content, err := os.ReadFile(staged.TempPath)
-		require.NoError(t, err)
-
-		var fragment entities.ChlogFragment
-		require.NoError(t, yaml.Unmarshal(content, &fragment))
-		assert.Equal(t, "Changed", fragment.Kind)
-		assert.Equal(t, "changed a dependency", fragment.Body)
-	})
-
-	t.Run("should merge several entries into one fragment body", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		root := writeChlogRepo(t, map[string]string{".changes/unreleased/": ""})
-
-		// when
-		staged := support.StageLocalChangelog(root, []string{"- changed `a`", "- changed `b`"})
-		defer staged.Remove()
-
-		// then
-		require.False(t, staged.IsEmpty())
-
-		content, err := os.ReadFile(staged.TempPath)
-		require.NoError(t, err)
-
-		var fragment entities.ChlogFragment
-		require.NoError(t, yaml.Unmarshal(content, &fragment))
-		assert.Equal(t, "changed `a`\nchanged `b`", fragment.Body)
-	})
-
-	t.Run("should stage the edited CHANGELOG.md when the repository does not use chlog", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		root := writeChlogRepo(t, map[string]string{"CHANGELOG.md": baseChangelog})
-
-		// when
-		staged := support.StageLocalChangelog(root, []string{"- changed a dependency"})
-		defer staged.Remove()
-
-		// then
-		require.False(t, staged.IsEmpty())
-		assert.Equal(t, "CHANGELOG.md", staged.RepoPath)
-
-		content, err := os.ReadFile(staged.TempPath)
-		require.NoError(t, err)
-		assert.Contains(t, string(content), "- changed a dependency")
-	})
-
-	t.Run("should stage nothing when the repository has neither chlog nor a changelog", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		root := writeChlogRepo(t, map[string]string{"go.mod": "module example\n"})
-
-		// when
-		staged := support.StageLocalChangelog(root, []string{"- changed a dependency"})
-
-		// then
-		assert.True(t, staged.IsEmpty())
-		assert.Empty(t, staged.Env())
-	})
-}
-
 func TestStageRemoteChangelog(t *testing.T) {
 	t.Parallel()
 
@@ -328,6 +247,32 @@ func TestStageRemoteChangelog(t *testing.T) {
 			"CHANGELOG_FILE=" + staged.TempPath,
 			"CHANGELOG_DEST=" + staged.RepoPath,
 		}, staged.Env())
+	})
+
+	t.Run("should merge several entries into one fragment body", func(t *testing.T) {
+		t.Parallel()
+
+		// given: the script copies exactly one file
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().
+			WithExistingFiles(map[string]bool{".chlog.yaml": true}).
+			WithFileContents(map[string]string{".chlog.yaml": "changesDir: .changes\n"}).
+			BuildSpy()
+
+		// when
+		staged := support.StageRemoteChangelog(
+			t.Context(), provider, repo, []string{"- changed `a`", "- changed `b`"})
+		defer staged.Remove()
+
+		// then
+		require.False(t, staged.IsEmpty())
+
+		content, err := os.ReadFile(staged.TempPath)
+		require.NoError(t, err)
+
+		var fragment entities.ChlogFragment
+		require.NoError(t, yaml.Unmarshal(content, &fragment))
+		assert.Equal(t, "Changed", fragment.Kind)
+		assert.Equal(t, "changed `a`\nchanged `b`", fragment.Body)
 	})
 
 	t.Run("should stage the edited CHANGELOG.md when the repository does not use chlog", func(t *testing.T) {

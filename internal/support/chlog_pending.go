@@ -135,19 +135,6 @@ func hasOnlyChlogKeys(document *yaml.Node) bool {
 	return true
 }
 
-// pendingChlogEntries reads the bodies of the fragments a repository already
-// has waiting under its unreleased directory, so the same statement is not
-// filed twice.
-//
-// The duplicate check has to reach both formats or they drift apart: a chlog
-// repository would keep collecting a fresh fragment per run saying exactly what
-// the last run's fragment says, and the drift would only surface at release
-// time, when the fragments are compiled into one section and the same bullet
-// appears several times.
-func pendingChlogEntries(repoDir string, config *entities.ChlogConfig) []string {
-	return fragmentBodies(readPendingChlogFragments(repoDir, config))
-}
-
 // fragmentBodies returns the statements the fragments make, skipping the ones
 // that carry none.
 func fragmentBodies(fragments []pendingFragment) []string {
@@ -160,8 +147,11 @@ func fragmentBodies(fragments []pendingFragment) []string {
 	return bodies
 }
 
-// pendingRemoteChlogEntries is pendingChlogEntries for a repository that has
-// not been cloned, reading the fragments through the provider API.
+// pendingRemoteChlogEntries reads the bodies of the fragments a repository
+// that has not been cloned already has waiting, through the provider API, so
+// the same statement is not filed twice. The duplicate check has to reach both
+// formats or they drift apart: a chlog repository would keep collecting a fresh
+// fragment per run saying exactly what the last run's fragment says.
 //
 // It costs one tree listing plus one fetch per pending fragment, which is why
 // it runs only for a repository that both uses chlog and has something to

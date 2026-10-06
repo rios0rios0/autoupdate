@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,22 +20,20 @@ const ChangelogFileName = "CHANGELOG.md"
 // StagedChangelog is a changelog payload staged in a temporary file, waiting to
 // be copied into a cloned repository by a generated upgrade script.
 //
-// The script-driven updaters (Go, Python, JavaScript, Ruby, Java, C#) do the
-// clone themselves, so they cannot write the file directly; they hand the pair
-// to bash through the CHANGELOG_FILE and CHANGELOG_DEST environment variables.
-// Carrying the destination alongside the content is what lets the same script
-// serve both formats: a Keep a Changelog run copies to CHANGELOG.md, a chlog
-// run copies to .changes/unreleased/<fragment>.yaml.
+// Only the legacy clone-and-push flow (CreateUpdatePRs) stages a changelog:
+// its script does the clone itself, so Go cannot write the file directly and
+// hands the pair to bash through the CHANGELOG_FILE and CHANGELOG_DEST
+// environment variables. Carrying the destination alongside the content is
+// what lets the same script serve both formats: a Keep a Changelog run copies
+// to CHANGELOG.md, a chlog run copies to .changes/unreleased/<fragment>.yaml.
+// Every other path writes the changelog on disk after the upgrade, which is
+// what lets it name the dependencies that moved.
 type StagedChangelog struct {
 	// TempPath is the host path holding the content, or "" when there is
 	// nothing to write.
 	TempPath string
 	// RepoPath is the repository-relative destination, using forward slashes.
 	RepoPath string
-	// Fragment reports whether RepoPath is a new chlog fragment rather than an
-	// edit of an existing changelog. It decides how an abandoned run is cleaned
-	// up: git restores an edited file, but a created one has to be deleted.
-	Fragment bool
 }
 
 // IsEmpty reports whether nothing was staged, in which case the script must not
@@ -49,23 +46,6 @@ func (s StagedChangelog) IsEmpty() bool {
 func (s StagedChangelog) Remove() {
 	if s.TempPath != "" {
 		_ = os.Remove(s.TempPath)
-	}
-}
-
-// Discard removes the copy the script placed in repoDir, for a run the caller
-// decided to abandon.
-//
-// Only a chlog fragment needs it: an edited CHANGELOG.md is a tracked file that
-// the caller's "git checkout" restores, whereas a fragment is a new untracked
-// file that would survive the checkout and be left behind in the repository.
-func (s StagedChangelog) Discard(repoDir string) {
-	if s.IsEmpty() || !s.Fragment {
-		return
-	}
-
-	path := entities.ChlogFragmentDiskPath(repoDir, s.RepoPath)
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		logger.Warnf("Failed to discard the chlog fragment %s: %v", path, err)
 	}
 }
 
@@ -205,36 +185,11 @@ func remoteChangelogEdit(
 	}, true
 }
 
-// StageLocalChangelog prepares the changelog payload for a repository on disk
-// without writing it into the repository, for the updaters whose upgrade runs
-// through a generated script that performs the copy itself. An entry the
-// repository already records as pending is dropped -- see [newChangelogEntries].
-//
-// The caller must Remove the result once the script has run.
-func StageLocalChangelog(repoDir string, entries []string) StagedChangelog {
-	if len(entries) == 0 {
-		return StagedChangelog{}
-	}
-
-	config, usesChlog, err := DetectLocalChlog(repoDir)
-	if err != nil {
-		logger.Warnf("Failed to detect chlog in %s, leaving the changelog untouched: %v", repoDir, err)
-		return StagedChangelog{}
-	}
-	if usesChlog {
-		return stageChlogFragment(config, pendingChlogEntries(repoDir, config), entries)
-	}
-
-	content, err := os.ReadFile(filepath.Join(repoDir, ChangelogFileName))
-	if err != nil {
-		return StagedChangelog{} // no changelog present
-	}
-	return stageChangelogEdit(string(content), entries)
-}
-
-// StageRemoteChangelog is StageLocalChangelog for a repository that has not been
-// cloned yet: the current content is fetched through the provider API, and the
-// generated script copies the staged file into the clone it makes itself.
+// StageRemoteChangelog prepares the changelog payload for a repository that has
+// not been cloned yet: the current content is fetched through the provider API,
+// and the generated script copies the staged file into the clone it makes
+// itself. An entry the repository already records as pending is dropped -- see
+// [newChangelogEntries].
 //
 // The caller must Remove the result once the script has run.
 func StageRemoteChangelog(
@@ -309,7 +264,7 @@ func stageChlogFragment(
 		return StagedChangelog{}
 	}
 
-	return StagedChangelog{TempPath: tempPath, RepoPath: fragments[0].Path, Fragment: true}
+	return StagedChangelog{TempPath: tempPath, RepoPath: fragments[0].Path}
 }
 
 // stageChangelogEdit writes the edited CHANGELOG.md to a temporary file. An

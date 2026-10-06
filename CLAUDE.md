@@ -172,7 +172,9 @@ destination, so the two formats cannot drift apart:
   updater calls once its package manager has run. The updater's `DependencyObserver` reads what moved
   and the call writes it (rules below). The observers live beside their updaters:
   `golang/module_changes.go`, `python/package_changes.go`, `dart/package_changes.go`,
-  `ruby/gem_changes.go`, `java/artifact_changes.go` and `csharp/package_changes.go`, each reading its
+  `ruby/gem_changes.go`, `java/artifact_changes.go`, `csharp/package_changes.go` and
+  `javascript/package_changes.go` (lockfile resolvers in `javascript/lockfile_versions.go`, picked from a
+  map keyed by lockfile name), each reading its
   manifests through `support.ReadModifiedFiles` and comparing them with `support.DiffDeclaredVersions`
   (names matched the way the subject matches them — PEP 503 for Python) and `support.PinChanges`.
 - `LocalDependencyChangelogUpdate(repoDir, changes)` — for the updaters that compute their upgrades in
@@ -180,13 +182,12 @@ destination, so the two formats cannot drift apart:
 - `LocalChangelogUpdate(repoDir, entries)` — plain bullets, on disk. Every production path writes on
   disk: `autoupdate run` reaches each updater through `ApplyUpdates` on a go-git clone, and
   `autoupdate .` works in the user's checkout.
-- `RemoteChangelogChanges` and `StageRemoteChangelog` serve only the legacy `CreateUpdatePRs` paths,
-  which `autoupdate run` no longer reaches because every updater implements `LocalUpdater`; they keep
-  the generic sentences, since the clone-based script never lets Go see the upgraded tree.
-  `StageLocalChangelog` / `ChangelogUpdateScript()` remain only for the JavaScript standalone flow,
-  not yet moved to observation. Call `StagedChangelog.Discard(repoDir)` when abandoning such a run: a
-  chlog fragment is a *new untracked* file, so `git checkout -- .` would leave it behind (this is why
-  the JavaScript cosmetic-lockfile revert threads the staged value).
+- `RemoteChangelogChanges`, `StageRemoteChangelog` and `ChangelogUpdateScript()` serve only the legacy
+  `CreateUpdatePRs` paths, which `autoupdate run` no longer reaches because every updater implements
+  `LocalUpdater`; they keep the generic sentences, since the clone-based script never lets Go see the
+  upgraded tree. Every standalone (`autoupdate .`) flow writes the changelog in Go after its script, so
+  nothing is staged before an upgrade any more — which is also why the JavaScript cosmetic-lockfile
+  check runs before the changelog is written and has no fragment of its own to undo.
 
 **Statements about dependencies name them.** They are written in one grammar
 (`internal/domain/entities/dependency_change.go`): ``changed the <subject> `name` from `old` to

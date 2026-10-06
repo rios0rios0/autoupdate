@@ -210,24 +210,16 @@ func (u *UpdaterRepository) ApplyUpdates(
 		logger.Infof(
 			"[javascript] Only cosmetic lockfile version changes detected (project version sync), skipping",
 		)
-		// This flow writes the changelog itself, after this check, so there is
-		// no staged payload to undo.
-		revertWorkingTreeChanges(ctx, repoDir, support.StagedChangelog{})
+		revertWorkingTreeChanges(ctx, repoDir)
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 	logger.Infof("[javascript] Filesystem changes detected, proceeding with commit")
 
-	// Record the upgrade in the repository's changelog.
-	var entry string
-	if nodeVersionUpdated {
-		entry = fmt.Sprintf(
-			"- changed the Node.js version to `%s` and updated all JavaScript dependencies",
-			vCtx.LatestVersion,
-		)
-	} else {
-		entry = jsChangelogEntryDeps
-	}
-	support.LocalChangelogUpdate(repoDir, []string{entry})
+	// Record the upgrade in the repository's changelog, naming what moved.
+	support.RecordObservedDependencyChanges(
+		ctx, repoDir, observePackageChanges,
+		changelogEntry(nodeVersionUpdated, vCtx.LatestVersion), jsChangelogSummary,
+	)
 
 	commitMsg := upgradeSubject(vCtx.LatestVersion, nodeVersionUpdated)
 
@@ -394,13 +386,19 @@ func readCurrentNodeVersion(
 // upgrade. The staging helpers turn it into a chlog fragment when the
 // target repository uses that format instead.
 func changelogEntries(vCtx *versionContext) []string {
-	if vCtx.NeedsVersionUpgrade {
-		return []string{fmt.Sprintf(
-			"- changed the Node.js version to `%s` and updated all JavaScript dependencies",
-			vCtx.LatestVersion,
-		)}
+	return []string{changelogEntry(vCtx.NeedsVersionUpgrade, vCtx.LatestVersion)}
+}
+
+// changelogEntry is the generic statement for an upgrade, naming no package. It
+// is what a run records when its manifests cannot be compared, and what the
+// legacy clone-and-push flow records, since it never sees the upgraded tree.
+func changelogEntry(nodeVersionUpdated bool, nodeVersion string) string {
+	if nodeVersionUpdated {
+		return fmt.Sprintf(
+			"- changed the Node.js version to `%s` and updated all JavaScript dependencies", nodeVersion,
+		)
 	}
-	return []string{jsChangelogEntryDeps}
+	return jsChangelogEntryDeps
 }
 
 // --- clone + upgrade ---

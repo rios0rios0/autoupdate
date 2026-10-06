@@ -7,7 +7,6 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
-	"github.com/rios0rios0/autoupdate/internal/support"
 )
 
 // HasOnlyLockfileVersionChanges is exported for testing.
@@ -21,12 +20,8 @@ func IsPackageLockOnlyVersionSync(ctx context.Context, repoDir string) bool {
 }
 
 // RevertWorkingTreeChanges is exported for testing.
-func RevertWorkingTreeChanges(
-	ctx context.Context,
-	repoDir string,
-	changelog support.StagedChangelog,
-) {
-	revertWorkingTreeChanges(ctx, repoDir, changelog)
+func RevertWorkingTreeChanges(ctx context.Context, repoDir string) {
+	revertWorkingTreeChanges(ctx, repoDir)
 }
 
 // ParseNodeVersionFile is exported for testing.
@@ -182,12 +177,26 @@ func RunLanguageUpgradeScript(
 	vCtx *versionContext,
 	pkgMgr string,
 	opts LocalUpgradeOptions,
-	changelog support.StagedChangelog,
 ) (string, error) {
-	return runLanguageUpgradeScript(ctx, repoDir, vCtx, pkgMgr, opts, changelog)
+	return runLanguageUpgradeScript(ctx, repoDir, vCtx, pkgMgr, opts)
 }
 
 // ChangelogEntries is exported for testing.
 func ChangelogEntries(vCtx *versionContext) []string {
 	return changelogEntries(vCtx)
+}
+
+// DeclaredRanges is exported for testing.
+func DeclaredRanges(content []byte) (map[string]string, error) {
+	return declaredRanges(content)
+}
+
+// ResolveLockfile is exported for testing; name is the lockfile's file name.
+func ResolveLockfile(name string, lock []byte, dir string, declared map[string]string) (map[string]string, error) {
+	return lockfileResolvers[name](lock, dir, declared)
+}
+
+// ObservePackageChanges is exported for testing.
+func ObservePackageChanges(ctx context.Context, repoDir string) ([]entities.DependencyChange, error) {
+	return observePackageChanges(ctx, repoDir)
 }
