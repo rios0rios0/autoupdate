@@ -7,8 +7,8 @@ import (
 	logger "github.com/sirupsen/logrus"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
-	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
-	registryInfra "github.com/rios0rios0/gitforge/pkg/registry/infrastructure"
+	globalEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
+	registryInfra "github.com/rios0rios0/gitforge/v4/pkg/registry/infrastructure"
 )
 
 // collectTokens returns all possible tokens for authentication, ordered by

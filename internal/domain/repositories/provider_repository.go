@@ -1,7 +1,7 @@
 package repositories
 
 import (
-	gitforgeEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
+	gitforgeEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
 )
 
 // ProviderRepository is an alias for gitforge's FileAccessProvider.

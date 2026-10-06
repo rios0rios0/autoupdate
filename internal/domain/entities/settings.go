@@ -7,7 +7,7 @@ import (
 	"path"
 	"strings"
 
-	configEntities "github.com/rios0rios0/gitforge/pkg/config/domain/entities"
+	configEntities "github.com/rios0rios0/gitforge/v4/pkg/config/domain/entities"
 )
 
 // DefaultConfigURL is the URL to the default autoupdate configuration file.

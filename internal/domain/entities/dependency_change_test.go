@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	changelogEntities "github.com/rios0rios0/gitforge/pkg/changelog/domain/entities"
+	changelogEntities "github.com/rios0rios0/gitforge/v4/pkg/changelog/domain/entities"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

@@ -13,9 +13,9 @@ import (
 	rbRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/ruby"
 	suRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/selfupdate"
 	tfRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/terraform"
-	"github.com/rios0rios0/gitforge/pkg/providers/infrastructure/azuredevops"
-	"github.com/rios0rios0/gitforge/pkg/providers/infrastructure/github"
-	"github.com/rios0rios0/gitforge/pkg/providers/infrastructure/gitlab"
+	"github.com/rios0rios0/gitforge/v4/pkg/providers/infrastructure/azuredevops"
+	"github.com/rios0rios0/gitforge/v4/pkg/providers/infrastructure/github"
+	"github.com/rios0rios0/gitforge/v4/pkg/providers/infrastructure/gitlab"
 	"go.uber.org/dig"
 )
 

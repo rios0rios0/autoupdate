@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	domainRepos "github.com/rios0rios0/autoupdate/internal/domain/repositories"
-	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
-	registryInfra "github.com/rios0rios0/gitforge/pkg/registry/infrastructure"
+	globalEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
+	registryInfra "github.com/rios0rios0/gitforge/v4/pkg/registry/infrastructure"
 )
 
 // ProviderFactory is a constructor function that creates a ProviderRepository given an auth token.

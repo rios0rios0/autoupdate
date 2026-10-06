@@ -11,8 +11,8 @@ import (
 	logger "github.com/sirupsen/logrus"
 
 	"github.com/rios0rios0/autoupdate/internal/support"
-	gitops "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
-	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
+	gitops "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
+	globalEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
 )
 
 // PushAuthResolver resolves authentication for git push operations.

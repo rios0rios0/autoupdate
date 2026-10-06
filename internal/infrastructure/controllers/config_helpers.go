@@ -9,8 +9,8 @@ import (
 
 	"github.com/rios0rios0/autoupdate/configs"
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
-	configHelpers "github.com/rios0rios0/gitforge/pkg/config/domain/helpers"
-	downloadHelpers "github.com/rios0rios0/gitforge/pkg/config/infrastructure/helpers"
+	configHelpers "github.com/rios0rios0/gitforge/v4/pkg/config/domain/helpers"
+	downloadHelpers "github.com/rios0rios0/gitforge/v4/pkg/config/infrastructure/helpers"
 )
 
 // applySkipCleanupFlag turns off stale branch cleanup when --skip-cleanup is set.

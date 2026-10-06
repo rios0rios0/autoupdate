@@ -16,7 +16,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/support"
-	gitops "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
+	gitops "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
 )
 
 // BatchGitContext wraps a cloned go-git repository for batch mode operations.
