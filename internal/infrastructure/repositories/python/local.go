@@ -150,6 +150,16 @@ func executeLocalUpgrade(
 
 	pythonVersionUpdated := strings.Contains(outputStr, "PYTHON_VERSION_UPDATED=true")
 
+	// Record the upgrade in the repository's changelog, naming what moved. The
+	// script no longer copies a changelog staged before it ran: which packages
+	// moved is only known once it has.
+	if support.HasUncommittedChanges(ctx, repoDir) {
+		support.RecordObservedDependencyChanges(
+			ctx, repoDir, observePackageChanges,
+			changelogEntry(pythonVersionUpdated, vCtx.LatestVersion, project.Toolchain()), pyChangelogSummary,
+		)
+	}
+
 	// --- Git Finalize (go-git) ---
 	commitMsg := pyCommitMsgDeps
 	if pythonVersionUpdated {
@@ -178,7 +188,7 @@ func executeLocalUpgrade(
 
 // runLanguageUpgradeScript builds and executes the bash script that
 // performs Python-specific upgrade operations (pip install, pyproject
-// updates, Dockerfile updates, changelog updates).
+// updates, Dockerfile updates).
 func runLanguageUpgradeScript(
 	ctx context.Context,
 	repoDir string,
@@ -186,9 +196,6 @@ func runLanguageUpgradeScript(
 	project pythonProject,
 	opts LocalUpgradeOptions,
 ) (string, error) {
-	changelog := support.StageLocalChangelog(repoDir, changelogEntries(vCtx))
-	defer changelog.Remove()
-
 	pythonBinary, err := findPythonBinary()
 	if err != nil {
 		return "", fmt.Errorf("python binary not found: %w", err)
@@ -197,7 +204,6 @@ func runLanguageUpgradeScript(
 	params := localUpgradeParams{
 		BranchName:    vCtx.BranchName,
 		PythonVersion: vCtx.LatestVersion,
-		Changelog:     changelog,
 		AuthToken:     opts.AuthToken,
 		ProviderName:  opts.ProviderName,
 		Project:       project,
@@ -221,11 +227,8 @@ func runLanguageUpgradeScript(
 type localUpgradeParams struct {
 	BranchName    string
 	PythonVersion string
-	// Changelog is the staged changelog payload the script copies into
-	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog    support.StagedChangelog
-	AuthToken    string
-	ProviderName string
+	AuthToken     string
+	ProviderName  string
 	// Project carries the manifests the repository has and the dependency
 	// manager selected from them.
 	Project      pythonProject
@@ -236,9 +239,9 @@ type localUpgradeParams struct {
 
 // buildLocalUpgradeScript builds a bash script that performs only the
 // language-specific upgrade operations (auth, pip install, pyproject
-// updates, Dockerfile updates, changelog updates). Git operations
-// (branch creation, staging, committing, pushing) are handled by
-// LocalGitContext.
+// updates, Dockerfile updates). The changelog is written in Go once the
+// script has run, and git operations (branch creation, staging,
+// committing, pushing) are handled by LocalGitContext.
 func buildLocalUpgradeScript(params localUpgradeParams) string {
 	var sb strings.Builder
 
@@ -259,9 +262,6 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 
 	// Update Dockerfile python image tags
 	writeDockerfileUpdate(&sb)
-
-	// Changelog update
-	sb.WriteString(support.ChangelogUpdateScript())
 
 	return sb.String()
 }
@@ -291,6 +291,5 @@ func buildLocalEnv(params localUpgradeParams) []string {
 			"GIT_HTTPS_TOKEN="+params.AuthToken,
 		)
 	}
-	env = append(env, params.Changelog.Env()...)
 	return env
 }

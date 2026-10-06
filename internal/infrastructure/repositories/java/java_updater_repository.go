@@ -215,17 +215,11 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	// Record the upgrade in the repository's changelog.
-	var entry string
-	if javaVersionUpdated {
-		entry = fmt.Sprintf(
-			"- changed the Java version to `%s` and updated all dependencies",
-			vCtx.LatestVersion,
-		)
-	} else {
-		entry = javaChangelogEntryDeps
-	}
-	support.LocalChangelogUpdate(repoDir, []string{entry})
+	// Record the upgrade in the repository's changelog, naming what moved.
+	support.RecordObservedDependencyChanges(
+		ctx, repoDir, observeArtifactChanges,
+		changelogEntry(javaVersionUpdated, vCtx.LatestVersion), javaChangelogSummary,
+	)
 
 	commitMsg := upgradeSubject(vCtx.LatestVersion, javaVersionUpdated)
 	prTitle := commitMsg
@@ -415,13 +409,17 @@ func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionCon
 // upgrade. The staging helpers turn it into a chlog fragment when the
 // target repository uses that format instead.
 func changelogEntries(vCtx *versionContext) []string {
-	if vCtx.NeedsVersionUpgrade {
-		return []string{fmt.Sprintf(
-			"- changed the Java version to `%s` and updated all dependencies",
-			vCtx.LatestVersion,
-		)}
+	return []string{changelogEntry(vCtx.NeedsVersionUpgrade, vCtx.LatestVersion)}
+}
+
+// changelogEntry is the generic statement for an upgrade, naming no artifact.
+// It is what a run records when its build files cannot be compared, and what
+// the legacy clone-and-push flow records, since it never sees the upgraded tree.
+func changelogEntry(javaVersionUpdated bool, javaVersion string) string {
+	if javaVersionUpdated {
+		return fmt.Sprintf("- changed the Java version to `%s` and updated all dependencies", javaVersion)
 	}
-	return []string{javaChangelogEntryDeps}
+	return javaChangelogEntryDeps
 }
 
 // --- clone + upgrade ---

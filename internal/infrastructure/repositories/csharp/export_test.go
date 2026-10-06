@@ -119,3 +119,13 @@ func ResolveLocalVersionContext(
 func DotnetVersionFor(vCtx *versionContext) string {
 	return dotnetVersionFor(vCtx)
 }
+
+// DeclaredPackageVersions is exported for testing.
+func DeclaredPackageVersions(content []byte) (map[string]string, error) {
+	return declaredPackageVersions(content)
+}
+
+// ObservePackageChanges is exported for testing.
+func ObservePackageChanges(ctx context.Context, repoDir string) ([]entities.DependencyChange, error) {
+	return observePackageChanges(ctx, repoDir)
+}

@@ -140,3 +140,13 @@ func RunLanguageUpgradeScript(
 func RubyVersionFor(vCtx *versionContext) string {
 	return rubyVersionFor(vCtx)
 }
+
+// LockedGemVersions is exported for testing.
+func LockedGemVersions(content []byte) (map[string]string, error) {
+	return lockedGemVersions(content)
+}
+
+// ObserveGemChanges is exported for testing.
+func ObserveGemChanges(ctx context.Context, repoDir string) ([]entities.DependencyChange, error) {
+	return observeGemChanges(ctx, repoDir)
+}

@@ -127,6 +127,15 @@ func executeLocalUpgrade(
 		return nil, runErr
 	}
 
+	// Record the upgrade in the repository's changelog, naming what moved. The
+	// script no longer copies a changelog staged before it ran: which packages
+	// moved is only known once it has.
+	if support.HasUncommittedChanges(ctx, repoDir) {
+		support.RecordObservedDependencyChanges(
+			ctx, repoDir, observePackageChanges, changelogEntry(vCtx, sdkUpdated), dartChangelogSummary,
+		)
+	}
+
 	// --- Git Finalize (go-git) ---
 	pushed, pushErr := gitCtx.StageCommitAndPush(
 		vCtx.BranchName, commitMessage(vCtx, sdkUpdated), opts.AuthToken,
@@ -146,20 +155,16 @@ func executeLocalUpgrade(
 }
 
 // runLanguageUpgradeScript builds and executes the bash script that performs the
-// pub upgrade and the changelog update.
+// pub upgrade. The changelog is written in Go once the script has run.
 func runLanguageUpgradeScript(
 	ctx context.Context,
 	repoDir string,
 	vCtx *versionContext,
 	opts LocalUpgradeOptions,
 ) (string, error) {
-	changelog := support.StageLocalChangelog(repoDir, changelogEntries(vCtx, vCtx.NeedsVersionUpgrade))
-	defer changelog.Remove()
-
 	params := localUpgradeParams{
 		BranchName:   vCtx.BranchName,
 		Toolchain:    vCtx.Toolchain,
-		Changelog:    changelog,
 		AuthToken:    opts.AuthToken,
 		ProviderName: opts.ProviderName,
 
@@ -179,11 +184,8 @@ func runLanguageUpgradeScript(
 // --- local-mode internal types & helpers ---
 
 type localUpgradeParams struct {
-	BranchName string
-	Toolchain  string
-	// Changelog is the staged changelog payload the script copies into
-	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog    support.StagedChangelog
+	BranchName   string
+	Toolchain    string
 	AuthToken    string
 	ProviderName string
 	// AllowMajorUpdates decides whether pub is asked for --major-versions.
@@ -193,9 +195,9 @@ type localUpgradeParams struct {
 }
 
 // buildLocalUpgradeScript builds a bash script that performs only the pub
-// operations and the changelog update. Git operations (branch creation,
-// staging, committing, pushing) are handled by LocalGitContext, and the .fvmrc
-// pin is rewritten in Go.
+// operations. Git operations (branch creation, staging, committing, pushing)
+// are handled by LocalGitContext, and the .fvmrc pin and the changelog are
+// written in Go.
 func buildLocalUpgradeScript(params localUpgradeParams) string {
 	allowMajorUpdates := params.AllowMajorUpdates
 	var sb strings.Builder
@@ -205,7 +207,6 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 
 	writeLocalAuth(&sb, params)
 	writeDartUpgradeCommands(&sb, allowMajorUpdates)
-	sb.WriteString(support.ChangelogUpdateScript())
 
 	return sb.String()
 }
@@ -231,6 +232,5 @@ func buildLocalEnv(params localUpgradeParams) []string {
 			"GIT_HTTPS_TOKEN="+params.AuthToken,
 		)
 	}
-	env = append(env, params.Changelog.Env()...)
 	return env
 }

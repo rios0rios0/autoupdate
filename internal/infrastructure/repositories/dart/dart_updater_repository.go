@@ -144,7 +144,10 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	support.LocalChangelogUpdate(repoDir, changelogEntries(vCtx, sdkUpdated))
+	// Record the upgrade in the repository's changelog, naming what moved.
+	support.RecordObservedDependencyChanges(
+		ctx, repoDir, observePackageChanges, changelogEntry(vCtx, sdkUpdated), dartChangelogSummary,
+	)
 
 	commitMsg := commitMessage(vCtx, sdkUpdated)
 	return &repositories.LocalUpdateResult{
@@ -313,13 +316,19 @@ func newVersionContext(toolchain, latest, currentPin string) *versionContext {
 // The staging helpers turn it into a chlog fragment when the target repository
 // uses that format instead.
 func changelogEntries(vCtx *versionContext, sdkUpdated bool) []string {
+	return []string{changelogEntry(vCtx, sdkUpdated)}
+}
+
+// changelogEntry is the generic statement for an upgrade, naming no package. It
+// is what a run records when its manifests cannot be compared, and what the
+// legacy clone-and-push flow records, since it never sees the upgraded tree.
+func changelogEntry(vCtx *versionContext, sdkUpdated bool) string {
 	if sdkUpdated {
-		return []string{fmt.Sprintf(
-			"- changed the Flutter SDK to `%s` and updated all pub dependencies",
-			vCtx.LatestVersion,
-		)}
+		return fmt.Sprintf(
+			"- changed the Flutter SDK to `%s` and updated all pub dependencies", vCtx.LatestVersion,
+		)
 	}
-	return []string{dartChangelogEntryDeps}
+	return dartChangelogEntryDeps
 }
 
 // commitMessage renders the commit subject for the upgrade.

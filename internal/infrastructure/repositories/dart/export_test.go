@@ -99,3 +99,12 @@ func (u *UpdaterRepository) ResolveLocalVersionContextForTest(
 ) *versionContext {
 	return u.resolveLocalVersionContext(ctx, repoDir)
 }
+
+// LockedDirectVersions exports lockedDirectVersions for testing.
+var LockedDirectVersions = lockedDirectVersions //nolint:gochecknoglobals // test export
+
+// DeclaredConstraints exports declaredConstraints for testing.
+var DeclaredConstraints = declaredConstraints //nolint:gochecknoglobals // test export
+
+// ObservePackageChanges exports observePackageChanges for testing.
+var ObservePackageChanges = observePackageChanges //nolint:gochecknoglobals // test export
