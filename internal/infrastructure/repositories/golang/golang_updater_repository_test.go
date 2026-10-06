@@ -635,6 +635,24 @@ func TestBuildLocalUpgradeScriptFull(t *testing.T) {
 		// then
 		assert.Contains(t, script, "config.sh")
 	})
+
+	t.Run("should leave the changelog to the Go side", func(t *testing.T) {
+		t.Parallel()
+
+		// given: which modules moved is only known once the script has run,
+		// so the entry cannot be staged for the script to copy
+		params := goUpdater.LocalUpgradeParamsType{GoVersion: "1.27.1", ProviderName: "github"}
+
+		// when
+		script := goUpdater.BuildLocalUpgradeScriptFull(params)
+		env := goUpdater.BuildLocalEnvFull(params, "/usr/local/go/bin/go")
+
+		// then
+		assert.NotContains(t, script, "CHANGELOG")
+		for _, variable := range env {
+			assert.False(t, strings.HasPrefix(variable, "CHANGELOG_"), variable)
+		}
+	})
 }
 
 func TestWriteLocalAuth(t *testing.T) {

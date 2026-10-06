@@ -217,3 +217,8 @@ func ResolveTagsForSource(
 ) ([]string, *entities.Repository) {
 	return resolveTagsForSource(ctx, provider, currentRepo, source)
 }
+
+// DependencyChanges is exported for testing.
+func DependencyChanges(upgrades []upgradeTask) []entities.DependencyChange {
+	return dependencyChanges(upgrades)
+}

@@ -235,17 +235,11 @@ func (u *UpdaterRepository) ApplyUpdates(
 	}
 	logger.Infof("[golang] Filesystem changes detected, proceeding with commit")
 
-	// Record the upgrade in the repository's changelog.
-	var entry string
-	if goVersionUpdated {
-		entry = fmt.Sprintf(
-			"- changed the Go version to `%s` and updated all module dependencies",
-			vCtx.LatestVersion,
-		)
-	} else {
-		entry = goChangelogEntryDeps
-	}
-	support.LocalChangelogUpdate(repoDir, []string{entry})
+	// Record the upgrade in the repository's changelog, naming what moved.
+	support.RecordObservedDependencyChanges(
+		ctx, repoDir, observeModuleChanges,
+		changelogEntry(goVersionUpdated, vCtx.LatestVersion), goChangelogSummary,
+	)
 
 	commitMsg := goCommitMsgDeps
 	prTitle := commitMsg
@@ -435,13 +429,17 @@ func resolveVersionContext(
 // The staging helpers turn it into a chlog fragment when the target repository
 // uses that format instead.
 func changelogEntries(vCtx *versionContext) []string {
-	if vCtx.NeedsVersionUpgrade {
-		return []string{fmt.Sprintf(
-			"- changed the Go version to `%s` and updated all module dependencies",
-			vCtx.LatestVersion,
-		)}
+	return []string{changelogEntry(vCtx.NeedsVersionUpgrade, vCtx.LatestVersion)}
+}
+
+// changelogEntry is the generic statement for an upgrade, naming no module. It
+// is what a run records when the go.mod files cannot be compared, and what the
+// legacy clone-and-push flow records, since it never sees the upgraded tree.
+func changelogEntry(goVersionUpdated bool, goVersion string) string {
+	if goVersionUpdated {
+		return fmt.Sprintf("- changed the Go version to `%s` and updated all module dependencies", goVersion)
 	}
-	return []string{goChangelogEntryDeps}
+	return goChangelogEntryDeps
 }
 
 // --- internal types ---

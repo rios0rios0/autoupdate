@@ -4,12 +4,10 @@ import (
 	"strings"
 
 	logger "github.com/sirupsen/logrus"
-
-	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 )
 
 // unreleasedHeading opens the section holding the changes that have not been
-// released yet. gitforge writes there, so it is also the only section a
+// released yet. autoupdate writes there, so it is also the only section a
 // duplicate can land in.
 const unreleasedHeading = "## [Unreleased]"
 
@@ -31,15 +29,15 @@ var bulletMarkers = []string{"- ", "* "}
 // repositories: an entry it wrote yesterday is merged into the default branch
 // by the time it looks again, so an unfiltered insert restates it verbatim on
 // every run until the next release moves the section away. Nothing downstream
-// catches that -- gitforge's InsertChangelogEntry appends whatever it is
-// handed -- so the check has to happen here, in the one place every updater
+// catches that, so the check has to happen here, in the one place every updater
 // funnels through.
 //
 // Two entries are the same statement when they normalize to the same text.
-// Deliberately nothing fuzzier: an entry naming a different version
-// ("from 3.13 to 3.14" after "from 3.12 to 3.13") describes a second, real
-// upgrade, and a similarity threshold that collapsed those would silently drop
-// a change the repository actually took.
+// Deliberately nothing fuzzier for these plain entries: a similarity threshold
+// cannot tell a reworded statement from a different one. Statements that name
+// dependencies are not compared here at all -- [mergeDependencyChanges] matches
+// them dependency by dependency, which is what lets a second upgrade of the same
+// library update the pending statement instead of being written beside it.
 func newChangelogEntries(recorded, entries []string) []string {
 	if len(entries) == 0 {
 		return entries
@@ -72,69 +70,11 @@ func newChangelogEntries(recorded, entries []string) []string {
 // insertChangelogEntries records the entries in a Keep a Changelog document,
 // leaving out the ones its [Unreleased] section already states.
 //
-// Every edit of a CHANGELOG.md goes through here rather than calling
-// entities.InsertChangelogEntry directly, so the duplicate check cannot be
-// bypassed by a new call site.
+// Every edit of a CHANGELOG.md goes through the same [changelogDocument], so
+// the duplicate check cannot be bypassed by a new call site, and an entry is
+// never inserted between a wrapped bullet and its continuation line.
 func insertChangelogEntries(content string, entries []string) string {
-	fresh := newChangelogEntries(unreleasedEntries(content), entries)
-	if len(fresh) == 0 {
-		return content
-	}
-	return entities.InsertChangelogEntry(content, fresh)
-}
-
-// unreleasedEntries returns the bullets a Keep a Changelog document already
-// records under [Unreleased], one string per bullet with wrapped continuation
-// lines folded back into it.
-//
-// Only the pending section is read. A bullet under a released heading describes
-// something that has already shipped, and the same dependency moving again
-// after that release is a new fact the changelog is supposed to state.
-func unreleasedEntries(content string) []string {
-	var (
-		entries []string
-		current strings.Builder
-		inside  bool
-	)
-
-	flush := func() {
-		if current.Len() > 0 {
-			entries = append(entries, current.String())
-			current.Reset()
-		}
-	}
-
-	for line := range strings.SplitSeq(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-
-		// "### Changed" is not an H2, so a subsection never closes the section.
-		if strings.HasPrefix(trimmed, h2Prefix) {
-			flush()
-			inside = strings.HasPrefix(trimmed, unreleasedHeading)
-			continue
-		}
-		if !inside {
-			continue
-		}
-
-		switch {
-		case isBulletLine(trimmed):
-			flush()
-			current.WriteString(trimmed)
-		case trimmed == "" || strings.HasPrefix(trimmed, "#"):
-			// A blank line or a subheading ends the bullet above it, and is
-			// itself not an entry.
-			flush()
-		case current.Len() > 0:
-			// An indented continuation of the bullet above: changelogs wrap, so
-			// a single statement can span several lines and still has to
-			// compare equal to the one-line entry an updater offers.
-			current.WriteString(" " + trimmed)
-		}
-	}
-	flush()
-
-	return entries
+	return mergeIntoChangelog(content, entries, nil)
 }
 
 // isBulletLine reports whether an already-trimmed line opens a list item.

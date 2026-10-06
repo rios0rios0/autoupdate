@@ -151,7 +151,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, err
 	}
 
-	support.LocalChangelogUpdate(repoDir, changelogEntries(upgrades))
+	support.LocalDependencyChangelogUpdate(repoDir, dependencyChanges(upgrades))
 
 	return &repositories.LocalUpdateResult{
 		BranchName:    generateBranchName(upgrades),
@@ -641,4 +641,21 @@ func changelogEntries(upgrades []upgradeTask) []string {
 		))
 	}
 	return entries
+}
+
+// dependencyChanges states every upgrade as a dependency change for the
+// changelog writer, which names them several to a line and merges an image the
+// pending section already mentions. A digest re-resolved alongside the tag is
+// part of the same upgrade and is not stated separately.
+func dependencyChanges(upgrades []upgradeTask) []entities.DependencyChange {
+	changes := make([]entities.DependencyChange, 0, len(upgrades))
+	for _, up := range upgrades {
+		changes = append(changes, entities.DependencyChange{
+			Subject: entities.SubjectDockerBaseImage,
+			Name:    up.parsed.FullName(),
+			From:    up.dep.CurrentVer,
+			To:      up.newTag,
+		})
+	}
+	return changes
 }

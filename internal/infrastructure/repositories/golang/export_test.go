@@ -204,3 +204,21 @@ func BuildRemoteScriptForMajorMode(allowMajorUpdates bool) string {
 	//nolint:exhaustruct // only the major-mode field is under test here
 	return buildUpgradeScript(upgradeParams{AllowMajorUpdates: allowMajorUpdates}, "", "")
 }
+
+// DiffGoMod is exported for testing.
+func DiffGoMod(modPath string, before, after []byte) ([]entities.DependencyChange, error) {
+	return diffGoMod(modPath, before, after)
+}
+
+// ObserveModuleChanges is exported for testing.
+func ObserveModuleChanges(ctx context.Context, repoDir string) ([]entities.DependencyChange, error) {
+	return observeModuleChanges(ctx, repoDir)
+}
+
+// ChangelogEntry is exported for testing.
+func ChangelogEntry(goVersionUpdated bool, goVersion string) string {
+	return changelogEntry(goVersionUpdated, goVersion)
+}
+
+// GoChangelogSummary is exported for testing.
+const GoChangelogSummary = goChangelogSummary

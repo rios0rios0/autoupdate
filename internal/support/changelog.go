@@ -117,97 +117,13 @@ fi
 // An entry the repository already records as pending is dropped, whichever
 // format it uses. See [newChangelogEntries] for why: autoupdate runs on a
 // schedule against the same repositories, so without the check it restates
-// yesterday's entry verbatim on every run.
+// yesterday's entry verbatim on every run. Entries that name dependencies go
+// through [LocalDependencyChangelogUpdate] instead, which merges them.
 func LocalChangelogUpdate(repoDir string, entries []string) bool {
 	if len(entries) == 0 {
 		return false
 	}
-
-	config, usesChlog, err := DetectLocalChlog(repoDir)
-	if err != nil {
-		logger.Warnf("Failed to detect chlog in %s, leaving the changelog untouched: %v", repoDir, err)
-		return false
-	}
-	if usesChlog {
-		return writeLocalChlogFragments(repoDir, config, entries)
-	}
-
-	return insertLocalChangelogEntries(repoDir, entries)
-}
-
-// writeLocalChlogFragments renders the entries as chlog fragments and writes
-// them under the repository's unreleased directory, creating it when a
-// .chlog.yaml declares a directory that does not exist yet.
-func writeLocalChlogFragments(
-	repoDir string,
-	config *entities.ChlogConfig,
-	entries []string,
-) bool {
-	fresh := newChangelogEntries(pendingChlogEntries(repoDir, config), entries)
-	if len(fresh) == 0 {
-		return false
-	}
-
-	fragments, err := config.NewChlogFragments(fresh, time.Now())
-	if err != nil {
-		logger.Warnf("Failed to build the chlog fragments: %v", err)
-		return false
-	}
-	if len(fragments) == 0 {
-		return false
-	}
-
-	unreleasedDir := entities.ChlogFragmentDiskPath(repoDir, config.UnreleasedPath())
-	// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
-	if err = os.MkdirAll(unreleasedDir, entities.ChlogFragmentDirMode); err != nil {
-		logger.Warnf("Failed to create the chlog fragment directory %s: %v", unreleasedDir, err)
-		return false
-	}
-
-	written := false
-	for _, fragment := range fragments {
-		fragmentPath := entities.ChlogFragmentDiskPath(repoDir, fragment.Path)
-
-		// path is validated against escaping the repository root
-		if err = os.WriteFile(fragmentPath, []byte(fragment.Content), 0o600); err != nil {
-			logger.Warnf("Failed to write the chlog fragment %s: %v", fragmentPath, err)
-			continue
-		}
-		written = true
-	}
-
-	if written {
-		logger.Infof("Recorded %d chlog fragment(s) in %s", len(fragments), config.UnreleasedPath())
-	}
-	return written
-}
-
-// insertLocalChangelogEntries appends the entries to the [Unreleased] section of
-// CHANGELOG.md on disk. A repository without a changelog is left alone.
-func insertLocalChangelogEntries(repoDir string, entries []string) bool {
-	changelogPath := filepath.Clean(filepath.Join(repoDir, ChangelogFileName))
-	data, err := os.ReadFile(changelogPath)
-	if err != nil {
-		logger.Warnf("Failed to read %s: %v", ChangelogFileName, err)
-		return false
-	}
-
-	content := string(data)
-	modified := insertChangelogEntries(content, entries)
-	if modified == content {
-		return false
-	}
-
-	writeErr := os.WriteFile( //nolint:gosec // repoDir is a controlled internal path
-		changelogPath,
-		[]byte(modified),
-		0o600,
-	)
-	if writeErr != nil {
-		logger.Warnf("Failed to write %s: %v", ChangelogFileName, writeErr)
-		return false
-	}
-	return true
+	return recordLocalChangelog(repoDir, entries, nil)
 }
 
 // RemoteChangelogChanges builds the file changes that record the given entries

@@ -144,7 +144,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, err
 	}
 
-	support.LocalChangelogUpdate(repoDir, changelogEntries(upgrades))
+	support.LocalDependencyChangelogUpdate(repoDir, dependencyChanges(upgrades))
 
 	return &repositories.LocalUpdateResult{
 		BranchName:    generateBranchName(upgrades),
@@ -843,6 +843,27 @@ func changelogEntries(upgrades []upgradeTask) []string {
 		))
 	}
 	return entries
+}
+
+// dependencyChanges states every upgrade as a dependency change for the
+// changelog writer, which names them several to a line and merges a module the
+// pending section already mentions. A module is named by the last segment of its
+// source, as the per-upgrade statements always named it.
+func dependencyChanges(upgrades []upgradeTask) []entities.DependencyChange {
+	changes := make([]entities.DependencyChange, 0, len(upgrades))
+	for _, up := range upgrades {
+		subject := entities.SubjectTerraformModule
+		if up.kind == depKindImage {
+			subject = entities.SubjectContainerImage
+		}
+		changes = append(changes, entities.DependencyChange{
+			Subject: subject,
+			Name:    extractRepoName(up.dep.Source),
+			From:    up.dep.CurrentVer,
+			To:      up.newVersion,
+		})
+	}
+	return changes
 }
 
 func generatePRDescription(tasks []upgradeTask) string {

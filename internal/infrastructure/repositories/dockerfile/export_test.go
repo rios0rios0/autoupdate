@@ -257,3 +257,8 @@ func splitNamespace(imageName string) [2]string {
 	}
 	return [2]string{"", imageName}
 }
+
+// DependencyChanges is exported for testing.
+func DependencyChanges(upgrades []upgradeTask) []entities.DependencyChange {
+	return dependencyChanges(upgrades)
+}
