@@ -10,7 +10,7 @@ import (
 	logger "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
 
-	configEntities "github.com/rios0rios0/gitforge/pkg/config/domain/entities"
+	configEntities "github.com/rios0rios0/gitforge/v4/pkg/config/domain/entities"
 )
 
 // The four configuration layers, in the order they are applied. Each one overrides only

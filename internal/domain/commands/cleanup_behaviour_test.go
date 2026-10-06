@@ -22,7 +22,7 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
 	"github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
-	gitops "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
+	gitops "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
 )
 
 // localAuthMethods satisfies the clone helper, which refuses an empty list. A remote on

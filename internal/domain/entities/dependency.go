@@ -1,7 +1,7 @@
 package entities
 
 import (
-	gitforgeEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
+	gitforgeEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
 )
 
 // Dependency represents a versioned dependency found in a repository.

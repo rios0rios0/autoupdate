@@ -15,9 +15,9 @@ import (
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
 	"github.com/rios0rios0/autoupdate/internal/support"
-	configHelpers "github.com/rios0rios0/gitforge/pkg/config/domain/helpers"
-	gitInfra "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
-	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
+	configHelpers "github.com/rios0rios0/gitforge/v4/pkg/config/domain/helpers"
+	gitInfra "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
+	globalEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
 	langEntities "github.com/rios0rios0/langforge/pkg/domain/entities"
 	langRegistry "github.com/rios0rios0/langforge/pkg/infrastructure/registry"
 )

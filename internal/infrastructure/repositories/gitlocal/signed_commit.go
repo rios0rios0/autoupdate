@@ -8,9 +8,9 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
 
-	gitops "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
-	gitHelpers "github.com/rios0rios0/gitforge/pkg/git/infrastructure/helpers"
-	signingInfra "github.com/rios0rios0/gitforge/pkg/signing/infrastructure"
+	gitops "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
+	gitHelpers "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure/helpers"
+	signingInfra "github.com/rios0rios0/gitforge/v4/pkg/signing/infrastructure"
 )
 
 // signingIdentity is the program name the signer reports itself under.

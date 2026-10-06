@@ -17,7 +17,7 @@ import (
 	infraRepos "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
 	"github.com/rios0rios0/autoupdate/internal/support"
-	gitops "github.com/rios0rios0/gitforge/pkg/git/infrastructure"
+	gitops "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
 )
 
 // defaultRepoConcurrency is the number of repositories processed in parallel

@@ -9,7 +9,7 @@ import (
 	domainRepos "github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	"github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
-	globalEntities "github.com/rios0rios0/gitforge/pkg/global/domain/entities"
+	globalEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
 )
 
 func TestProviderRegistry_NewProviderRegistry(t *testing.T) {
