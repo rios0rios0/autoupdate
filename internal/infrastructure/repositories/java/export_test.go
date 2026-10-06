@@ -109,3 +109,18 @@ func WriteCommitAndPush(sb *strings.Builder) {
 func DetectLocalBuildSystem(repoDir string) string {
 	return detectLocalBuildSystem(repoDir)
 }
+
+// DeclaredArtifactVersions is exported for testing.
+func DeclaredArtifactVersions(content []byte) (map[string]string, error) {
+	return declaredArtifactVersions(content)
+}
+
+// GradleWrapperVersion is exported for testing.
+func GradleWrapperVersion(content string) string {
+	return gradleWrapperVersion(content)
+}
+
+// ObserveArtifactChanges is exported for testing.
+func ObserveArtifactChanges(ctx context.Context, repoDir string) ([]entities.DependencyChange, error) {
+	return observeArtifactChanges(ctx, repoDir)
+}

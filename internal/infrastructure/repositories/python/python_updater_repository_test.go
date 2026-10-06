@@ -1006,7 +1006,6 @@ func TestBuildLocalEnv(t *testing.T) {
 		params := pyUpdater.LocalUpgradeParamsExported{
 			BranchName:    "chore/upgrade-python-deps",
 			AuthToken:     "tok",
-			Changelog:     support.StagedChangelog{TempPath: "/tmp/cl.md", RepoPath: "CHANGELOG.md"},
 			PythonVersion: "3.13.1",
 			PythonBinary:  "/usr/bin/python3",
 		}
@@ -1021,7 +1020,8 @@ func TestBuildLocalEnv(t *testing.T) {
 		assert.Equal(t, "3.13.1", envMap["PYTHON_VERSION"])
 		assert.Equal(t, "tok", envMap["AUTH_TOKEN"])
 		assert.Equal(t, "tok", envMap["GIT_HTTPS_TOKEN"])
-		assert.Equal(t, "/tmp/cl.md", envMap["CHANGELOG_FILE"])
+		_, hasChangelog := envMap["CHANGELOG_FILE"]
+		assert.False(t, hasChangelog)
 	})
 
 	t.Run("should omit optional variables when fields are empty", func(t *testing.T) {

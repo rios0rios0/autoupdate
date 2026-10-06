@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 )
 
@@ -50,4 +51,45 @@ func HeadFileContent(ctx context.Context, repoDir, path string) ([]byte, error) 
 // returns it, into a path under repoDir using the host separator.
 func WorkingFilePath(repoDir, path string) string {
 	return filepath.Join(repoDir, filepath.FromSlash(path))
+}
+
+// ModifiedFile is a tracked file a run modified, as HEAD had it and as the
+// working tree has it now.
+type ModifiedFile struct {
+	// Path is repository-relative, with forward slashes.
+	Path   string
+	Before []byte
+	After  []byte
+}
+
+// ReadModifiedFiles returns both versions of every tracked file the working tree
+// modified since HEAD whose path match accepts. It is the one way a dependency
+// reader looks at what a run changed, so every reader compares the same two
+// states.
+func ReadModifiedFiles(ctx context.Context, repoDir string, match func(path string) bool) ([]ModifiedFile, error) {
+	paths, err := ModifiedPaths(ctx, repoDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []ModifiedFile
+	for _, path := range paths {
+		if !match(path) {
+			continue
+		}
+
+		before, headErr := HeadFileContent(ctx, repoDir, path)
+		if headErr != nil {
+			return nil, headErr
+		}
+
+		// path came from git's own listing of the files modified in repoDir.
+		after, readErr := os.ReadFile(WorkingFilePath(repoDir, path))
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", path, readErr)
+		}
+
+		files = append(files, ModifiedFile{Path: path, Before: before, After: after})
+	}
+	return files, nil
 }

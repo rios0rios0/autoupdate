@@ -89,3 +89,40 @@ func TestHeadFileContent(t *testing.T) {
 		assert.Nil(t, content)
 	})
 }
+
+func TestReadModifiedFiles(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return both versions of the modified files that match", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := gitrepo.New(t, map[string]string{"a/go.mod": "before\n", "README.md": "before\n"})
+		gitrepo.Write(t, root, map[string]string{"a/go.mod": "after\n", "README.md": "after\n"})
+
+		// when
+		files, err := support.ReadModifiedFiles(t.Context(), root, func(path string) bool {
+			return path == "a/go.mod"
+		})
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, []support.ModifiedFile{
+			{Path: "a/go.mod", Before: []byte("before\n"), After: []byte("after\n")},
+		}, files)
+	})
+
+	t.Run("should fail outside a repository", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := t.TempDir()
+
+		// when
+		files, err := support.ReadModifiedFiles(t.Context(), root, func(string) bool { return true })
+
+		// then
+		require.Error(t, err)
+		assert.Nil(t, files)
+	})
+}

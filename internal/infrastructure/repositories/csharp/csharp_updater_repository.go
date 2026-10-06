@@ -205,17 +205,11 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	// Record the upgrade in the repository's changelog.
-	var entry string
-	if dotnetVersionUpdated {
-		entry = fmt.Sprintf(
-			"- changed the .NET SDK version to `%s` and updated all NuGet dependencies",
-			vCtx.LatestVersion,
-		)
-	} else {
-		entry = dotnetChangelogEntryDeps
-	}
-	support.LocalChangelogUpdate(repoDir, []string{entry})
+	// Record the upgrade in the repository's changelog, naming what moved.
+	support.RecordObservedDependencyChanges(
+		ctx, repoDir, observePackageChanges,
+		changelogEntry(dotnetVersionUpdated, vCtx.LatestVersion), dotnetChangelogSummary,
+	)
 
 	commitMsg := upgradeSubject(vCtx.LatestVersion, dotnetVersionUpdated)
 
@@ -364,13 +358,19 @@ func resolveLocalVersionContext(
 // upgrade. The staging helpers turn it into a chlog fragment when the
 // target repository uses that format instead.
 func changelogEntries(vCtx *versionContext) []string {
-	if vCtx.NeedsVersionUpgrade {
-		return []string{fmt.Sprintf(
-			"- changed the .NET SDK version to `%s` and updated all NuGet dependencies",
-			vCtx.LatestVersion,
-		)}
+	return []string{changelogEntry(vCtx.NeedsVersionUpgrade, vCtx.LatestVersion)}
+}
+
+// changelogEntry is the generic statement for an upgrade, naming no package. It
+// is what a run records when its project files cannot be compared, and what the
+// legacy clone-and-push flow records, since it never sees the upgraded tree.
+func changelogEntry(dotnetVersionUpdated bool, dotnetVersion string) string {
+	if dotnetVersionUpdated {
+		return fmt.Sprintf(
+			"- changed the .NET SDK version to `%s` and updated all NuGet dependencies", dotnetVersion,
+		)
 	}
-	return []string{dotnetChangelogEntryDeps}
+	return dotnetChangelogEntryDeps
 }
 
 // --- clone + upgrade ---

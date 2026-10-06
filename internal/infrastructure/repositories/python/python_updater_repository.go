@@ -225,17 +225,11 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	// Record the upgrade in the repository's changelog.
-	var entry string
-	if pyVersionUpdated {
-		entry = fmt.Sprintf(
-			"- changed the Python version to `%s` and updated all %s dependencies",
-			vCtx.LatestVersion, project.Toolchain(),
-		)
-	} else {
-		entry = pyChangelogEntryDeps
-	}
-	support.LocalChangelogUpdate(repoDir, []string{entry})
+	// Record the upgrade in the repository's changelog, naming what moved.
+	support.RecordObservedDependencyChanges(
+		ctx, repoDir, observePackageChanges,
+		changelogEntry(pyVersionUpdated, vCtx.LatestVersion, project.Toolchain()), pyChangelogSummary,
+	)
 
 	commitMsg := upgradeSubject(vCtx.LatestVersion, pyVersionUpdated)
 
@@ -451,13 +445,19 @@ func resolveVersionContext(
 // upgrade. The staging helpers turn it into a chlog fragment when the
 // target repository uses that format instead.
 func changelogEntries(vCtx *versionContext) []string {
-	if vCtx.NeedsVersionUpgrade {
-		return []string{fmt.Sprintf(
-			"- changed the Python version to `%s` and updated all pip dependencies",
-			vCtx.LatestVersion,
-		)}
+	return []string{changelogEntry(vCtx.NeedsVersionUpgrade, vCtx.LatestVersion, toolchainPip)}
+}
+
+// changelogEntry is the generic statement for an upgrade, naming no package. It
+// is what a run records when its manifests cannot be compared, and what the
+// legacy clone-and-push flow records, since it never sees the upgraded tree.
+func changelogEntry(pyVersionUpdated bool, pyVersion, toolchain string) string {
+	if pyVersionUpdated {
+		return fmt.Sprintf(
+			"- changed the Python version to `%s` and updated all %s dependencies", pyVersion, toolchain,
+		)
 	}
-	return []string{pyChangelogEntryDeps}
+	return pyChangelogEntryDeps
 }
 
 // --- clone + upgrade ---

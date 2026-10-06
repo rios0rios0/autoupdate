@@ -11,15 +11,21 @@ import (
 // at a different version, sorted by name.
 //
 // A dependency present on one side only is not an upgrade -- the run added or
-// removed it -- and is left out. Names are matched exactly, so a caller whose
-// ecosystem treats two spellings as one dependency normalizes the keys first.
+// removed it -- and is left out. Names are matched the way the subject matches
+// them -- case-insensitively, or under PEP 503 for Python packages -- and a
+// change carries the spelling the manifest uses after the run.
 func DiffDeclaredVersions(
 	subject entities.DependencySubject,
 	before, after map[string]string,
 ) []entities.DependencyChange {
+	beforeByKey := make(map[string]string, len(before))
+	for name, version := range before {
+		beforeByKey[entities.DependencyChange{Subject: subject, Name: name}.Key()] = version
+	}
+
 	var changes []entities.DependencyChange
 	for name, to := range after {
-		from, declared := before[name]
+		from, declared := beforeByKey[entities.DependencyChange{Subject: subject, Name: name}.Key()]
 		if !declared || from == to {
 			continue
 		}
@@ -30,6 +36,21 @@ func DiffDeclaredVersions(
 
 	sort.Slice(changes, func(i, j int) bool { return changes[i].Name < changes[j].Name })
 	return changes
+}
+
+// PinChanges compares one version pin file a run modified, returning the pin's
+// change, or nothing when it did not move or either side holds no version parse
+// can read -- "lts/*" or "system" is a repository's own choice, not a version.
+func PinChanges(
+	file ModifiedFile,
+	subject entities.DependencySubject,
+	parse func(content string) string,
+) []entities.DependencyChange {
+	from, to := parse(string(file.Before)), parse(string(file.After))
+	if from == "" || to == "" || from == to {
+		return nil
+	}
+	return []entities.DependencyChange{{Subject: subject, From: from, To: to}}
 }
 
 // FoldDependencyChanges collapses the changes that name the same dependency --

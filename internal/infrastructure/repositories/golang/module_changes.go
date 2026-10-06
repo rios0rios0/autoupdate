@@ -3,7 +3,6 @@ package golang
 import (
 	"context"
 	"fmt"
-	"os"
 	"path"
 
 	"golang.org/x/mod/modfile"
@@ -24,40 +23,22 @@ const goChangelogSummary = "- changed the Go module checksums to match the decla
 // version pin. The same requirement moving in several modules is reported once
 // per module; the changelog writer folds them.
 func observeModuleChanges(ctx context.Context, repoDir string) ([]entities.DependencyChange, error) {
-	paths, err := support.ModifiedPaths(ctx, repoDir)
+	files, err := support.ReadModifiedFiles(ctx, repoDir, func(modPath string) bool {
+		return path.Base(modPath) == goModFileName && !isSkippedModulePath(modPath)
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	var changes []entities.DependencyChange
-	for _, modPath := range paths {
-		if path.Base(modPath) != goModFileName || isSkippedModulePath(modPath) {
-			continue
-		}
-
-		moduleChanges, diffErr := diffModuleManifest(ctx, repoDir, modPath)
+	for _, file := range files {
+		moduleChanges, diffErr := diffGoMod(file.Path, file.Before, file.After)
 		if diffErr != nil {
 			return nil, diffErr
 		}
 		changes = append(changes, moduleChanges...)
 	}
 	return changes, nil
-}
-
-// diffModuleManifest compares one go.mod at HEAD with the working tree.
-func diffModuleManifest(ctx context.Context, repoDir, modPath string) ([]entities.DependencyChange, error) {
-	before, err := support.HeadFileContent(ctx, repoDir, modPath)
-	if err != nil {
-		return nil, err
-	}
-
-	// modPath came from git's own listing of the files modified in repoDir.
-	after, err := os.ReadFile(support.WorkingFilePath(repoDir, modPath))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", modPath, err)
-	}
-
-	return diffGoMod(modPath, before, after)
 }
 
 // diffGoMod compares the requirements and the go directive of two versions of

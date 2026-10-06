@@ -196,17 +196,11 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	// Record the upgrade in the repository's changelog.
-	var entry string
-	if rbVersionUpdated {
-		entry = fmt.Sprintf(
-			"- changed the Ruby version to `%s` and updated all gem dependencies",
-			vCtx.LatestVersion,
-		)
-	} else {
-		entry = rbChangelogEntryDeps
-	}
-	support.LocalChangelogUpdate(repoDir, []string{entry})
+	// Record the upgrade in the repository's changelog, naming what moved.
+	support.RecordObservedDependencyChanges(
+		ctx, repoDir, observeGemChanges,
+		changelogEntry(rbVersionUpdated, vCtx.LatestVersion), rbChangelogSummary,
+	)
 
 	commitMsg := upgradeSubject(vCtx.LatestVersion, rbVersionUpdated)
 
@@ -309,13 +303,17 @@ func resolveVersionContext(
 // upgrade. The staging helpers turn it into a chlog fragment when the
 // target repository uses that format instead.
 func changelogEntries(vCtx *versionContext) []string {
-	if vCtx.NeedsVersionUpgrade {
-		return []string{fmt.Sprintf(
-			"- changed the Ruby version to `%s` and updated all gem dependencies",
-			vCtx.LatestVersion,
-		)}
+	return []string{changelogEntry(vCtx.NeedsVersionUpgrade, vCtx.LatestVersion)}
+}
+
+// changelogEntry is the generic statement for an upgrade, naming no gem. It is
+// what a run records when its manifests cannot be compared, and what the legacy
+// clone-and-push flow records, since it never sees the upgraded tree.
+func changelogEntry(rbVersionUpdated bool, rbVersion string) string {
+	if rbVersionUpdated {
+		return fmt.Sprintf("- changed the Ruby version to `%s` and updated all gem dependencies", rbVersion)
 	}
-	return []string{rbChangelogEntryDeps}
+	return rbChangelogEntryDeps
 }
 
 // --- clone + upgrade ---

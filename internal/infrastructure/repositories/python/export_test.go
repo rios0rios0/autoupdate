@@ -216,3 +216,23 @@ func RunLanguageUpgradeScript(
 ) (string, error) {
 	return runLanguageUpgradeScript(ctx, repoDir, vCtx, detectLocalProject(repoDir), opts)
 }
+
+// RequirementPins is exported for testing.
+func RequirementPins(content []byte) map[string]string {
+	return requirementPins(content)
+}
+
+// PdmLockVersions is exported for testing.
+func PdmLockVersions(content []byte) (map[string]string, error) {
+	return pdmLockVersions(content)
+}
+
+// DeclaredRequirementNames is exported for testing.
+func DeclaredRequirementNames(content []byte) []string {
+	return declaredRequirementNames(content)
+}
+
+// ObservePackageChanges is exported for testing.
+func ObservePackageChanges(ctx context.Context, repoDir string) ([]entities.DependencyChange, error) {
+	return observePackageChanges(ctx, repoDir)
+}

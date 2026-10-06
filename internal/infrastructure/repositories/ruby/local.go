@@ -146,6 +146,16 @@ func executeLocalUpgrade(
 
 	rubyVersionUpdated := strings.Contains(outputStr, "RUBY_VERSION_UPDATED=true")
 
+	// Record the upgrade in the repository's changelog, naming what moved. The
+	// script no longer copies a changelog staged before it ran: which gems moved
+	// is only known once it has.
+	if support.HasUncommittedChanges(ctx, repoDir) {
+		support.RecordObservedDependencyChanges(
+			ctx, repoDir, observeGemChanges,
+			changelogEntry(rubyVersionUpdated, vCtx.LatestVersion), rbChangelogSummary,
+		)
+	}
+
 	// --- Git Finalize (go-git) ---
 	commitMsg := rbCommitMsgDeps
 	if rubyVersionUpdated {
@@ -173,20 +183,16 @@ func executeLocalUpgrade(
 
 // runLanguageUpgradeScript builds and executes the bash script that
 // performs Ruby-specific upgrade operations (gem update, bundle update,
-// Dockerfile updates, changelog updates).
+// Dockerfile updates).
 func runLanguageUpgradeScript(
 	ctx context.Context,
 	repoDir string,
 	vCtx *versionContext,
 	opts LocalUpgradeOptions,
 ) (string, error) {
-	changelog := support.StageLocalChangelog(repoDir, changelogEntries(vCtx))
-	defer changelog.Remove()
-
 	params := localUpgradeParams{
 		BranchName:   vCtx.BranchName,
 		RubyVersion:  vCtx.LatestVersion,
-		Changelog:    changelog,
 		AuthToken:    opts.AuthToken,
 		ProviderName: opts.ProviderName,
 
@@ -206,11 +212,8 @@ func runLanguageUpgradeScript(
 // --- local-mode internal types & helpers ---
 
 type localUpgradeParams struct {
-	BranchName  string
-	RubyVersion string
-	// Changelog is the staged changelog payload the script copies into
-	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog    support.StagedChangelog
+	BranchName   string
+	RubyVersion  string
 	AuthToken    string
 	ProviderName string
 	// AllowMajorUpdates picks the direction of the gem upgrade; see writeRubyUpgradeCommands.
@@ -219,9 +222,9 @@ type localUpgradeParams struct {
 
 // buildLocalUpgradeScript builds a bash script that performs only the
 // language-specific upgrade operations (auth, gem update, bundle update,
-// Dockerfile updates, changelog updates). Git operations
-// (branch creation, staging, committing, pushing) are handled by
-// LocalGitContext.
+// Dockerfile updates). The changelog is written in Go once the script has
+// run, and git operations (branch creation, staging, committing, pushing)
+// are handled by LocalGitContext.
 func buildLocalUpgradeScript(params localUpgradeParams) string {
 	var sb strings.Builder
 
@@ -236,9 +239,6 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 
 	// Update Dockerfile ruby image tags
 	writeDockerfileUpdate(&sb)
-
-	// Changelog update
-	sb.WriteString(support.ChangelogUpdateScript())
 
 	return sb.String()
 }
@@ -267,6 +267,5 @@ func buildLocalEnv(params localUpgradeParams) []string {
 			"GIT_HTTPS_TOKEN="+params.AuthToken,
 		)
 	}
-	env = append(env, params.Changelog.Env()...)
 	return env
 }

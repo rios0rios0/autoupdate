@@ -170,8 +170,11 @@ destination, so the two formats cannot drift apart:
 
 - `RecordObservedDependencyChanges(ctx, repoDir, observe, fallback, summary)` — what a script-driven
   updater calls once its package manager has run. The updater's `DependencyObserver` reads what moved
-  and the call writes it (rules below); Go's observer is `observeModuleChanges`
-  (`internal/infrastructure/repositories/golang/module_changes.go`).
+  and the call writes it (rules below). The observers live beside their updaters:
+  `golang/module_changes.go`, `python/package_changes.go`, `dart/package_changes.go`,
+  `ruby/gem_changes.go`, `java/artifact_changes.go` and `csharp/package_changes.go`, each reading its
+  manifests through `support.ReadModifiedFiles` and comparing them with `support.DiffDeclaredVersions`
+  (names matched the way the subject matches them — PEP 503 for Python) and `support.PinChanges`.
 - `LocalDependencyChangelogUpdate(repoDir, changes)` — for the updaters that compute their upgrades in
   Go (`terraform`, `dockerfile`, `pipeline`), fed by each one's `dependencyChanges(upgrades)`.
 - `LocalChangelogUpdate(repoDir, entries)` — plain bullets, on disk. Every production path writes on
@@ -180,10 +183,10 @@ destination, so the two formats cannot drift apart:
 - `RemoteChangelogChanges` and `StageRemoteChangelog` serve only the legacy `CreateUpdatePRs` paths,
   which `autoupdate run` no longer reaches because every updater implements `LocalUpdater`; they keep
   the generic sentences, since the clone-based script never lets Go see the upgraded tree.
-  `StageLocalChangelog` / `ChangelogUpdateScript()` remain for the standalone flows not yet moved to
-  observation (Python, JavaScript, Dart, Ruby). Call `StagedChangelog.Discard(repoDir)` when
-  abandoning such a run: a chlog fragment is a *new untracked* file, so `git checkout -- .` would
-  leave it behind (this is why the JavaScript cosmetic-lockfile revert threads the staged value).
+  `StageLocalChangelog` / `ChangelogUpdateScript()` remain only for the JavaScript standalone flow,
+  not yet moved to observation. Call `StagedChangelog.Discard(repoDir)` when abandoning such a run: a
+  chlog fragment is a *new untracked* file, so `git checkout -- .` would leave it behind (this is why
+  the JavaScript cosmetic-lockfile revert threads the staged value).
 
 **Statements about dependencies name them.** They are written in one grammar
 (`internal/domain/entities/dependency_change.go`): ``changed the <subject> `name` from `old` to
@@ -198,7 +201,11 @@ An observer compares `HEAD` with the working tree (`support.ModifiedPaths`, `sup
 That isolates exactly one updater's changes in batch mode, where `HEAD` is the previous updater's
 snapshot commit, and the upgrade in local mode, where it is the commit the branch was cut from. It
 names the dependencies the repository *declares* — for Go every requirement, `// indirect` ones
-included, because `go.mod` declares them — and never transitive packages only a lockfile lists. It
+included, because `go.mod` declares them; elsewhere the packages a manifest names, at the version the
+lockfile resolves — and never transitive packages only a lockfile lists. A Gradle build's versions are
+never rewritten and its dependency locks are transitive, so only the wrapper version is named there.
+pdm.lock and pyproject.toml are read with line scanners rather than a TOML parser, following
+`pyprojectUsesPDM`; the pyproject's quoted requirements only ever *filter* what the lock resolved. It
 returns `(nil, nil)` only when everything it owns parsed and nothing declared moved; a format it cannot
 read is an error, which records the updater's generic `fallback` sentence rather than nothing. A panic
 is recovered for the same reason, and because it would otherwise end the batch run's errgroup.
