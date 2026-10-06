@@ -164,35 +164,50 @@ func (d changelogDocument) apply(rewrites map[int]string, additions []string) st
 	}
 
 	out := make([]string, 0, len(d.lines)+len(plan.lines))
-	for i := 0; i < len(d.lines); i++ {
+	for i := 0; i < len(d.lines); {
 		if plan.before == i {
 			out = append(out, plan.lines...)
 		}
 
-		index, rewritten := replaced[i]
-		if !rewritten {
-			out = append(out, d.lines[i])
-			if plan.after == i {
-				out = append(out, plan.lines...)
-			}
-			continue
-		}
-
-		bullet := d.bullets[index]
-		skipTo := bullet.last
-		if text := rewrites[index]; text != "" {
-			out = append(out, bullet.indent+bullet.marker+text+lineEnding(d.lines[bullet.first]))
-		} else if isBlank(d.lines, bullet.first-1) && isBlank(d.lines, bullet.last+1) &&
-			bullet.last+1 < len(d.lines) && plan.after != bullet.last {
-			// Dropping the bullet would leave two blank lines in a row.
-			skipTo = bullet.last + 1
-		}
-		if plan.after == bullet.last {
+		emitted, next, anchor := d.emit(i, replaced, rewrites, plan.after)
+		out = append(out, emitted...)
+		if plan.after == anchor {
 			out = append(out, plan.lines...)
 		}
-		i = skipTo
+		i = next
 	}
 	return strings.Join(out, "\n")
+}
+
+// emit returns what the document carries for the original line at index i:
+// the line itself, or -- where a rewritten bullet starts -- its new single line,
+// or nothing for a removed one. It also returns the index of the next original
+// line to visit and the original line the emitted text ends at, which is where
+// new bullets anchored after it are inserted.
+func (d changelogDocument) emit(
+	i int,
+	replaced map[int]int,
+	rewrites map[int]string,
+	insertAfter int,
+) ([]string, int, int) {
+	index, rewritten := replaced[i]
+	if !rewritten {
+		return []string{d.lines[i]}, i + 1, i
+	}
+
+	bullet := d.bullets[index]
+	if text := rewrites[index]; text != "" {
+		line := bullet.indent + bullet.marker + text + lineEnding(d.lines[bullet.first])
+		return []string{line}, bullet.last + 1, bullet.last
+	}
+
+	next := bullet.last + 1
+	if next < len(d.lines) && insertAfter != bullet.last &&
+		isBlank(d.lines, bullet.first-1) && isBlank(d.lines, next) {
+		// Dropping the bullet would leave two blank lines in a row.
+		next++
+	}
+	return nil, next, bullet.last
 }
 
 // changelogInsertion is where new bullets go and the lines that carry them.
