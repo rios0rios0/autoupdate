@@ -247,39 +247,6 @@ func TestValidateSettings(t *testing.T) {
 	})
 }
 
-func TestInsertChangelogEntry(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should insert entries under Unreleased section", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		content := "# Changelog\n\n## [Unreleased]\n\n## [1.0.0] - 2026-01-01\n"
-		entries := []string{"- added new feature X"}
-
-		// when
-		result := entities.InsertChangelogEntry(content, entries)
-
-		// then
-		assert.Contains(t, result, "- added new feature X")
-		assert.Contains(t, result, "[Unreleased]")
-	})
-
-	t.Run("should return content unchanged when no Unreleased section exists", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		content := "# Changelog\n\n## [1.0.0] - 2026-01-01\n"
-		entries := []string{"- added something"}
-
-		// when
-		result := entities.InsertChangelogEntry(content, entries)
-
-		// then
-		assert.Equal(t, content, result)
-	})
-}
-
 func TestMergeUpdatersConfig(t *testing.T) {
 	t.Parallel()
 

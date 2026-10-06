@@ -50,6 +50,10 @@ type languageRule struct {
 	Patterns []*regexp.Regexp
 }
 
+// actionLanguagePrefix marks a GitHub Action reference in a versionMatch's
+// Language, which otherwise names the runtime a pipeline pins.
+const actionLanguagePrefix = "action:"
+
 // versionMatch represents a found version reference in a pipeline file.
 type versionMatch struct {
 	FilePath    string
@@ -198,14 +202,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, err
 	}
 
-	entries := make([]string, 0, len(upgrades))
-	for _, up := range upgrades {
-		entries = append(entries, fmt.Sprintf(
-			"- changed the %s pipeline version from `%s` to `%s`",
-			up.match.Language, up.match.CurrentVer, up.newVersion,
-		))
-	}
-	support.LocalChangelogUpdate(repoDir, entries)
+	support.LocalDependencyChangelogUpdate(repoDir, dependencyChanges(upgrades))
 
 	return &repositories.LocalUpdateResult{
 		BranchName:    generateBranchName(upgrades),
@@ -791,7 +788,7 @@ func findActionUpgradesInFile(
 		tasks = append(tasks, upgradeTask{
 			match: versionMatch{
 				FilePath:   filePath,
-				Language:   fmt.Sprintf("action:%s/%s", ref.Owner, ref.Repo),
+				Language:   actionLanguagePrefix + ref.Owner + "/" + ref.Repo,
 				CurrentVer: ref.CurrentRef,
 				FullMatch:  ref.FullMatch,
 			},
@@ -1029,6 +1026,27 @@ func generatePRDescription(tasks []upgradeTask) string {
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()
+}
+
+// dependencyChanges states every upgrade as a dependency change for the
+// changelog writer: a language pin as the runtime a pipeline uses, an action
+// reference as the GitHub Action it names. The writer folds the same runtime
+// pinned in several pipeline files into one statement.
+func dependencyChanges(upgrades []upgradeTask) []entities.DependencyChange {
+	changes := make([]entities.DependencyChange, 0, len(upgrades))
+	for _, up := range upgrades {
+		change := entities.DependencyChange{
+			Subject: entities.SubjectPipelineRuntime,
+			Name:    up.match.Language,
+			From:    up.match.CurrentVer,
+			To:      up.newVersion,
+		}
+		if action, isAction := strings.CutPrefix(up.match.Language, actionLanguagePrefix); isAction {
+			change.Subject, change.Name = entities.SubjectGitHubAction, action
+		}
+		changes = append(changes, change)
+	}
+	return changes
 }
 
 // appendChangelogEntry records the pipeline version upgrades in the target

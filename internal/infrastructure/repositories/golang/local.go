@@ -166,6 +166,16 @@ func executeLocalUpgrade(
 		}
 	}
 
+	// Record the upgrade in the repository's changelog, naming what moved. The
+	// script no longer copies a changelog staged before it ran: which modules
+	// moved is only known once it has.
+	if support.HasUncommittedChanges(ctx, repoDir) {
+		support.RecordObservedDependencyChanges(
+			ctx, repoDir, observeModuleChanges,
+			changelogEntry(goVersionUpdated, vCtx.LatestVersion), goChangelogSummary,
+		)
+	}
+
 	// --- Git Finalize (go-git) ---
 	commitMsg := goCommitMsgDeps
 	if goVersionUpdated {
@@ -192,17 +202,13 @@ func executeLocalUpgrade(
 }
 
 // runLanguageUpgradeScript builds and executes the bash script that
-// performs Go-specific upgrade operations (go get, go mod tidy,
-// Dockerfile updates, changelog updates).
+// performs Go-specific upgrade operations (go get, go mod tidy).
 func runLanguageUpgradeScript(
 	ctx context.Context,
 	repoDir string,
 	vCtx *versionContext,
 	opts LocalUpgradeOptions,
 ) (string, error) {
-	changelog := support.StageLocalChangelog(repoDir, changelogEntries(vCtx))
-	defer changelog.Remove()
-
 	goBinary, err := findGoBinary()
 	if err != nil {
 		return "", fmt.Errorf("go binary not found: %w", err)
@@ -216,7 +222,6 @@ func runLanguageUpgradeScript(
 	params := localUpgradeParams{
 		BranchName:   vCtx.BranchName,
 		GoVersion:    vCtx.LatestVersion,
-		Changelog:    changelog,
 		AuthToken:    opts.AuthToken,
 		ProviderName: opts.ProviderName,
 		HasConfigSH:  hasConfigSH,
@@ -263,11 +268,8 @@ func runLanguageUpgradeScript(
 // --- local-mode internal types & helpers ---
 
 type localUpgradeParams struct {
-	BranchName string
-	GoVersion  string
-	// Changelog is the staged changelog payload the script copies into
-	// the clone; an empty value leaves the repository's changelog untouched.
-	Changelog    support.StagedChangelog
+	BranchName   string
+	GoVersion    string
 	AuthToken    string
 	ProviderName string // git provider name (for credential setup)
 	HasConfigSH  bool   // whether the repo contains config.sh
@@ -276,9 +278,10 @@ type localUpgradeParams struct {
 }
 
 // buildLocalUpgradeScript builds a bash script that performs only the
-// language-specific upgrade operations (auth, go get, go mod tidy,
-// Dockerfile updates, changelog updates).  Git operations (branch
-// creation, staging, committing, pushing) are handled by LocalGitContext.
+// language-specific upgrade operations (auth, go get, go mod tidy).  The
+// changelog is written in Go once the script has run, and git operations
+// (branch creation, staging, committing, pushing) are handled by
+// LocalGitContext.
 func buildLocalUpgradeScript(params localUpgradeParams) string {
 	var sb strings.Builder
 
@@ -303,9 +306,6 @@ func buildLocalUpgradeScript(params localUpgradeParams) string {
 	// NOTE: Dockerfile golang image tags are updated in Go (registry-verified)
 	// by updateDockerfileGolangTags after this script runs — never via a blind
 	// tag rewrite here, which could point FROM at a non-existent image.
-
-	// Changelog update (reuse existing)
-	sb.WriteString(support.ChangelogUpdateScript())
 
 	return sb.String()
 }
@@ -336,6 +336,5 @@ func buildLocalEnv(params localUpgradeParams, goBinary string) []string {
 			"GIT_HTTPS_TOKEN="+params.AuthToken,
 		)
 	}
-	env = append(env, params.Changelog.Env()...)
 	return env
 }

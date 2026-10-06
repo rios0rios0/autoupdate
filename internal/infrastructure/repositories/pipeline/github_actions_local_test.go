@@ -82,9 +82,7 @@ jobs:
 		)
 		fileChanges := pipeline.ApplyUpgrades(upgrades, fileContents)
 		require.NoError(t, support.WriteFileChanges(root, fileChanges))
-		changelogWritten := support.LocalChangelogUpdate(root, []string{
-			"- changed the golang pipeline version from `1.22.0` to `1.24.1`",
-		})
+		changelogWritten := support.LocalDependencyChangelogUpdate(root, pipeline.DependencyChanges(upgrades))
 
 		// then
 		require.Len(t, upgrades, 1)
@@ -97,7 +95,7 @@ jobs:
 
 		assert.True(t, changelogWritten)
 		assert.Contains(t, readFile(t, root, "CHANGELOG.md"),
-			"- changed the golang pipeline version from `1.22.0` to `1.24.1`")
+			"- changed the pipeline runtime `golang` from `1.22.0` to `1.24.1`")
 
 		assert.Equal(t, "chore/upgrade-pipeline-golang-1.24.1", pipeline.GenerateBranchName(upgrades))
 		assert.Equal(t,

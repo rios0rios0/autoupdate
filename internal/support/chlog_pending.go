@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	logger "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -13,20 +15,39 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 )
 
-// pendingChlogEntries reads the bodies of the fragments a repository already
-// has waiting under its unreleased directory, so the same statement is not
-// filed twice.
+// editableFragmentExtension is the only suffix chlog compiles at release time.
+// A ".yml" fragment still counts as pending, but a statement merged into one
+// would never reach a release, so autoupdate never edits it.
+const editableFragmentExtension = ".yaml"
+
+// chlogFragmentKeys are the keys of a fragment as chlog writes it. A fragment
+// carrying any other key -- `breaking`, or one autoupdate does not know -- was
+// shaped by hand, and rewriting it through ChlogFragment would drop that key.
 //
-// The duplicate check has to reach both formats or they drift apart: a chlog
-// repository would keep collecting a fresh fragment per run saying exactly what
-// the last run's fragment says, and the drift would only surface at release
-// time, when the fragments are compiled into one section and the same bullet
-// appears several times.
+//nolint:gochecknoglobals // read-only lookup table
+var chlogFragmentKeys = map[string]bool{"kind": true, "body": true, "time": true}
+
+// pendingFragment is one fragment waiting under the unreleased directory.
+type pendingFragment struct {
+	path string
+	name string
+	kind string
+	body string
+	time time.Time
+	// editable reports whether autoupdate may rewrite or remove the fragment:
+	// a regular ".yaml" file holding exactly the keys chlog writes.
+	editable bool
+}
+
+// readPendingChlogFragments reads the fragments a repository has waiting under
+// its unreleased directory, oldest first.
 //
-// A directory that cannot be read yields no entries rather than an error. The
-// worst case is the duplicate this check exists to avoid, whereas refusing to
-// write would drop a real changelog entry -- so the unreadable case fails open.
-func pendingChlogEntries(repoDir string, config *entities.ChlogConfig) []string {
+// Only regular files are read. In batch mode the repository is input autoupdate
+// does not own, and a fragment that is a symbolic link would have the merge
+// read, and rewrite, a file outside it. A directory that cannot be read yields
+// no fragments rather than an error: the worst case is a statement filed twice,
+// whereas refusing to write would drop a real changelog entry.
+func readPendingChlogFragments(repoDir string, config *entities.ChlogConfig) []pendingFragment {
 	unreleasedDir := entities.ChlogFragmentDiskPath(repoDir, config.UnreleasedPath())
 
 	dirEntries, err := os.ReadDir(unreleasedDir)
@@ -37,9 +58,9 @@ func pendingChlogEntries(repoDir string, config *entities.ChlogConfig) []string 
 		return nil
 	}
 
-	bodies := make([]string, 0, len(dirEntries))
+	fragments := make([]pendingFragment, 0, len(dirEntries))
 	for _, dirEntry := range dirEntries {
-		if dirEntry.IsDir() || !hasChlogFragmentExtension(dirEntry.Name()) {
+		if !dirEntry.Type().IsRegular() || !hasChlogFragmentExtension(dirEntry.Name()) {
 			continue
 		}
 
@@ -52,11 +73,90 @@ func pendingChlogEntries(repoDir string, config *entities.ChlogConfig) []string 
 			logger.Warnf("Failed to read the chlog fragment %s: %v", dirEntry.Name(), readErr)
 			continue
 		}
-		if body := chlogFragmentBody(content); body != "" {
-			bodies = append(bodies, body)
-		}
+
+		fragment := parsePendingFragment(content)
+		fragment.path, fragment.name = fragmentPath, dirEntry.Name()
+		fragment.editable = fragment.editable &&
+			strings.HasSuffix(dirEntry.Name(), editableFragmentExtension)
+		fragments = append(fragments, fragment)
 	}
 
+	sort.SliceStable(fragments, func(i, j int) bool {
+		if !fragments[i].time.Equal(fragments[j].time) {
+			return fragments[i].time.Before(fragments[j].time)
+		}
+		return fragments[i].name < fragments[j].name
+	})
+	return fragments
+}
+
+// parsePendingFragment decodes a fragment. One that does not parse is still
+// pending -- the release check counts it -- but has no statement to compare and
+// is never edited.
+func parsePendingFragment(content []byte) pendingFragment {
+	var document yaml.Node
+	if err := yaml.Unmarshal(content, &document); err != nil {
+		return pendingFragment{}
+	}
+
+	var fragment entities.ChlogFragment
+	if err := document.Decode(&fragment); err != nil {
+		return pendingFragment{}
+	}
+
+	return pendingFragment{
+		kind:     fragment.Kind,
+		body:     fragment.Body,
+		time:     fragment.Time,
+		editable: hasOnlyChlogKeys(&document),
+	}
+}
+
+// hasOnlyChlogKeys reports whether a decoded fragment holds exactly the keys
+// chlog writes, each once.
+func hasOnlyChlogKeys(document *yaml.Node) bool {
+	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 {
+		return false
+	}
+
+	mapping := document.Content[0]
+	if mapping.Kind != yaml.MappingNode || len(mapping.Content) != 2*len(chlogFragmentKeys) {
+		return false
+	}
+
+	seen := make(map[string]bool, len(chlogFragmentKeys))
+	for i := 0; i < len(mapping.Content); i += 2 {
+		key := mapping.Content[i].Value
+		if !chlogFragmentKeys[key] || seen[key] {
+			return false
+		}
+		seen[key] = true
+	}
+	return true
+}
+
+// pendingChlogEntries reads the bodies of the fragments a repository already
+// has waiting under its unreleased directory, so the same statement is not
+// filed twice.
+//
+// The duplicate check has to reach both formats or they drift apart: a chlog
+// repository would keep collecting a fresh fragment per run saying exactly what
+// the last run's fragment says, and the drift would only surface at release
+// time, when the fragments are compiled into one section and the same bullet
+// appears several times.
+func pendingChlogEntries(repoDir string, config *entities.ChlogConfig) []string {
+	return fragmentBodies(readPendingChlogFragments(repoDir, config))
+}
+
+// fragmentBodies returns the statements the fragments make, skipping the ones
+// that carry none.
+func fragmentBodies(fragments []pendingFragment) []string {
+	bodies := make([]string, 0, len(fragments))
+	for _, fragment := range fragments {
+		if fragment.body != "" {
+			bodies = append(bodies, fragment.body)
+		}
+	}
 	return bodies
 }
 
@@ -94,21 +194,10 @@ func pendingRemoteChlogEntries(
 			logger.Warnf("Failed to read the chlog fragment %s: %v", filePath, contentErr)
 			continue
 		}
-		if body := chlogFragmentBody([]byte(content)); body != "" {
+		if body := parsePendingFragment([]byte(content)).body; body != "" {
 			bodies = append(bodies, body)
 		}
 	}
 
 	return bodies
-}
-
-// chlogFragmentBody extracts the statement a fragment records. A fragment that
-// does not parse contributes nothing: it is not autoupdate's file to interpret,
-// and the only cost of ignoring it is a duplicate.
-func chlogFragmentBody(content []byte) string {
-	var fragment entities.ChlogFragment
-	if err := yaml.Unmarshal(content, &fragment); err != nil {
-		return ""
-	}
-	return fragment.Body
 }

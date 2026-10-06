@@ -55,7 +55,7 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 
 ### Key External Libraries
 
-- **gitforge** (`rios0rios0/gitforge`): Abstraction over GitHub/GitLab/Azure DevOps APIs. Domain entities (`Repository`, `PullRequest`, `Dependency`) are re-exported as type aliases from gitforge.
+- **gitforge** (`rios0rios0/gitforge`): Abstraction over GitHub/GitLab/Azure DevOps APIs. Domain entities (`Repository`, `PullRequest`, `FileChange`) are re-exported as type aliases from gitforge; `Dependency` and `DependencyChange` are autoupdate's own.
 - **langforge** (`rios0rios0/langforge`): Language/ecosystem detection and shared version fetchers.
 - **cliforge** (`rios0rios0/cliforge`): Shared CLI utilities including the self-update mechanism.
 - **testkit** (`rios0rios0/testkit`): Base builder pattern for test data construction.
@@ -164,45 +164,93 @@ git accepts, contain a `/`, and not stop at one -- `chore/` would match AutoBump
 
 ### Changelog Writing (Keep a Changelog and chlog)
 
-Every updater records its entries through `internal/support/changelog.go` — never call
-`entities.InsertChangelogEntry` or write `CHANGELOG.md` directly from an updater. The helper detects
-the target repository's format and picks the destination, so the two formats cannot drift apart:
+Every updater records its entries through `internal/support` — never write `CHANGELOG.md` or a
+fragment directly from an updater. The helpers detect the target repository's format and pick the
+destination, so the two formats cannot drift apart:
 
-- `LocalChangelogUpdate(repoDir, entries)` — writes on disk (local mode).
-- `RemoteChangelogChanges(ctx, provider, repo, entries, fileChanges)` — appends `FileChange` values
-  for the provider API (batch mode), used by `terraform`, `dockerfile`, and `pipeline`.
-- `StageLocalChangelog` / `StageRemoteChangelog` — return a `StagedChangelog` (temp file plus
-  repository-relative destination) for the seven ecosystems whose upgrade runs through a generated bash
-  script. The script gets `CHANGELOG_FILE` and `CHANGELOG_DEST` from `StagedChangelog.Env()` and
-  performs the copy with the shared snippet `support.ChangelogUpdateScript()`. Call
-  `StagedChangelog.Discard(repoDir)` when abandoning a run: a chlog fragment is a *new untracked*
-  file, so `git checkout -- .` would leave it behind (this is why the JavaScript cosmetic-lockfile
-  revert threads the staged value).
+- `RecordObservedDependencyChanges(ctx, repoDir, observe, fallback, summary)` — what a script-driven
+  updater calls once its package manager has run. The updater's `DependencyObserver` reads what moved
+  and the call writes it (rules below); Go's observer is `observeModuleChanges`
+  (`internal/infrastructure/repositories/golang/module_changes.go`).
+- `LocalDependencyChangelogUpdate(repoDir, changes)` — for the updaters that compute their upgrades in
+  Go (`terraform`, `dockerfile`, `pipeline`), fed by each one's `dependencyChanges(upgrades)`.
+- `LocalChangelogUpdate(repoDir, entries)` — plain bullets, on disk. Every production path writes on
+  disk: `autoupdate run` reaches each updater through `ApplyUpdates` on a go-git clone, and
+  `autoupdate .` works in the user's checkout.
+- `RemoteChangelogChanges` and `StageRemoteChangelog` serve only the legacy `CreateUpdatePRs` paths,
+  which `autoupdate run` no longer reaches because every updater implements `LocalUpdater`; they keep
+  the generic sentences, since the clone-based script never lets Go see the upgraded tree.
+  `StageLocalChangelog` / `ChangelogUpdateScript()` remain for the standalone flows not yet moved to
+  observation (Python, JavaScript, Dart, Ruby). Call `StagedChangelog.Discard(repoDir)` when
+  abandoning such a run: a chlog fragment is a *new untracked* file, so `git checkout -- .` would
+  leave it behind (this is why the JavaScript cosmetic-lockfile revert threads the staged value).
 
-No entry is ever restated. `newChangelogEntries` (`internal/support/changelog_dedupe.go`) drops any
-entry the repository already records as pending, and every `CHANGELOG.md` edit goes through
-`insertChangelogEntries` rather than calling `entities.InsertChangelogEntry` directly — gitforge
-appends whatever it is handed, so the check has to happen on this side of the call, in the one place
-every updater funnels through. It matters because autoupdate runs unattended on a schedule against the
-same repositories: yesterday's entry is merged into the default branch by the time it looks again, and
-without the check it was restated verbatim on every run until the next release moved the section away.
-The pending set is read from `[Unreleased]` for a Keep a Changelog repository (wrapped continuation
-lines folded back into their bullet) and from the fragment bodies under the unreleased directory for a
-chlog one (`internal/support/chlog_pending.go`), so the two formats cannot drift. Matching is exact
-after normalizing the bullet marker, backticks, whitespace and case — deliberately nothing fuzzier: an
-entry naming a different version ("from `3.13` to `3.14`" after "from `3.12` to `3.13`") is a second,
-real upgrade, and a similarity threshold that collapsed those would drop a change the repository took.
-Released sections are never compared against; they are history, and the same dependency moving again
-after a release is a new fact.
+**Statements about dependencies name them.** They are written in one grammar
+(`internal/domain/entities/dependency_change.go`): ``changed the <subject> `name` from `old` to
+`new`, … and `name` from `old` to `new` `` — at most `MaxDependenciesPerEntry` (five) per line,
+singular subject for one item — or ``changed the Go version from `old` to `new` `` for a version pin.
+The subjects are a closed registry (`dependency_subjects.go`), and parsing accepts nothing else, so a
+maintainer's sentence that merely mentions a version is never read as one to rewrite. The
+per-upgrade Terraform and Dockerfile statements written before this grammar parse as one-item lists,
+and a small recogniser maps the old pipeline shape onto the new subjects.
+
+An observer compares `HEAD` with the working tree (`support.ModifiedPaths`, `support.HeadFileContent`).
+That isolates exactly one updater's changes in batch mode, where `HEAD` is the previous updater's
+snapshot commit, and the upgrade in local mode, where it is the commit the branch was cut from. It
+names the dependencies the repository *declares* — for Go every requirement, `// indirect` ones
+included, because `go.mod` declares them — and never transitive packages only a lockfile lists. It
+returns `(nil, nil)` only when everything it owns parsed and nothing declared moved; a format it cannot
+read is an error, which records the updater's generic `fallback` sentence rather than nothing. A panic
+is recovered for the same reason, and because it would otherwise end the batch run's errgroup.
+
+`mergeDependencyChanges` (`internal/support/changelog_merge.go`) folds a run into what is pending,
+**updating a dependency in place** rather than naming it twice. The surviving mention keeps the lowest
+`from` any mention records (the version the last release shipped) and takes this run's `to` — even
+when it is lower, because a Go hold cascade or a revert really moved it down. Other mentions lose the
+item and a statement left naming nothing is removed; a dependency ending where it started is dropped.
+A mention filed outside the default bucket (`### Security`, a chlog kind other than `Changed`) wins,
+because a maintainer put it there. New names only ever go into new lines, and statements about
+dependencies this run did not move stay byte-identical, so merging the same run twice changes nothing.
+Never mentions: prose, the generic sentences, nested bullets, multi-line fragment bodies, `.yml`
+fragments (chlog never compiles them), fragments with keys other than `kind`/`body`/`time` (`breaking`
+would be lost), and symlinked fragments, which are never followed because the repository is untrusted
+input in batch mode. A rewritten fragment keeps its path, kind and time, since chlog orders by time.
+
+When nothing declared moved, nothing is written — unless nothing is pending at all, in which case the
+updater's `summary` sentence is. The shared pipelines' `basic-checks` fail a `chore/autoupdate-*` pull
+request that adds no changelog change while none is pending, so a transitive-only run straight after a
+release would otherwise open a pull request that cannot pass.
+
+The wording is constrained by autobump: its release-time `DeduplicateEntries` (gitforge) strips
+versions and backticks and drops an entry whose words overlap another's by 0.9 of the shorter one.
+Library lines survive because their names differ, and that is why the pipeline subjects avoid the
+word "version" — ``changed the Python version …`` would vanish into ``changed the python pipeline
+version …``. `TestDependencyEntriesSurviveReleaseDeduplication` runs gitforge's function over every
+shape; a new subject needs a row there.
+
+Plain entries — generic sentences, fallbacks, summaries — keep the exact-match check:
+`newChangelogEntries` (`internal/support/changelog_dedupe.go`) drops an entry the repository already
+records as pending, after normalizing the bullet marker, backticks, whitespace and case. Released
+sections are never compared against; they are history, and the same dependency moving again after a
+release is a new fact.
+
+Every `CHANGELOG.md` edit goes through one `changelogDocument` (`internal/support/changelog_unreleased.go`),
+which reads and writes `[Unreleased]` with one heading rule and records each bullet's line span,
+continuation lines included. A rewritten bullet keeps its marker, indentation and line ending; new
+bullets go **after the last continuation line** of the last `### Changed` bullet, and a missing
+`### Changed` is created in Keep a Changelog order. gitforge's `InsertChangelogEntry` stopped at the
+first line that was not a bullet, which put new entries between a wrapped bullet and the rest of its
+sentence; it is no longer called.
 
 chlog (`internal/support/chlog.go` + `internal/domain/entities/chlog.go`) is detected from a
 `.chlog.yaml`/`.chlog.yml` or a `.changes/unreleased/` directory. When detected, entries become one
-fragment file per entry (`<unixnano>-<hex>.yaml` with `kind`/`body`/`time`) and `CHANGELOG.md` is
-left untouched — editing it would recreate exactly the merge conflicts chlog exists to remove. The
-configured `changesDir`/`unreleasedDir`/`kinds` are honored, and paths are validated against escaping
-the repository root because `.chlog.yaml` is untrusted input from a repo autoupdate does not own. A
-broken or unreadable `.chlog.yaml` fails loudly rather than falling back to `CHANGELOG.md`. The
-per-ecosystem `changelogEntries(vCtx)` helper is all that remains ecosystem-specific.
+fragment file per statement (`<unixnano>-<hex>.yaml` with `kind`/`body`/`time`, each a nanosecond
+older than the last so the release lists them in order) and `CHANGELOG.md` is left untouched — editing
+it would recreate exactly the merge conflicts chlog exists to remove. The configured
+`changesDir`/`unreleasedDir`/`kinds` are honored, and paths are validated against escaping the
+repository root because `.chlog.yaml` is untrusted input from a repo autoupdate does not own. A broken
+or unreadable `.chlog.yaml` fails loudly rather than falling back to `CHANGELOG.md`. What remains
+ecosystem-specific is the observer and the fallback and summary sentences.
 
 A fragment is emitted byte for byte the way `chlog new` emits one, which is why
 `ChlogFragment.MarshalYAML` builds the mapping by hand instead of letting the encoder marshal the
@@ -596,7 +644,8 @@ A repository is upgraded with the dependency manager it already uses; an update 
 - External test packages (e.g., `commands_test` for package `commands`)
 - BDD structure with `// given`, `// when`, `// then` comments
 - Parallel execution via `t.Parallel()` and `t.Run()` subtests
-- Test doubles in `test/domain/commanddoubles/` (stubs), `test/domain/entitybuilders/` (builders), and `test/infrastructure/repositorydoubles/` (stubs, spies, builders)
+- Test doubles in `test/domain/commanddoubles/` (stubs), `test/domain/entitybuilders/` (builders), and `test/infrastructure/repositorydoubles/` (stubs, spies, builders, and `FakeUpgradeRunner`, which writes manifests the way a package manager would so `ApplyUpdates` can be driven end to end)
+- `test/infrastructure/gitrepo` lays out throwaway git repositories for code that compares the working tree with `HEAD`; it disables signing and hooks so a developer's global git configuration cannot break a test
 - Uses `stretchr/testify` for assertions — prefer stubs over mocks
 
 <!-- chlog:start -->

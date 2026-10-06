@@ -197,3 +197,8 @@ func CreateUpgradePR(
 ) ([]entities.PullRequest, error) {
 	return createUpgradePR(ctx, provider, repo, opts, upgrades, fileContents)
 }
+
+// DependencyChanges is exported for testing.
+func DependencyChanges(upgrades []upgradeTask) []entities.DependencyChange {
+	return dependencyChanges(upgrades)
+}

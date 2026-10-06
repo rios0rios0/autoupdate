@@ -274,9 +274,9 @@ and leaves `CHANGELOG.md` alone:
 
 ```yaml
 # .changes/unreleased/1748359200-a1b2.yaml
-kind: Changed
-body: changed the Go module dependencies to their latest versions
-time: 2026-07-29T14:30:00Z
+kind: 'Changed'
+body: 'changed the Go module `github.com/spf13/cobra` from `v1.8.0` to `v1.9.1`'
+time: '2026-07-29T14:30:00Z'
 ```
 
 A repository is treated as a chlog user when it commits a `.chlog.yaml` (or
@@ -286,12 +286,35 @@ chlog works without a configuration file. When the file is present, its
 renamed its directories or its `Changed` label still gets valid fragments. The
 `chlog merge` step later compiles them into the changelog as usual.
 
-**Entries are never restated.** AutoUpdate runs unattended and on a schedule, so
-the entry it wrote yesterday is usually already merged by the time it looks
-again. An entry the repository already records as pending -- a bullet under
-`[Unreleased]`, or the body of a fragment under `.changes/unreleased/` -- is not
-written a second time, whichever format the repository uses. An entry naming a
-different version is a second, real upgrade and is still recorded.
+**Every dependency is named, once, at the version the release ships.** Each run
+names what it moved, with the version on both sides, at most five dependencies
+to a line:
+
+```markdown
+- changed the Go version from `1.26.0` to `1.27.1`
+- changed the Go modules `github.com/spf13/cobra` from `v1.8.0` to `v1.10.2` and `golang.org/x/mod` from `v0.20.0` to `v0.21.0`
+```
+
+AutoUpdate runs unattended and on a schedule, so a dependency it named yesterday
+is usually still pending when it moves again. It is then updated where it
+already is -- `from` stays the version the last release shipped, `to` becomes the
+new one -- instead of being named a second time, in a bullet under
+`[Unreleased]` and in a fragment under `.changes/unreleased/` alike; a rewritten
+fragment keeps its file and its timestamp. Only the dependencies the run moved
+are touched. A sentence written by hand is never rewritten, and neither is a
+fragment carrying a key AutoUpdate does not write, such as `breaking`.
+
+Lines name the dependencies the repository declares -- every `go.mod`
+requirement, `// indirect` ones included -- not transitive packages that only a
+lockfile lists. A run that moved only those writes no line, unless nothing is
+pending at all: then it writes one summary sentence, so the pull request still
+carries a changelog change. A manifest that cannot be read falls back to a
+generic sentence rather than dropping the entry, and any other entry the
+repository already records as pending is never written a second time.
+
+The Go, Terraform, Dockerfile and pipeline updaters name what they moved; the
+other ecosystems still record one generic sentence per release cycle until
+their manifest readers land.
 
 Both formats work in every ecosystem and in both local and batch mode.
 
