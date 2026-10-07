@@ -73,6 +73,8 @@ func TestRemoveTree(t *testing.T) {
 		kept := filepath.Join(outside, "gradle.properties")
 		require.NoError(t, os.WriteFile(kept, []byte("org.gradle.java.home=/opt/jdk\n"), 0o600))
 		require.NoError(t, os.Chmod(outside, readOnlyDirMode))
+		// A directory needs the owner search bit to be removed by t.TempDir().
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		t.Cleanup(func() { _ = os.Chmod(outside, writableDirMode) })
 
 		tree := filepath.Join(t.TempDir(), "workspace")

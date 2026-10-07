@@ -52,6 +52,7 @@ func TestRepositoryWorkspaceRemove(t *testing.T) {
 
 		// given
 		workspace := newWorkspace(t)
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		require.NoError(t, os.MkdirAll(workspace.RepoDir(), writableDirMode))
 		require.NoError(t, os.WriteFile(filepath.Join(workspace.RepoDir(), "go.mod"), []byte("module m\n"), 0o600))
 		writeReadOnlyModuleCache(t, workspace.ToolingDir())
@@ -88,6 +89,7 @@ func TestRepositoryWorkspaceGradleConfiguration(t *testing.T) {
 		properties := filepath.Join(operatorHome, "gradle.properties")
 		initScript := filepath.Join(operatorHome, "init.d", "mirror.gradle")
 		require.NoError(t, os.WriteFile(properties, []byte("systemProp.https.proxyHost=proxy\n"), 0o600))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		require.NoError(t, os.MkdirAll(filepath.Dir(initScript), writableDirMode))
 		require.NoError(t, os.WriteFile(initScript, []byte("// mirror\n"), 0o600))
 		t.Setenv("GRADLE_USER_HOME", operatorHome)

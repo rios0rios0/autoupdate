@@ -41,6 +41,8 @@ func (f *localForge) GetAuthMethods(_ string) []transport.AuthMethod { return lo
 // cannot delete.
 func fillModuleCache(toolingDir string) error {
 	module := filepath.Join(toolingDir, "go", "mod", "example.com", "dependency@v1.0.0")
+	// A directory needs the owner search bit, so 0o700 is the least-privilege mode.
+	// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 	if err := os.MkdirAll(module, 0o700); err != nil {
 		return err
 	}

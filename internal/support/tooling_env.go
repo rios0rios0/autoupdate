@@ -155,11 +155,15 @@ func ScriptEnv(toolingDir string) []string {
 // prepareToolingDir lays out what ScriptEnv points at and cannot be created on
 // first use: the temporary directory, and the operator's Gradle configuration.
 func prepareToolingDir(toolingDir string) error {
+	// A directory needs the owner search bit, so 0o700 is the least-privilege mode
+	// one can be created with; the rule compares it against 0600 regardless.
+	// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 	if err := os.MkdirAll(filepath.Join(toolingDir, toolingTempDir), toolingDirMode); err != nil {
 		return fmt.Errorf("failed to create the tooling directory: %w", err)
 	}
 
 	gradleHome := filepath.Join(toolingDir, gradleHomeDir)
+	// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 	if err := os.MkdirAll(gradleHome, toolingDirMode); err != nil {
 		return fmt.Errorf("failed to create the Gradle home: %w", err)
 	}

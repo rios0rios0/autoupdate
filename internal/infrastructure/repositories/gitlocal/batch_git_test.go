@@ -125,6 +125,8 @@ func TestCleanupStaleTempDirs(t *testing.T) {
 		workspace, err := os.MkdirTemp("", "autoupdate-batch-*")
 		require.NoError(t, err)
 		module := filepath.Join(workspace, "tooling", "go", "mod", "example.com", "dependency@v1.0.0")
+		// A directory needs the owner search bit, so 0o700 is the least-privilege mode.
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		require.NoError(t, os.MkdirAll(module, 0o700))
 		require.NoError(
 			t,
