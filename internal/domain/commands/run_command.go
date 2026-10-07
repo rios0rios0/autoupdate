@@ -417,6 +417,19 @@ func (it *RunCommand) processLocalUpdaters(
 		resolveAggregateTargetBranch(repo, updaters), "refs/heads/",
 	)
 
+	// Everything this repository costs the run on disk lives in one directory --
+	// the clone, and every cache, download and temporary file the updaters'
+	// package managers write -- and it is removed on every way out of this
+	// function: a pull request opened, nothing to upgrade, or a failure anywhere
+	// from the clone onwards. Nothing accumulates from one repository to the next.
+	workspace, err := support.NewRepositoryWorkspace()
+	if err != nil {
+		logger.Errorf("[autoupdate] Failed to prepare a workspace for %s/%s: %v",
+			repo.Organization, repo.Name, err)
+		return nil, 1
+	}
+	defer removeRepositoryWorkspace(workspace, repo)
+
 	cloneURL := provider.CloneURL(repo)
 	serviceType := gitlocal.ResolveServiceTypeFromURL(it.providerRegistry, cloneURL)
 	authMethods := gitlocal.CollectBatchAuthMethods(
@@ -425,13 +438,12 @@ func (it *RunCommand) processLocalUpdaters(
 
 	gitOps := gitops.NewGitOperations(it.providerRegistry)
 	batchCtx, err := gitlocal.CloneRepository(
-		gitOps, cloneURL, targetBranch, authMethods, it.providerRegistry,
+		gitOps, cloneURL, targetBranch, authMethods, it.providerRegistry, workspace.RepoDir(),
 	)
 	if err != nil {
 		logger.Errorf("Failed to clone %s/%s: %v", repo.Organization, repo.Name, err)
 		return nil, 1
 	}
-	defer batchCtx.Close()
 
 	// Drop the dated branches left behind by earlier runs, closing their pull requests,
 	// before today's branch is created. Reaching this point means no pull request exists
@@ -448,7 +460,9 @@ func (it *RunCommand) processLocalUpdaters(
 		return nil, 1
 	}
 
-	applied, errorCount := it.runUpdatersOnBranch(ctx, batchCtx, updaters, provider, repo)
+	applied, errorCount := it.runUpdatersOnBranch(
+		ctx, batchCtx, workspace.ToolingDir(), updaters, provider, repo,
+	)
 	if len(applied) == 0 {
 		logger.Infof("[autoupdate] %s/%s: no updaters produced changes",
 			repo.Organization, repo.Name)
@@ -465,14 +479,31 @@ func (it *RunCommand) processLocalUpdaters(
 	return []entities.PullRequest{*pr}, errorCount + pushErrs
 }
 
+// removeRepositoryWorkspace deletes the repository's workspace, and says so when
+// it cannot: a workspace left behind is exactly the growth the workspace exists to
+// prevent, and a deferred removal has no other way to report it.
+func removeRepositoryWorkspace(workspace *support.RepositoryWorkspace, repo entities.Repository) {
+	if err := workspace.Remove(); err != nil {
+		logger.Warnf("[autoupdate] Could not remove the workspace of %s/%s: %v",
+			repo.Organization, repo.Name, err)
+		return
+	}
+	logger.Debugf("[autoupdate] Removed the workspace of %s/%s (%s)",
+		repo.Organization, repo.Name, workspace.Root())
+}
+
 // runUpdatersOnBranch runs each applicable LocalUpdater against the shared
 // worktree on the aggregate branch with snapshot-based failure isolation.
 // On success with real changes, the snapshot advances so the next updater
 // builds on top of it. On failure, the worktree hard-resets to the last
 // known-good snapshot, discarding only the failing updater's partial writes.
+//
+// Every updater's scripts keep their package managers' caches in toolingDir,
+// the repository's own, which is removed together with the clone.
 func (it *RunCommand) runUpdatersOnBranch(
 	ctx context.Context,
 	batchCtx *gitlocal.BatchGitContext,
+	toolingDir string,
 	updaters []applicableUpdater,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
@@ -497,7 +528,9 @@ func (it *RunCommand) runUpdatersOnBranch(
 			continue
 		}
 
-		result, applyErr := lu.ApplyUpdates(ctx, batchCtx.RepoDir(), provider, repo, au.opts)
+		opts := au.opts
+		opts.ToolingDir = toolingDir
+		result, applyErr := lu.ApplyUpdates(ctx, batchCtx.RepoDir(), provider, repo, opts)
 		if applyErr != nil {
 			if errors.Is(applyErr, repositories.ErrNoUpdatesNeeded) {
 				logger.Infof("[%s] %s/%s: already up to date",

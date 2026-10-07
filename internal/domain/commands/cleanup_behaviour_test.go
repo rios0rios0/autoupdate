@@ -84,16 +84,17 @@ func newBareRemoteWithBranches(t *testing.T, branches ...string) string {
 	return bareDir
 }
 
-// cloneBatchContext clones the given bare remote into a BatchGitContext.
+// cloneBatchContext clones the given bare remote into a BatchGitContext. The clone
+// lives under t.TempDir(), which removes it when the test ends.
 func cloneBatchContext(t *testing.T, bareDir string) *gitlocal.BatchGitContext {
 	t.Helper()
 
 	registry := repositories.NewProviderRegistry()
 	batchCtx, err := gitlocal.CloneRepository(
 		gitops.NewGitOperations(registry), bareDir, "main", localAuthMethods(), registry,
+		filepath.Join(t.TempDir(), "repo"),
 	)
 	require.NoError(t, err)
-	t.Cleanup(batchCtx.Close)
 
 	return batchCtx
 }

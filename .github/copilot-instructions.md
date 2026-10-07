@@ -149,6 +149,10 @@ rather than by copying a sibling.
 - **git** (`internal/support/git_command.go`): `GitCommand` is the only place this
   program looks git up on `PATH`, resolved with `exec.LookPath` on every call
   and deliberately not cached.
+- **Script environment** (`internal/support/tooling_env.go`): `ScriptEnv` is what
+  every `ApplyUpdates` builds its script environment from, never `os.Environ()`
+  directly -- it moves the package managers' caches into the repository's
+  workspace (see "Per-Repository Workspace" below).
 
 ### Configuration System
 - **Configuration is layered.** Four sources, each overriding only the keys its document declares: built-in defaults (`configs/autoupdate.yaml`, embedded via `configs/embed.go`) → published defaults (the same file fetched from `entities.DefaultConfigURL`, best effort) → the operator's file (`--config`, else `~/` then `~/.config/`, names `.autoupdate.{yml,yaml}` and `autoupdate.{yml,yaml}`) → the target repository's own `.autoupdate.yaml`
@@ -205,6 +209,12 @@ Push transport is auto-detected from the origin remote URL:
 - A `FROM image:tag@sha256:...` clause is only rewritten by code that can re-resolve the digest, because the digest — not the tag — is what Docker pulls. Moving the tag alone yields a diff that reads as an upgrade and builds the previous image, and nothing downstream catches it because the version pin really did move.
 - The `dockerfile` updater owns them: `fromPattern` captures the digest, the Docker Hub listing that answers "does this tag exist?" also carries each tag's digest (`registryTag`), and `applyUpgrades` rewrites `image:tag@digest` as one unit via `upgradeTask.currentRef`/`newRef` and `replaceRef` (which requires a whole-reference match, so `python:3.13-slim` is not matched inside `python:3.13-slim@sha256:...`). A tag the registry reports no digest for means the clause is left untouched — never write the tag alone, and never drop the digest to make the rewrite apply.
 - Everything that rewrites base images without registry access skips digest-pinned clauses: `support.DockerfileTagUpdateScript` (the `sed` address and `autoupdate_image_tag_is_older` both key on `digestPinMarker`, one constant so they cannot disagree) and `golang/dockerfile_tags.go`. In batch mode the `dockerfile` updater runs on the same aggregate branch and picks them up.
+
+### Per-Repository Workspace (Batch Mode)
+- `processLocalUpdaters` gives each repository a `support.RepositoryWorkspace` (`autoupdate-batch-*` under `os.TempDir()`): the clone in `repo/`, the package managers' caches and temporary files in `tooling/`. `defer removeRepositoryWorkspace` deletes it on every outcome (pull request, no changes, updater failure, clone failure), so a batch run's disk use is bounded by `concurrency`. `BatchGitContext` clones into `workspace.RepoDir()` and owns nothing.
+- Every `ApplyUpdates` builds its environment with `support.ScriptEnv(opts.ToolingDir)`, never `os.Environ()` directly. `toolingRedirects` in `internal/support/tooling_env.go` is the single table of what moves (TMPDIR, XDG_CACHE_HOME, Go, npm/pnpm/Yarn Berry/corepack, pip/PDM, Gradle, Maven via `AUTOUPDATE_MAVEN_REPOSITORY`, pub, NuGet, Bundler) — caches only, never configuration. `YARN_CACHE_FOLDER` and `npm_config_store_dir` are deliberately absent. The operator's Gradle configuration is linked into each repository's Gradle home.
+- `support.RemoveTree` deletes trees `os.RemoveAll` cannot (Go's read-only module cache), chmodding through an `os.Root` so no symlink escapes the tree; `CleanupStaleTempDirs` uses it for workspaces a killed run left behind.
+- No process outlives its repository: Gradle runs with `--no-daemon` (a Gradle plus Kotlin daemon pair measured about 1 GB resident for hours) and `MSBUILDDISABLENODEREUSE=1` is set.
 
 ### Repository Walking
 - `WalkFilesByExtension`/`WalkFilesByPredicate` (`internal/support/filesystem.go`) both delegate to one `walkFiles`, so the directory-skip rule lives in exactly one place. That rule is a **deny list** (`skippedWalkDirs` in `internal/support/walk_skip.go`), not an allow list — these walkers feed dependency *discovery*, where a default of "skip" fails silently (nothing found, no error, success with zero upgrades). A dot-prefix rule once hid `.github/workflows/`, so the pipeline updater could never upgrade a GitHub Actions workflow on the clone path. Do not swap in an allow list or add an opt-in walker variant.

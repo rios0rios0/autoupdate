@@ -180,7 +180,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, fmt.Errorf("dotnet binary not found: %w", binErr)
 	}
 
-	env := append(os.Environ(), "DOTNET_BINARY="+dotnetBinary)
+	env := append(support.ScriptEnv(opts.ToolingDir), "DOTNET_BINARY="+dotnetBinary)
 	if pinVersion := dotnetVersionFor(vCtx); pinVersion != "" {
 		env = append(env, "DOTNET_VERSION="+pinVersion)
 	}

@@ -202,7 +202,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	runResult, cmdErr := u.cmdRunner.Run(ctx, "bash", []string{scriptPath}, cmdrunner.RunOptions{
 		Dir: repoDir,
-		Env: append(os.Environ(),
+		Env: append(support.ScriptEnv(opts.ToolingDir),
 			"AUTH_TOKEN="+provider.AuthToken(),
 			"GIT_HTTPS_TOKEN="+provider.AuthToken(),
 			"GO_VERSION="+vCtx.LatestVersion,

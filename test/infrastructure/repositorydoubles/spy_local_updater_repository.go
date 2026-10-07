@@ -20,10 +20,11 @@ type SpyLocalUpdaterRepository struct {
 	DetectedRepos []entities.Repository
 
 	// --- ApplyUpdates ---
-	// ApplyUpdateFn receives repoDir and returns what ApplyUpdates should
-	// yield for this invocation. Tests use this to mutate the worktree and
-	// control the result/error.
-	ApplyUpdateFn  func(repoDir string) (*repositories.LocalUpdateResult, error)
+	// ApplyUpdateFn receives repoDir and the options the run passed, and returns
+	// what ApplyUpdates should yield for this invocation. Tests use this to
+	// mutate the worktree, write into the tooling directory the way a package
+	// manager would, and control the result/error.
+	ApplyUpdateFn  func(repoDir string, opts entities.UpdateOptions) (*repositories.LocalUpdateResult, error)
 	ApplyCallCount int
 }
 
@@ -63,11 +64,11 @@ func (u *SpyLocalUpdaterRepository) ApplyUpdates(
 	repoDir string,
 	_ repositories.ProviderRepository,
 	_ entities.Repository,
-	_ entities.UpdateOptions,
+	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
 	u.ApplyCallCount++
 	if u.ApplyUpdateFn != nil {
-		return u.ApplyUpdateFn(repoDir)
+		return u.ApplyUpdateFn(repoDir, opts)
 	}
 	return nil, repositories.ErrNoUpdatesNeeded
 }
