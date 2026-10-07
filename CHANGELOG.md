@@ -22,6 +22,23 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-07
+
+### Changed
+
+- changed `install.sh` to stop using `local`, which POSIX `sh` does not define, so the script runs under any POSIX shell and passes ShellCheck
+- changed every changelog statement about upgraded dependencies to name them: a run now lists each dependency it moved with the version on both sides (for example `golang.org/x/mod` from `v0.40.0` to `v0.41.0`), at most five to a line, instead of `changed the Go module dependencies to their latest versions`, which named nothing and which the exact-match de-duplication then dropped on every later run of a release cycle. A dependency the pending `[Unreleased]` section or a pending chlog fragment already names is updated where it is, keeping the version the last release shipped and taking the new one, rather than being named a second time. The Go, Terraform, Dockerfile and pipeline updaters name what they moved; a manifest that cannot be read falls back to the generic sentence, and a run that moved nothing declared writes a summary only when nothing else is pending
+- changed the gitforge dependency from `github.com/rios0rios0/gitforge` `v1.0.1-0.20260827000225-8c05a4730240` to `github.com/rios0rios0/gitforge/v4` `v4.2.10`: the unsuffixed module path never resolved past `v1.0.0`, so gitforge could only be pinned to a pseudo-version and dependency updates never reached it
+- changed the JavaScript updater to name the packages it moves in the changelog, at the version on both sides: the packages `package.json` declares, at the versions `package-lock.json` (v1 to v3, workspaces included), `pnpm-lock.yaml` (v5 to v9) or `yarn.lock` (Classic or Berry) resolves, alongside the `.nvmrc` and `.node-version` pin; the standalone run now writes the changelog after the upgrade, and the changelog staging that only that run still used was removed
+- changed the Python, Dart, Ruby, Java and C# updaters to name the dependencies they move in the changelog, at the version on both sides, instead of one generic sentence per release cycle: the `requirements.txt` pins or the versions `pdm.lock` resolves for the packages `pyproject.toml` declares, the direct dependencies `pubspec.lock` resolves, the gems the Gemfile names, the artifacts `pom.xml` declares and the Gradle wrapper version, and the `PackageReference`/`PackageVersion` versions of every C# project, alongside each language's version pin; the Python and Dart standalone runs now write the changelog after the upgrade instead of staging it before
+
+### Fixed
+
+- fixed `install.sh` ending in a 404 on 32-bit x86 and ARM machines, for a release asset that is never built: it now stops with a message that releases are published for amd64 and arm64 only
+- fixed `install.sh` failing with a 404 for every pinned version: it prefixed the version given with `--version` or `AUTOUPDATE_VERSION` with a `v` that the release tags do not carry, so it now accepts `1.0.0` and `v1.0.0` alike, and pointed the README example at a release that has assets
+- fixed `install.sh` installing the Windows binary without its `.exe` extension, which left it unrunnable from PowerShell and cmd: it now installs `autoupdate.exe` and checks for `unzip` before downloading
+- fixed changelog entries being inserted between a wrapped bullet and its continuation line, which glued the tail of the bullet above onto the new entry (`changed the Go module dependencies to their latest versions never closed without a replacement being opened for it`): every `CHANGELOG.md` edit now goes through one reader and writer of the `[Unreleased]` section that treats continuation lines as part of their bullet, instead of gitforge's `InsertChangelogEntry`, which stopped at the first line that was not a bullet
+
 ## [1.2.0] - 2026-09-30
 
 ### Added

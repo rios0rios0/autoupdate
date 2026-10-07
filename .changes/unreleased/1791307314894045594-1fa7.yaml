@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed changelog entries being inserted between a wrapped bullet and its continuation line, which glued the tail of the bullet above onto the new entry (`changed the Go module dependencies to their latest versions never closed without a replacement being opened for it`): every `CHANGELOG.md` edit now goes through one reader and writer of the `[Unreleased]` section that treats continuation lines as part of their bullet, instead of gitforge''s `InsertChangelogEntry`, which stopped at the first line that was not a bullet'
-time: '2026-10-06T17:21:54.893745964Z'
