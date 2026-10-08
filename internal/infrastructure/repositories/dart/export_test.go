@@ -6,6 +6,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 )
 
 // VersionContextExported exposes versionContext for testing.
@@ -53,9 +54,16 @@ var BuildLocalEnv = buildLocalEnv //nolint:gochecknoglobals // test export
 // HandleDryRun exports handleDryRun for testing.
 var HandleDryRun = handleDryRun //nolint:gochecknoglobals // test export
 
-// NewUpdaterRepositoryForTest builds the concrete updater with injected fetchers.
-func NewUpdaterRepositoryForTest(dartFetcher, flutterFetcher VersionFetcher) *UpdaterRepository {
-	return &UpdaterRepository{dartFetcher: dartFetcher, flutterFetcher: flutterFetcher}
+// NewUpdaterRepositoryForTest builds the concrete updater with injected fetchers
+// and, optionally, the runner its upgrade script goes through.
+func NewUpdaterRepositoryForTest(
+	dartFetcher, flutterFetcher VersionFetcher, runner ...cmdrunner.Runner,
+) *UpdaterRepository {
+	r := cmdrunner.NewDefaultRunner()
+	if len(runner) > 0 {
+		r = runner[0]
+	}
+	return &UpdaterRepository{dartFetcher: dartFetcher, flutterFetcher: flutterFetcher, cmdRunner: r}
 }
 
 // WriteGitAuth exports writeGitAuth for testing.

@@ -391,6 +391,40 @@ autoupdate run --updater terraform
 autoupdate run -v
 ```
 
+#### Disk and Memory Footprint
+
+Each repository gets one working directory under the system temporary directory (`$TMPDIR`,
+`/tmp` by default), named `autoupdate-batch-*`. The clone lives there, and so does everything
+the updaters' package managers write outside it:
+
+- the Go module and build caches, including any toolchain `GOTOOLCHAIN` downloads
+- the npm, pnpm, Yarn and corepack caches
+- the pip and PDM caches
+- the Gradle home and the Maven local repository
+- the pub cache, NuGet packages and installed gems
+- every temporary file the upgrade scripts create
+
+That directory is deleted as soon as AutoUpdate is done with the repository, whether a pull
+request was opened, nothing needed upgrading, or something failed. A run therefore holds at
+most a few repositories' worth on disk (one per `concurrency` slot), however many
+repositories it covers, and a run that is killed before it can clean up is cleaned up by the
+next run on the same machine.
+
+No process outlives its repository either. Gradle runs with `--no-daemon`, because a Gradle
+daemon and the Kotlin compile daemon it starts otherwise stay resident for hours, about a
+gigabyte per repository with Kotlin build logic. MSBuild's node reuse is turned off.
+
+Your configuration is still read from where you keep it: `~/.npmrc`, `~/.m2/settings.xml`,
+`pip.conf`, `NuGet.Config`, `~/.bundle/config`, `.netrc` and `go env -w` are untouched, and
+`~/.gradle/gradle.properties` and its init scripts are linked into each repository's Gradle
+home.
+
+The trade-off is that repositories no longer share a download cache, so each one downloads
+its own dependencies. If the temporary directory is memory-backed (`df -h /tmp` reports
+`tmpfs`), point `TMPDIR` at a directory on disk before running AutoUpdate, or every clone
+and cache counts against RAM. Standalone mode (`autoupdate .`) is unaffected: it upgrades
+your own checkout once, with your own caches.
+
 ### CI/CD Integration (Cronjob)
 
 ```yaml

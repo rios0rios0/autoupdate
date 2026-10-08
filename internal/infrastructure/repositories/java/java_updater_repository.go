@@ -190,7 +190,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	buildSys := detectLocalBuildSystem(repoDir)
 
-	env := append(os.Environ(), "BUILD_SYSTEM="+buildSys)
+	env := append(support.ScriptEnv(opts.ToolingDir), "BUILD_SYSTEM="+buildSys)
 	if vCtx.LatestVersion != "" {
 		env = append(env, "JAVA_VERSION="+vCtx.LatestVersion)
 	}
@@ -499,7 +499,11 @@ func writeJavaUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 	sb.WriteString("echo \"Using build system: $BUILD_SYSTEM\"\n")
 	sb.WriteString("case \"$BUILD_SYSTEM\" in\n")
 
-	// Gradle commands
+	// Gradle commands. Both run with --no-daemon: a daemon outlives the build by
+	// hours, and so does the Kotlin compile daemon it starts for build logic written
+	// in Kotlin -- together about a gigabyte of memory per repository, which a batch
+	// run over many repositories accumulates until the machine runs out. Without
+	// the daemon, Gradle stops both within seconds of the build ending.
 	sb.WriteString("    gradle)\n")
 	sb.WriteString("        # Refresh Gradle wrapper if gradlew exists\n")
 	sb.WriteString("        if [ -f \"./gradlew\" ]; then\n")
@@ -508,7 +512,7 @@ func writeJavaUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 		"            chmod +x ./gradlew\n",
 	)
 	sb.WriteString(
-		"            ./gradlew wrapper 2>&1 || " +
+		"            ./gradlew --no-daemon wrapper 2>&1 || " +
 			"echo \"WARNING: Gradle wrapper refresh had some errors (continuing anyway)\"\n",
 	)
 	sb.WriteString("        fi\n\n")
@@ -519,7 +523,7 @@ func writeJavaUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 	sb.WriteString("            echo \"Updating Gradle dependency locks...\"\n")
 	sb.WriteString("            if [ -f \"./gradlew\" ]; then\n")
 	sb.WriteString(
-		"                ./gradlew dependencies --write-locks 2>&1 || " +
+		"                ./gradlew --no-daemon dependencies --write-locks 2>&1 || " +
 			"echo \"WARNING: Gradle lock update had some errors (continuing anyway)\"\n",
 	)
 	sb.WriteString("            fi\n")
@@ -573,9 +577,17 @@ func writeJavaUpgradeCommands(sb *strings.Builder, params upgradeParams) {
 // split or glob-expanded; the rest carry no metacharacters but are written out
 // rather than accumulated, so a later addition cannot reintroduce the unquoted
 // expansion this replaced.
+//
+// The local repository is the batch run's per-repository one when the
+// environment names it (support.MavenRepositoryVariable), so the artifacts Maven
+// downloads are removed with the repository instead of growing `~/.m2` by every
+// repository's dependencies. `${VAR:+...}` expands to nothing at all when the
+// variable is unset -- not to an empty argument -- and `set -u` accepts it, so a
+// run that names no repository keeps Maven's own default.
 func writeMavenGoal(sb *strings.Builder, goal, announce, warning string) {
 	fmt.Fprintf(sb, "        echo %q\n", announce)
 	fmt.Fprintf(sb, "        $MVN_CMD %s \\\n", goal)
+	fmt.Fprintf(sb, "            ${%[1]s:+\"-Dmaven.repo.local=$%[1]s\"} \\\n", support.MavenRepositoryVariable)
 	sb.WriteString("            -DgenerateBackupPoms=false \\\n")
 	sb.WriteString("            -DallowSnapshots=false \\\n")
 	sb.WriteString("            -DallowMajorUpdates=$MAVEN_ALLOW_MAJOR \\\n")

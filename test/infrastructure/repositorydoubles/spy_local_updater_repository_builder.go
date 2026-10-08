@@ -1,6 +1,7 @@
 package repositorydoubles
 
 import (
+	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	testkit "github.com/rios0rios0/testkit/pkg/test"
 )
@@ -12,7 +13,7 @@ type SpyLocalUpdaterRepositoryBuilder struct {
 
 	updaterName   string
 	detectResult  bool
-	applyUpdateFn func(repoDir string) (*repositories.LocalUpdateResult, error)
+	applyUpdateFn func(repoDir string, opts entities.UpdateOptions) (*repositories.LocalUpdateResult, error)
 }
 
 // NewSpyLocalUpdaterRepositoryBuilder creates a new spy local updater
@@ -38,9 +39,10 @@ func (b *SpyLocalUpdaterRepositoryBuilder) WithDetectResult(result bool) *SpyLoc
 }
 
 // WithApplyUpdateFn sets the function invoked from ApplyUpdates. Tests use
-// this to mutate the worktree and return a custom LocalUpdateResult.
+// this to mutate the worktree, fill the tooling directory, and return a
+// custom LocalUpdateResult.
 func (b *SpyLocalUpdaterRepositoryBuilder) WithApplyUpdateFn(
-	fn func(repoDir string) (*repositories.LocalUpdateResult, error),
+	fn func(repoDir string, opts entities.UpdateOptions) (*repositories.LocalUpdateResult, error),
 ) *SpyLocalUpdaterRepositoryBuilder {
 	b.applyUpdateFn = fn
 	return b

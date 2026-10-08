@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed `autoupdate run` running the machine out of memory across many Gradle and .NET repositories: Gradle now runs with `--no-daemon`, so neither its daemon nor the Kotlin compile daemon it starts (about a gigabyte between them) stays resident for hours after the repository is done, and MSBuild no longer keeps its worker nodes alive'
+time: '2026-10-07T19:13:08.035360048Z'

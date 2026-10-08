@@ -102,6 +102,10 @@ rather than by copying a sibling.
 - **git** (`internal/support/git_command.go`): `GitCommand` is the only place this
   program looks git up on `PATH`, resolved with `exec.LookPath` on every call
   and deliberately not cached.
+- **Script environment** (`internal/support/tooling_env.go`): `ScriptEnv` is what
+  every `ApplyUpdates` builds its script environment from, never `os.Environ()`
+  directly -- it moves the package managers' caches into the repository's
+  workspace (see "Per-Repository Workspace" below).
 
 ### Commit Signing
 
@@ -641,6 +645,52 @@ digest to make the substitution apply.
 ### Package Manager Selection (Python)
 
 A repository is upgraded with the dependency manager it already uses; an update run must never migrate it to a different one. `newPythonProject` (`internal/infrastructure/repositories/python/toolchain.go`) is the single place that makes that decision, and `detectRemoteProject`/`detectLocalProject` are the only ways to reach it — do not re-derive the toolchain at a call site. PDM is selected **only** when a `pyproject.toml` is present: that file is PDM's project definition, so running `pdm update` without one makes PDM write a fresh `pyproject.toml`, converting a pip/`requirements.txt` repository into a PDM repository inside what was meant to be a dependency bump. A `pdm.lock` with no `pyproject.toml` beside it therefore stays on pip. A `pyproject.toml` naming PDM is not enough on its own either: `[tool.pdm]` is also how a pip project declares its package layout, so when a `requirements.txt` is present and no `pdm.lock` has ever been committed, the repository keeps pip. Upgrading it through PDM would resolve a lock file from scratch — the whole of the resulting pull request, since `pdm update` leaves the pyproject's own constraints alone — while never touching the `requirements.txt` the build installs from. A committed `pdm.lock` is what settles the question the other way, which is why `pdmMarkers` keeps the two signals apart instead of collapsing them into one boolean. The resolved `pythonProject` flows through `upgradeParams`/`localUpgradeParams` into the generated script, the changelog entry, the PR description and the dry-run report, so those cannot disagree about what ran. On the pip path the script additionally brackets the upgrade with `writeManifestSnapshot`/`writeManifestRestore`, which delete a `pyproject.toml` or `pdm.lock` that appeared during the run — never one the repository already owned.
+
+### Per-Repository Workspace (Batch Mode)
+
+`processLocalUpdaters` gives every repository one directory, a
+`support.RepositoryWorkspace` (`autoupdate-batch-*` under `os.TempDir()`). The clone goes in
+`repo/`, and `tooling/` holds everything the updaters' package managers write outside the
+clone. `defer removeRepositoryWorkspace` deletes it on every way out -- pull request opened,
+nothing to upgrade, updater failure, clone failure -- so a run's disk footprint is bounded by
+`concurrency` instead of growing with the organization. `BatchGitContext` clones into
+`workspace.RepoDir()` and owns nothing; it has no `Close`. `TestRunCommandLeavesNothingBehind`
+drives a real run against a local remote and asserts the temporary directory is empty after
+each outcome.
+
+The updaters reach the tooling directory through `entities.UpdateOptions.ToolingDir`, which
+`runUpdatersOnBranch` sets, and every `ApplyUpdates` builds its script environment with
+`support.ScriptEnv(opts.ToolingDir)` -- an updater that used `os.Environ()` directly would put
+its caches back in the operator's home, where they grow with every repository. `toolingRedirects`
+(`internal/support/tooling_env.go`) is the one table of what moves: `TMPDIR`, `XDG_CACHE_HOME`,
+`GOMODCACHE`/`GOCACHE` (the module cache also holds every toolchain `GOTOOLCHAIN` downloads),
+npm, pnpm (`PNPM_HOME`), Yarn Berry (`YARN_GLOBAL_FOLDER`), corepack, pip, PDM,
+`GRADLE_USER_HOME`, the Maven local repository, `PUB_CACHE`, NuGet and Bundler. A new package
+manager means a new row there. It moves caches and downloads, never configuration: HOME and
+XDG_CONFIG_HOME stay, so `~/.npmrc`, `settings.xml`, `pip.conf`, `NuGet.Config` and `.netrc`
+are still read. Two variables are deliberately absent: `YARN_CACHE_FOLDER` would pull a
+zero-install project's committed `.yarn/cache` out of the repository, and
+`npm_config_store_dir` makes npm warn about an unknown setting on every command.
+
+Maven has no variable for its local repository, so the table sets `AUTOUPDATE_MAVEN_REPOSITORY`
+and the Java script passes it as `${AUTOUPDATE_MAVEN_REPOSITORY:+"-Dmaven.repo.local=..."}`,
+an argument rather than `MAVEN_OPTS`, which the `mvn` launcher word-splits.
+`GRADLE_USER_HOME` mixes caches with configuration, so `prepareToolingDir` links the
+operator's `gradle.properties`, init scripts and Develocity keys into each repository's Gradle
+home -- linked, not copied, so no credential is duplicated into a temporary directory.
+
+Removal goes through `support.RemoveTree`. Go writes its module cache with read-only
+directories, so `os.RemoveAll` alone gives up at the first one and leaves the whole cache
+behind; `RemoveTree` makes the directories writable through an `os.Root` opened on the
+parent, so no symbolic link can carry a chmod outside the tree, and tries again.
+`CleanupStaleTempDirs` uses it too, for the workspaces a killed run leaves behind.
+
+No process may outlive its repository either. The Java script runs Gradle with
+`--no-daemon`: a Gradle daemon and the Kotlin compile daemon it starts for Kotlin build logic
+were measured at about a gigabyte resident, kept for hours, and per-repository Gradle homes
+would mean none of them is ever reused. `toolingSettings` sets `MSBUILDDISABLENODEREUSE=1` for
+the same reason. Standalone mode (`autoupdate .`) never reaches `ApplyUpdates` and keeps the
+operator's own caches; `ScriptEnv("")` returns the process environment unchanged.
 
 ### Batch Mode Concurrency
 

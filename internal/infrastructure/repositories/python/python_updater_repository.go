@@ -200,7 +200,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, fmt.Errorf("python binary not found: %w", binErr)
 	}
 
-	env := append(os.Environ(), "PYTHON_BINARY="+pythonBinary)
+	env := append(support.ScriptEnv(opts.ToolingDir), "PYTHON_BINARY="+pythonBinary)
 	if vCtx.LatestVersion != "" {
 		env = append(env, pythonVersionVar+"="+vCtx.LatestVersion)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -133,7 +132,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	// and parsing JSON with grep and sed is how a flavors block gets destroyed.
 	sdkUpdated := applyFvmPin(repoDir, vCtx)
 
-	outputStr, runErr := runUpgradeScript(ctx, u.cmdRunner, repoDir, vCtx, opts.AllowMajorUpdates)
+	outputStr, runErr := runUpgradeScript(ctx, u.cmdRunner, repoDir, vCtx, opts)
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -168,13 +167,13 @@ func runUpgradeScript(
 	runner cmdrunner.Runner,
 	repoDir string,
 	vCtx *versionContext,
-	allowMajorUpdates bool,
+	opts entities.UpdateOptions,
 ) (string, error) {
 	return cmdrunner.RunScript(ctx, runner, cmdrunner.ScriptRun{
-		Body:        buildBatchDartScript(allowMajorUpdates),
+		Body:        buildBatchDartScript(opts.AllowMajorUpdates),
 		TempPattern: "autoupdate-dart-batch-*",
 		Dir:         repoDir,
-		Env:         append(os.Environ(), "PUB_EXECUTABLE="+vCtx.Toolchain),
+		Env:         append(support.ScriptEnv(opts.ToolingDir), "PUB_EXECUTABLE="+vCtx.Toolchain),
 	})
 }
 

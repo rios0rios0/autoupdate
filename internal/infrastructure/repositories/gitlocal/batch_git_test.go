@@ -7,10 +7,14 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/transport"
+	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
+	gitops "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
 )
 
 func TestCreateBranchFromDefault_PreservesChangesWithStash(t *testing.T) {
@@ -112,6 +116,48 @@ func TestCleanupStaleTempDirs(t *testing.T) {
 		_, statErr = os.Stat(changelogFile.Name())
 		assert.True(t, os.IsNotExist(statErr))
 	})
+
+	t.Run("should remove a stale workspace even when it holds Go's read-only module cache", func(t *testing.T) {
+		// given -- a workspace left by a run that was killed mid-repository, still
+		// holding the module cache Go writes with read-only directories
+		t.Setenv("TMPDIR", t.TempDir())
+		//nolint:usetesting // the name and the location are what is being tested
+		workspace, err := os.MkdirTemp("", "autoupdate-batch-*")
+		require.NoError(t, err)
+		module := filepath.Join(workspace, "tooling", "go", "mod", "example.com", "dependency@v1.0.0")
+		// A directory needs the owner search bit, so 0o700 is the least-privilege mode.
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(module, 0o700))
+		require.NoError(
+			t,
+			os.WriteFile(filepath.Join(module, "go.mod"), []byte("module example.com/dependency\n"), 0o400),
+		)
+		for dir := module; dir != workspace; dir = filepath.Dir(dir) {
+			require.NoError(t, os.Chmod(dir, 0o555))
+		}
+		past := time.Now().Add(-time.Hour)
+		require.NoError(t, os.Chtimes(workspace, past, past))
+
+		// when
+		gitlocal.CleanupStaleTempDirs()
+
+		// then
+		assert.NoDirExists(t, workspace)
+	})
+
+	t.Run("should keep a workspace a concurrent run may still be using", func(t *testing.T) {
+		// given
+		t.Setenv("TMPDIR", t.TempDir())
+		//nolint:usetesting // the name and the location are what is being tested
+		workspace, err := os.MkdirTemp("", "autoupdate-batch-*")
+		require.NoError(t, err)
+
+		// when
+		gitlocal.CleanupStaleTempDirs()
+
+		// then
+		assert.DirExists(t, workspace)
+	})
 }
 
 func TestNewBatchGitContextFromLocal(t *testing.T) {
@@ -184,38 +230,28 @@ func TestRepoDir(t *testing.T) {
 	})
 }
 
-func TestClose(t *testing.T) {
-	// Not parallel: Close removes directories, and testing existence
-	// immediately after is order-dependent.
+func TestCloneRepository(t *testing.T) {
+	t.Parallel()
 
-	t.Run("should remove the temporary directory", func(t *testing.T) {
+	t.Run("should clone into the directory it is given and leave it to its owner", func(t *testing.T) {
+		t.Parallel()
+
 		// given
-		repoDir := createTestRepoWithCommit(t)
-		ctx := newBatchGitContext(t, repoDir)
-
-		// verify directory exists before close
-		_, err := os.Stat(repoDir)
-		require.NoError(t, err)
+		remoteDir := createTestRepoWithCommit(t)
+		repoDir := filepath.Join(t.TempDir(), "repo")
+		registry := repositories.NewProviderRegistry()
 
 		// when
-		ctx.Close()
+		ctx, err := gitlocal.CloneRepository(
+			gitops.NewGitOperations(registry), remoteDir, "refs/heads/main",
+			[]transport.AuthMethod{&githttp.BasicAuth{Username: "unused", Password: "unused"}},
+			registry, repoDir,
+		)
 
 		// then
-		_, statErr := os.Stat(repoDir)
-		assert.True(t, os.IsNotExist(statErr), "directory should have been removed")
-	})
-
-	t.Run("should not panic when tmpDir is empty", func(t *testing.T) {
-		// given - a context with empty tmpDir (edge case)
-		repoDir := createTestRepoWithCommit(t)
-		ctx := newBatchGitContext(t, repoDir)
-		// Close once to clear the directory
-		ctx.Close()
-
-		// when / then - calling Close again should not panic
-		assert.NotPanics(t, func() {
-			ctx.Close()
-		})
+		require.NoError(t, err)
+		assert.Equal(t, repoDir, ctx.RepoDir())
+		assert.FileExists(t, filepath.Join(repoDir, "README.md"))
 	})
 }
 

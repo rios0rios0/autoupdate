@@ -25,36 +25,34 @@ import (
 type BatchGitContext struct {
 	repo          *git.Repository
 	workTree      *git.Worktree
-	tmpDir        string
+	repoDir       string
 	defaultBranch string
 	resolver      PushAuthResolver
 	stashRef      string // set by StashChanges, verified by PopStash
 }
 
-// CloneRepository clones a remote repository into a temporary directory using
-// the provided auth methods (multi-token retry). The caller must call Close()
-// when done to remove the temp directory.
+// CloneRepository clones a remote repository into repoDir using the provided
+// auth methods (multi-token retry).
+//
+// The context does not own repoDir and never removes it: the batch run clones
+// into the repository's support.RepositoryWorkspace, whose removal takes the
+// clone with it together with everything the updaters' package managers wrote
+// beside it. A failed clone is left for that removal too.
 func CloneRepository(
 	gitOps *gitops.GitOperations,
 	cloneURL string,
 	defaultBranch string,
 	authMethods []transport.AuthMethod,
 	resolver PushAuthResolver,
+	repoDir string,
 ) (*BatchGitContext, error) {
-	tmpDir, err := os.MkdirTemp("", "autoupdate-batch-*")
+	repo, err := gitOps.CloneRepo(cloneURL, repoDir, authMethods)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
-	}
-
-	repo, err := gitOps.CloneRepo(cloneURL, tmpDir, authMethods)
-	if err != nil {
-		_ = os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("failed to clone %s: %w", cloneURL, err)
 	}
 
 	wt, err := repo.Worktree()
 	if err != nil {
-		_ = os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("failed to get worktree: %w", err)
 	}
 
@@ -63,7 +61,7 @@ func CloneRepository(
 	return &BatchGitContext{
 		repo:          repo,
 		workTree:      wt,
-		tmpDir:        tmpDir,
+		repoDir:       repoDir,
 		defaultBranch: cleanBranch,
 		resolver:      resolver,
 	}, nil
@@ -85,14 +83,14 @@ func NewBatchGitContextFromLocal(repoDir, defaultBranch string) (*BatchGitContex
 	return &BatchGitContext{
 		repo:          repo,
 		workTree:      wt,
-		tmpDir:        repoDir,
+		repoDir:       repoDir,
 		defaultBranch: strings.TrimPrefix(defaultBranch, "refs/heads/"),
 	}, nil
 }
 
 // RepoDir returns the filesystem path of the cloned repository.
 func (c *BatchGitContext) RepoDir() string {
-	return c.tmpDir
+	return c.repoDir
 }
 
 // CreateBranchFromDefault creates a new branch from the default branch HEAD
@@ -214,7 +212,7 @@ func (c *BatchGitContext) CommitSignedAndPush(
 // this method returned true.
 func (c *BatchGitContext) StashChanges() (bool, error) {
 	cmd := support.GitCommand(
-		context.TODO(), c.tmpDir, "stash", "push", "--include-untracked", "-m", "autoupdate-batch-stash",
+		context.TODO(), c.repoDir, "stash", "push", "--include-untracked", "-m", "autoupdate-batch-stash",
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -227,7 +225,7 @@ func (c *BatchGitContext) StashChanges() (bool, error) {
 	}
 
 	// Record the stash ref so PopStash can verify it pops the right entry.
-	refCmd := support.GitCommand(context.TODO(), c.tmpDir, "rev-parse", "stash@{0}")
+	refCmd := support.GitCommand(context.TODO(), c.repoDir, "rev-parse", "stash@{0}")
 	refOut, refErr := refCmd.CombinedOutput()
 	if refErr != nil {
 		return false, fmt.Errorf("failed to read stash ref: %w\nOutput: %s", refErr, string(refOut))
@@ -242,7 +240,7 @@ func (c *BatchGitContext) StashChanges() (bool, error) {
 // restoring an unrelated stash entry.
 func (c *BatchGitContext) PopStash() error {
 	if c.stashRef != "" {
-		refCmd := support.GitCommand(context.TODO(), c.tmpDir, "rev-parse", "stash@{0}")
+		refCmd := support.GitCommand(context.TODO(), c.repoDir, "rev-parse", "stash@{0}")
 		refOut, refErr := refCmd.CombinedOutput()
 		if refErr != nil {
 			return fmt.Errorf("failed to verify stash ref: %w\nOutput: %s", refErr, string(refOut))
@@ -256,7 +254,7 @@ func (c *BatchGitContext) PopStash() error {
 		}
 	}
 
-	cmd := support.GitCommand(context.TODO(), c.tmpDir, "stash", "pop")
+	cmd := support.GitCommand(context.TODO(), c.repoDir, "stash", "pop")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to pop stash: %w\nOutput: %s", err, string(output))
@@ -271,7 +269,7 @@ func (c *BatchGitContext) DropStash() {
 	if c.stashRef == "" {
 		return
 	}
-	_ = support.GitCommand(context.TODO(), c.tmpDir, "stash", "drop").Run()
+	_ = support.GitCommand(context.TODO(), c.repoDir, "stash", "drop").Run()
 	c.stashRef = ""
 }
 
@@ -363,13 +361,6 @@ func (c *BatchGitContext) FlattenToWorktree() error {
 	return nil
 }
 
-// Close removes the temporary directory created during cloning.
-func (c *BatchGitContext) Close() {
-	if c.tmpDir != "" {
-		_ = os.RemoveAll(c.tmpDir)
-	}
-}
-
 // staleTempThreshold is the minimum age a temp path must have before it is
 // considered stale. This prevents concurrent autoupdate runs from deleting
 // each other's active temporary directories.
@@ -379,28 +370,37 @@ const staleTempThreshold = 30 * time.Minute
 // files from the OS temp dir. These accumulate when the process is killed
 // (SIGKILL, OOM) before deferred cleanup can run. Only paths older than
 // staleTempThreshold are removed to avoid interfering with concurrent runs.
+//
+// A leftover repository workspace holds that repository's package-manager
+// caches as well as its clone, and Go's module cache among them is read-only, so
+// each path goes through support.RemoveTree: [os.RemoveAll] would give up on the
+// cache and leave it behind for every later run to fail to remove too.
 func CleanupStaleTempDirs() {
 	tmpDir := os.TempDir()
 	cutoff := time.Now().Add(-staleTempThreshold)
 
 	for _, pattern := range []string{
-		"autoupdate-batch-*",
+		support.RepositoryWorkspacePattern,
 		"autoupdate-local-*",
 		"autoupdate-go-*",
 		"autoupdate-js-*",
-		"autoupdate-js-local-*",
 		"autoupdate-python-*",
-		"autoupdate-python-local-*",
+		"autoupdate-java-*",
+		"autoupdate-csharp-*",
+		"autoupdate-ruby-*",
+		"autoupdate-dart-*",
 		"autoupdate-changelog-*.md",
 	} {
 		matches, _ := filepath.Glob(filepath.Join(tmpDir, pattern))
 		for _, m := range matches {
-			info, err := os.Stat(m)
+			info, err := os.Lstat(m)
 			if err != nil || info.ModTime().After(cutoff) {
 				continue
 			}
 			logger.Debugf("Cleaning up stale temp path: %s", m)
-			_ = os.RemoveAll(m)
+			if removeErr := support.RemoveTree(m); removeErr != nil {
+				logger.Warnf("Could not remove the stale temp path %s: %v", m, removeErr)
+			}
 		}
 	}
 }
