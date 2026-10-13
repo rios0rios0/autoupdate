@@ -1,0 +1,3 @@
+kind: 'Changed'
+body: 'changed the Go modules `golang.org/x/text` from `v0.42.0` to `v0.43.0` and `golang.org/x/tools` from `v0.51.0` to `v0.52.0`'
+time: '2026-10-13T09:13:10.973582483Z'
