@@ -840,11 +840,11 @@ func sanitizeBranchSegment(s string) string {
 // replace the version in the actual config key (e.g. versionSpec) rather than
 // in a preceding label (e.g. displayName).
 func replaceLastOccurrence(s, old, replacement string) string {
-	idx := strings.LastIndex(s, old)
-	if idx < 0 {
+	before, after, found := strings.CutLast(s, old)
+	if !found {
 		return s
 	}
-	return s[:idx] + replacement + s[idx+len(old):]
+	return before + replacement + after
 }
 
 // updateDisplayNameVersion rewrites the version carried by displayName labels

@@ -224,8 +224,8 @@ func scanAllDockerfiles(
 // isDockerfilePath returns true if the file path looks like a Dockerfile.
 func isDockerfilePath(path string) bool {
 	base := path
-	if idx := strings.LastIndex(path, "/"); idx >= 0 {
-		base = path[idx+1:]
+	if _, pathBase, found := strings.CutLast(path, "/"); found {
+		base = pathBase
 	}
 
 	return base == "Dockerfile" ||
