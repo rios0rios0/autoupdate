@@ -1181,7 +1181,7 @@ func TestGeneratePRTitle(t *testing.T) {
 		result := terraform.GeneratePRTitle(tasks)
 
 		// then
-		assert.Equal(t, "chore(deps): upgraded `my-module` to `v2.0.0`", result)
+		assert.Equal(t, "chore(deps): updated `my-module` to `v2.0.0`", result)
 	})
 
 	t.Run("should format batch upgrade title", func(t *testing.T) {
@@ -1213,7 +1213,7 @@ func TestGeneratePRTitle(t *testing.T) {
 		result := terraform.GeneratePRTitle(tasks)
 
 		// then
-		assert.Equal(t, "chore(deps): upgraded 3 Terraform dependencies", result)
+		assert.Equal(t, "chore(deps): updated 3 Terraform dependencies", result)
 	})
 }
 

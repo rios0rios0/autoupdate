@@ -147,7 +147,7 @@ func cloneAndUpgrade(
 func upgradeSubject(rbVersion string, rbVersionUpdated bool) string {
 	if rbVersionUpdated {
 		return fmt.Sprintf(
-			"chore(deps): upgraded Ruby to `%s` and updated all gem dependencies",
+			"chore(deps): updated Ruby to `%s` and gem dependencies",
 			rbVersion,
 		)
 	}

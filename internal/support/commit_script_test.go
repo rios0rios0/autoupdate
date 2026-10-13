@@ -15,7 +15,7 @@ func TestCommitAndPushScript(t *testing.T) {
 	commit := support.CommitAndPush{
 		UpgradedWhen:   `[ "$GO_VERSION_CHANGED" = "true" ]`,
 		UpgradeMessage: "chore(deps): upgraded Go version to `$GO_VERSION` and updated all dependencies",
-		DepsMessage:    "chore(deps): update Go module dependencies",
+		DepsMessage:    "chore(deps): updated Go module dependencies",
 	}
 
 	t.Run("should stage, commit and push when the worktree changed", func(t *testing.T) {
@@ -55,7 +55,7 @@ func TestCommitAndPushScript(t *testing.T) {
 			script,
 			"        git commit -m \"chore(deps): upgraded Go version to \\`$GO_VERSION\\` and updated all dependencies\"",
 		)
-		assert.Contains(t, script, `        git commit -m "chore(deps): update Go module dependencies"`)
+		assert.Contains(t, script, `        git commit -m "chore(deps): updated Go module dependencies"`)
 		assert.NotContains(t, script, "to `$GO_VERSION`")
 	})
 

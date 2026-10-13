@@ -840,11 +840,11 @@ func sanitizeBranchSegment(s string) string {
 // replace the version in the actual config key (e.g. versionSpec) rather than
 // in a preceding label (e.g. displayName).
 func replaceLastOccurrence(s, old, replacement string) string {
-	idx := strings.LastIndex(s, old)
-	if idx < 0 {
+	before, after, found := strings.CutLast(s, old)
+	if !found {
 		return s
 	}
-	return s[:idx] + replacement + s[idx+len(old):]
+	return before + replacement + after
 }
 
 // updateDisplayNameVersion rewrites the version carried by displayName labels
@@ -1000,11 +1000,11 @@ func generateCommitMessage(tasks []upgradeTask) string {
 func generatePRTitle(tasks []upgradeTask) string {
 	if len(tasks) == 1 {
 		return fmt.Sprintf(
-			"chore(deps): upgraded %s pipeline version to `%s`",
+			"chore(deps): updated %s pipeline version to `%s`",
 			tasks[0].match.Language, tasks[0].newVersion,
 		)
 	}
-	return fmt.Sprintf("chore(deps): upgraded %d pipeline version references", len(tasks))
+	return fmt.Sprintf("chore(deps): updated %d pipeline version references", len(tasks))
 }
 
 func generatePRDescription(tasks []upgradeTask) string {

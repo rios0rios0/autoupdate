@@ -160,7 +160,7 @@ func executeLocalUpgrade(
 	commitMsg := rbCommitMsgDeps
 	if rubyVersionUpdated {
 		commitMsg = fmt.Sprintf(
-			"chore(deps): upgraded Ruby to `%s` and updated all gem dependencies",
+			"chore(deps): updated Ruby to `%s` and gem dependencies",
 			vCtx.LatestVersion,
 		)
 	}

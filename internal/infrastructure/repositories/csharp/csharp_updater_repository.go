@@ -152,7 +152,7 @@ func cloneAndUpgrade(
 func upgradeSubject(dotnetVersion string, dotnetVersionUpdated bool) string {
 	if dotnetVersionUpdated {
 		return fmt.Sprintf(
-			"chore(deps): upgraded .NET SDK to `%s` and updated all NuGet dependencies",
+			"chore(deps): updated .NET SDK to `%s` and NuGet dependencies",
 			dotnetVersion,
 		)
 	}

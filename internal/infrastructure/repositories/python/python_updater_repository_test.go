@@ -780,7 +780,7 @@ func TestUpgradeSubject(t *testing.T) {
 
 		// then
 		assert.Contains(t, subject, pyVersion)
-		assert.Contains(t, subject, "upgraded Python")
+		assert.Contains(t, subject, "updated Python")
 	})
 }
 

@@ -102,7 +102,7 @@ jobs:
 			"chore(deps): upgraded golang pipeline version from `1.22.0` to `1.24.1`",
 			pipeline.GenerateCommitMessage(upgrades))
 		assert.Equal(t,
-			"chore(deps): upgraded golang pipeline version to `1.24.1`",
+			"chore(deps): updated golang pipeline version to `1.24.1`",
 			pipeline.GeneratePRTitle(upgrades))
 		assert.Contains(t, pipeline.GeneratePRDescription(upgrades),
 			"| golang | 1.22.0 | 1.24.1 | .github/workflows/ci.yaml |")

@@ -224,8 +224,8 @@ func scanAllDockerfiles(
 // isDockerfilePath returns true if the file path looks like a Dockerfile.
 func isDockerfilePath(path string) bool {
 	base := path
-	if idx := strings.LastIndex(path, "/"); idx >= 0 {
-		base = path[idx+1:]
+	if _, pathBase, found := strings.CutLast(path, "/"); found {
+		base = pathBase
 	}
 
 	return base == "Dockerfile" ||
@@ -569,11 +569,11 @@ func generateCommitMessage(tasks []upgradeTask) string {
 func generatePRTitle(tasks []upgradeTask) string {
 	if len(tasks) == 1 {
 		return fmt.Sprintf(
-			"chore(deps): upgraded `%s` to `%s`",
+			"chore(deps): updated `%s` to `%s`",
 			tasks[0].parsed.FullName(), tasks[0].newTag,
 		)
 	}
-	return fmt.Sprintf("chore(deps): upgraded %d Docker base images", len(tasks))
+	return fmt.Sprintf("chore(deps): updated %d Docker base images", len(tasks))
 }
 
 func generatePRDescription(tasks []upgradeTask) string {

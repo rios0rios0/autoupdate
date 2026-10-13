@@ -334,7 +334,7 @@ func changelogEntry(vCtx *versionContext, sdkUpdated bool) string {
 func commitMessage(vCtx *versionContext, sdkUpdated bool) string {
 	if sdkUpdated {
 		return fmt.Sprintf(
-			"chore(deps): upgraded Flutter to `%s` and updated all pub dependencies",
+			"chore(deps): updated Flutter to `%s` and pub dependencies",
 			vCtx.LatestVersion,
 		)
 	}

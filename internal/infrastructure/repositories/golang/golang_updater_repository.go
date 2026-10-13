@@ -39,7 +39,7 @@ const (
 	branchGoDepsFmt    = "chore/upgrade-go-deps"
 
 	// Commit/PR messages and changelog entries used across remote and local modes.
-	goCommitMsgDeps      = "chore(deps): update Go module dependencies"
+	goCommitMsgDeps      = "chore(deps): updated Go module dependencies"
 	goChangelogEntryDeps = "- changed the Go module dependencies to their latest versions"
 )
 
@@ -245,7 +245,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	prTitle := commitMsg
 	if goVersionUpdated {
 		commitMsg = fmt.Sprintf(
-			"chore(deps): upgraded Go version to `%s` and updated all dependencies",
+			"chore(deps): updated Go version to `%s` and dependencies",
 			vCtx.LatestVersion,
 		)
 		prTitle = commitMsg
@@ -362,7 +362,7 @@ func cloneAndUpgrade(
 func upgradeSubject(goVersion string, goVersionUpdated bool) string {
 	if goVersionUpdated {
 		return fmt.Sprintf(
-			"chore(deps): upgraded Go version to `%s` and updated all dependencies",
+			"chore(deps): updated Go version to `%s` and dependencies",
 			goVersion,
 		)
 	}
@@ -803,7 +803,7 @@ func writeCommitAndPush(sb *strings.Builder) {
 		UpgradedWhen: `[ "$GO_VERSION_CHANGED" = "true" ]`,
 		UpgradeMessage: "chore(deps): upgraded Go version to `$GO_VERSION` " +
 			"and updated all dependencies",
-		DepsMessage: "chore(deps): update Go module dependencies",
+		DepsMessage: "chore(deps): updated Go module dependencies",
 	}))
 }
 

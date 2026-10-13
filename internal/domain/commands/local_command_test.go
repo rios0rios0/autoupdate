@@ -167,7 +167,7 @@ func TestGeneratePRContent(t *testing.T) {
 		title, desc := commands.GeneratePRContent(info)
 
 		// then
-		assert.Equal(t, "chore(deps): update Go module dependencies", title)
+		assert.Equal(t, "chore(deps): updated Go module dependencies", title)
 		assert.NotEmpty(t, desc)
 	})
 
@@ -187,7 +187,7 @@ func TestGeneratePRContent(t *testing.T) {
 
 		// then
 		assert.Contains(t, title, "1.26.0")
-		assert.Contains(t, title, "upgraded Go version")
+		assert.Contains(t, title, "updated Go version")
 	})
 
 	t.Run("should generate Python PR content", func(t *testing.T) {

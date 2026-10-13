@@ -164,7 +164,7 @@ func executeLocalUpgrade(
 	commitMsg := pyCommitMsgDeps
 	if pythonVersionUpdated {
 		commitMsg = fmt.Sprintf(
-			"chore(deps): upgraded Python to `%s` and updated all dependencies",
+			"chore(deps): updated Python to `%s` and dependencies",
 			vCtx.LatestVersion,
 		)
 	}
