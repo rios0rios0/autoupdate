@@ -506,7 +506,7 @@ func TestUpgradeSubject(t *testing.T) {
 		subject := goUpdater.UpgradeSubject(goVersion, false)
 
 		// then
-		assert.Equal(t, "chore(deps): update Go module dependencies", subject)
+		assert.Equal(t, "chore(deps): updated Go module dependencies", subject)
 	})
 
 	t.Run("should name the version when the version moved", func(t *testing.T) {
@@ -520,7 +520,7 @@ func TestUpgradeSubject(t *testing.T) {
 
 		// then
 		assert.Contains(t, subject, goVersion)
-		assert.Contains(t, subject, "upgraded Go version")
+		assert.Contains(t, subject, "updated Go version")
 	})
 }
 

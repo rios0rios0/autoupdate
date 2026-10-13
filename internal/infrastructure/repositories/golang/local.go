@@ -180,7 +180,7 @@ func executeLocalUpgrade(
 	commitMsg := goCommitMsgDeps
 	if goVersionUpdated {
 		commitMsg = fmt.Sprintf(
-			"chore(deps): upgraded Go version to `%s` and updated all dependencies",
+			"chore(deps): updated Go version to `%s` and dependencies",
 			vCtx.LatestVersion,
 		)
 	}

@@ -204,7 +204,7 @@ func executeLocalUpgrade(
 	commitMsg := jsCommitMsgDeps
 	if nodeVersionUpdated {
 		commitMsg = fmt.Sprintf(
-			"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
+			"chore(deps): updated Node.js to `%s` and dependencies",
 			vCtx.LatestVersion,
 		)
 	}

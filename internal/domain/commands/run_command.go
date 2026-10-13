@@ -677,9 +677,8 @@ func buildAggregateCommitMessage(applied []appliedUpdaterResult) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// buildAggregatePRTitle returns the PR title. For a single updater it is
-// that updater's original title; for multiple it lists the contributing
-// updater names so reviewers can see at a glance which ecosystems moved.
+// buildAggregatePRTitle preserves the updater title for one updater and lists
+// the contributors for multi-updater runs.
 func buildAggregatePRTitle(applied []appliedUpdaterResult) string {
 	if len(applied) == 1 {
 		return applied[0].result.PRTitle
@@ -688,7 +687,7 @@ func buildAggregatePRTitle(applied []appliedUpdaterResult) string {
 	for _, a := range applied {
 		names = append(names, a.name)
 	}
-	return fmt.Sprintf("chore(deps): bumped dependencies (%s)", strings.Join(names, ", "))
+	return fmt.Sprintf("chore(deps): updated dependencies (%s)", strings.Join(names, ", "))
 }
 
 // buildAggregatePRDescription renders the PR body with one section per

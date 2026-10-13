@@ -442,10 +442,10 @@ type prContentGenerator func(info *localPRInfo) (string, string)
 func prContentGenerators() map[langEntities.Language]prContentGenerator {
 	return map[langEntities.Language]prContentGenerator{
 		langEntities.LanguageGo: func(info *localPRInfo) (string, string) {
-			title := "chore(deps): update Go module dependencies"
+			title := "chore(deps): updated Go module dependencies"
 			if info.VersionUpdated {
 				title = fmt.Sprintf(
-					"chore(deps): upgraded Go version to `%s` and updated all dependencies",
+					"chore(deps): updated Go version to `%s` and dependencies",
 					info.LatestVersion,
 				)
 			}
@@ -461,7 +461,7 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 			title := "chore(deps): updated Python dependencies"
 			if info.VersionUpdated {
 				title = fmt.Sprintf(
-					"chore(deps): upgraded Python to `%s` and updated all dependencies",
+					"chore(deps): updated Python to `%s` and dependencies",
 					info.LatestVersion,
 				)
 			}
@@ -474,7 +474,7 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 			title := "chore(deps): updated JavaScript dependencies"
 			if info.VersionUpdated {
 				title = fmt.Sprintf(
-					"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
+					"chore(deps): updated Node.js to `%s` and dependencies",
 					info.LatestVersion,
 				)
 			}
@@ -487,7 +487,7 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 			title := "chore(deps): updated Dart pub dependencies"
 			if info.VersionUpdated {
 				title = fmt.Sprintf(
-					"chore(deps): upgraded Flutter to `%s` and updated all pub dependencies",
+					"chore(deps): updated Flutter to `%s` and pub dependencies",
 					info.LatestVersion,
 				)
 			}

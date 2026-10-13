@@ -1986,13 +1986,13 @@ func TestBuildAggregateCommitMessage(t *testing.T) {
 func TestBuildAggregatePRTitle(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should pass the single updater PR title through verbatim", func(t *testing.T) {
+	t.Run("should pass the single updater PR title through", func(t *testing.T) {
 		t.Parallel()
 
 		// given
 		applied := []commands.AppliedUpdaterResult{
 			commands.NewAppliedUpdaterResult("golang", &repositories.LocalUpdateResult{
-				PRTitle: "chore(deps): upgraded Go version to `1.26.2` and updated all dependencies",
+				PRTitle: "chore(deps): updated Go version to `1.26.2` and dependencies",
 			}),
 		}
 
@@ -2000,7 +2000,7 @@ func TestBuildAggregatePRTitle(t *testing.T) {
 		title := commands.BuildAggregatePRTitle(applied)
 
 		// then
-		assert.Equal(t, "chore(deps): upgraded Go version to `1.26.2` and updated all dependencies", title)
+		assert.Equal(t, "chore(deps): updated Go version to `1.26.2` and dependencies", title)
 	})
 
 	t.Run("should list contributing updater names for multi-updater runs", func(t *testing.T) {
@@ -2016,7 +2016,7 @@ func TestBuildAggregatePRTitle(t *testing.T) {
 		title := commands.BuildAggregatePRTitle(applied)
 
 		// then
-		assert.Equal(t, "chore(deps): bumped dependencies (golang, dockerfile)", title)
+		assert.Equal(t, "chore(deps): updated dependencies (golang, dockerfile)", title)
 	})
 }
 

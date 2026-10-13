@@ -803,13 +803,13 @@ func generateCommitMessage(tasks []upgradeTask) string {
 func generatePRTitle(tasks []upgradeTask) string {
 	if len(tasks) == 1 {
 		return fmt.Sprintf(
-			"chore(deps): upgraded `%s` to `%s`",
+			"chore(deps): updated `%s` to `%s`",
 			extractRepoName(tasks[0].dep.Source),
 			tasks[0].newVersion,
 		)
 	}
 	return fmt.Sprintf(
-		"chore(deps): upgraded %d Terraform dependencies",
+		"chore(deps): updated %d Terraform dependencies",
 		len(tasks),
 	)
 }

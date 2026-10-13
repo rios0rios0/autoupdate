@@ -165,7 +165,7 @@ func cloneAndUpgrade(
 func upgradeSubject(javaVersion string, javaVersionUpdated bool) string {
 	if javaVersionUpdated {
 		return fmt.Sprintf(
-			"chore(deps): upgraded Java to `%s` and updated all dependencies",
+			"chore(deps): updated Java to `%s` and dependencies",
 			javaVersion,
 		)
 	}

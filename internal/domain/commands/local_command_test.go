@@ -167,7 +167,7 @@ func TestGeneratePRContent(t *testing.T) {
 		title, desc := commands.GeneratePRContent(info)
 
 		// then
-		assert.Equal(t, "chore(deps): update Go module dependencies", title)
+		assert.Equal(t, "chore(deps): updated Go module dependencies", title)
 		assert.NotEmpty(t, desc)
 	})
 

@@ -154,7 +154,7 @@ func cloneAndUpgrade(
 func upgradeSubject(nodeVersion string, nodeVersionUpdated bool) string {
 	if nodeVersionUpdated {
 		return fmt.Sprintf(
-			"chore(deps): upgraded Node.js to `%s` and updated all dependencies",
+			"chore(deps): updated Node.js to `%s` and dependencies",
 			nodeVersion,
 		)
 	}

@@ -1000,11 +1000,11 @@ func generateCommitMessage(tasks []upgradeTask) string {
 func generatePRTitle(tasks []upgradeTask) string {
 	if len(tasks) == 1 {
 		return fmt.Sprintf(
-			"chore(deps): upgraded %s pipeline version to `%s`",
+			"chore(deps): updated %s pipeline version to `%s`",
 			tasks[0].match.Language, tasks[0].newVersion,
 		)
 	}
-	return fmt.Sprintf("chore(deps): upgraded %d pipeline version references", len(tasks))
+	return fmt.Sprintf("chore(deps): updated %d pipeline version references", len(tasks))
 }
 
 func generatePRDescription(tasks []upgradeTask) string {
