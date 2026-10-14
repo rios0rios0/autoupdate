@@ -22,6 +22,22 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-14
+
+### Changed
+
+- changed the Go modules `github.com/Microsoft/go-winio` from `v0.6.2` to `v0.6.3` and `golang.org/x/net` from `v0.59.0` to `v0.61.0`
+- changed the Go modules `github.com/rios0rios0/cliforge` from `v0.4.7` to `v0.5.0`, `github.com/rios0rios0/langforge` from `v1.1.7` to `v1.1.8` and `github.com/rios0rios0/testkit` from `v0.3.4` to `v0.3.5`
+- changed the Go modules `golang.org/x/crypto` from `v0.57.0` to `v0.58.0`, `golang.org/x/mod` from `v0.41.0` to `v0.42.0`, `golang.org/x/sync` from `v0.23.0` to `v0.24.0`, `golang.org/x/sys` from `v0.48.0` to `v0.49.0` and `golang.org/x/term` from `v0.46.0` to `v0.47.0`
+- changed the Go modules `golang.org/x/text` from `v0.42.0` to `v0.43.0` and `golang.org/x/tools` from `v0.51.0` to `v0.52.0`
+- changed the Go version from `1.27.1` to `1.27.2`
+- standardized dependency PR titles on updated while preserving ecosystem details
+
+### Fixed
+
+- fixed `autoupdate run` filling the disk of the machine it runs on as it moved through an organization: each repository now gets one working directory holding its clone and everything its package managers write outside it (the Go module and build caches with any downloaded Go toolchain, the npm, pnpm, Yarn, corepack, pip, PDM, Gradle, Maven, pub, NuGet and Bundler caches, and every temporary file), and the directory is deleted as soon as the repository is done, whether a pull request was opened, nothing needed upgrading or an updater failed; the deletion also removes Go's read-only module cache, which `os.RemoveAll` left behind without reporting it, and the sweep of directories left by a killed run now covers every updater
+- fixed `autoupdate run` running the machine out of memory across many Gradle and .NET repositories: Gradle now runs with `--no-daemon`, so neither its daemon nor the Kotlin compile daemon it starts (about a gigabyte between them) stays resident for hours after the repository is done, and MSBuild no longer keeps its worker nodes alive
+
 ## [1.2.1] - 2026-10-07
 
 ### Changed
