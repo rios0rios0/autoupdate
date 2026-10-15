@@ -5,10 +5,10 @@ go 1.27.2
 require (
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/hashicorp/hcl/v2 v2.25.0
-	github.com/rios0rios0/cliforge v0.5.0
-	github.com/rios0rios0/gitforge/v4 v4.2.10
-	github.com/rios0rios0/langforge v1.1.8
-	github.com/rios0rios0/testkit v0.3.5
+	github.com/rios0rios0/cliforge v0.5.1
+	github.com/rios0rios0/gitforge/v4 v4.2.11
+	github.com/rios0rios0/langforge v1.1.9
+	github.com/rios0rios0/testkit v0.3.6
 	github.com/sirupsen/logrus v1.10.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
@@ -22,7 +22,7 @@ require (
 require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
-	github.com/Microsoft/go-winio v0.6.3 // indirect
+	github.com/Microsoft/go-winio v0.6.4 // indirect
 	github.com/ProtonMail/go-crypto v1.5.2 // indirect
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
