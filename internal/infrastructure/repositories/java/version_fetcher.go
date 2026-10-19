@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"time"
 )
 
@@ -22,8 +24,15 @@ type javaRelease struct {
 	EOL    any    `json:"eol"` // bool (false) or string date
 }
 
-// defaultJavaVersionURL is the default URL for fetching Java release metadata.
-const defaultJavaVersionURL = "https://endoflife.date/api/java.json"
+// defaultJavaVersionURL is endoflife.date's Eclipse Temurin feed. Its "java"
+// product, which the updater read before, no longer exists and answers 404.
+const defaultJavaVersionURL = "https://endoflife.date/api/eclipse-temurin.json"
+
+// temurinReleaseName matches the name of an Eclipse Temurin release and captures
+// the JDK version it packages: up to three numbers, the feature, interim and
+// update releases. Temurin appends a respin number when it rebuilds a JDK, and a
+// build number after a "+": "25.0.4.1+1" is JDK 25.0.4, and "27+35" is JDK 27.
+var temurinReleaseName = regexp.MustCompile(`^(\d+(?:\.\d+){0,2})(?:\.\d+)*(?:\+.+)?$`)
 
 // HTTPJavaVersionFetcher fetches the latest LTS Java version from the endoflife.date API.
 type HTTPJavaVersionFetcher struct {
@@ -41,7 +50,8 @@ func NewHTTPJavaVersionFetcherWithURL(client *http.Client, baseURL string) Versi
 	return &HTTPJavaVersionFetcher{client: client, baseURL: baseURL}
 }
 
-// FetchLatestVersion returns the latest LTS Java version string (e.g. "21.0.5").
+// FetchLatestVersion returns the JDK version of the newest active LTS line (e.g.
+// "25.0.4"), the value the updater writes into .java-version.
 func (f *HTTPJavaVersionFetcher) FetchLatestVersion(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(
 		ctx, http.MethodGet, f.baseURL, nil,
@@ -65,13 +75,42 @@ func (f *HTTPJavaVersionFetcher) FetchLatestVersion(ctx context.Context) (string
 		return "", fmt.Errorf("failed to parse Java versions: %w", decodeErr)
 	}
 
-	for _, release := range releases {
-		if isLTSRelease(release) && isActiveRelease(release) {
-			return release.Latest, nil
-		}
+	release, found := newestActiveLTSRelease(releases)
+	if !found {
+		return "", errors.New("no active LTS Java release found")
 	}
 
-	return "", errors.New("no active LTS Java release found")
+	return jdkVersion(release.Latest)
+}
+
+// newestActiveLTSRelease returns the active LTS release with the highest cycle. The
+// feed does not list the cycles in order (it puts 11 before 16), so the first
+// active LTS release it lists is not necessarily the newest.
+func newestActiveLTSRelease(releases []javaRelease) (javaRelease, bool) {
+	var newest javaRelease
+	newestCycle := -1
+	for _, release := range releases {
+		cycle, err := strconv.Atoi(release.Cycle)
+		if err != nil || cycle <= newestCycle || !isLTSRelease(release) || !isActiveRelease(release) {
+			continue
+		}
+		newest, newestCycle = release, cycle
+	}
+
+	return newest, newestCycle >= 0
+}
+
+// jdkVersion returns the JDK version an Eclipse Temurin release packages, e.g.
+// "25.0.4" for "25.0.4.1+1". The respin and build numbers do not belong in
+// .java-version: version managers name JDKs by MAJOR.MINOR.PATCH, and the branch
+// name and the commit message are built from the same value.
+func jdkVersion(releaseName string) (string, error) {
+	match := temurinReleaseName.FindStringSubmatch(releaseName)
+	if match == nil {
+		return "", fmt.Errorf("unrecognized Java release %q", releaseName)
+	}
+
+	return match[1], nil
 }
 
 // isLTSRelease returns true if the Java release is an LTS version.

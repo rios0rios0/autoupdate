@@ -40,7 +40,7 @@ func TestHTTPJavaVersionFetcher(t *testing.T) {
 		assert.Equal(t, "21.0.5", version)
 	})
 
-	t.Run("should skip non-LTS releases and return first LTS release", func(t *testing.T) {
+	t.Run("should skip non-LTS releases even when they are newer", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -62,6 +62,54 @@ func TestHTTPJavaVersionFetcher(t *testing.T) {
 		// then
 		require.NoError(t, err)
 		assert.Equal(t, "21.0.5", version)
+	})
+
+	t.Run("should return the JDK version of the newest LTS line from an Eclipse Temurin feed", func(t *testing.T) {
+		t.Parallel()
+
+		// given the feed's own shape: release names with respin and build numbers,
+		// a boolean LTS flag, and the lines out of cycle order
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[` +
+				`{"cycle":"27","latest":"27+35","lts":false,"eol":false},` +
+				`{"cycle":"17","latest":"17.0.20.1+1","lts":true,"eol":false},` +
+				`{"cycle":"25","latest":"25.0.4.1+1","lts":true,"eol":false},` +
+				`{"cycle":"11","latest":"11.0.32.1+1","lts":true,"eol":false},` +
+				`{"cycle":"21","latest":"21.0.12.1+1","lts":true,"eol":false},` +
+				`{"cycle":"8","latest":"8u504-b01","lts":true,"eol":false}` +
+				`]`))
+		}))
+		defer server.Close()
+
+		fetcher := javaUpdater.NewHTTPJavaVersionFetcherWithURL(server.Client(), server.URL)
+
+		// when
+		version, err := fetcher.FetchLatestVersion(context.Background())
+
+		// then
+		require.NoError(t, err)
+		assert.Equal(t, "25.0.4", version)
+	})
+
+	t.Run("should return error when the newest LTS release has a name it cannot read", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"cycle":"25","latest":"jdk-25.0.4","lts":true,"eol":false}]`))
+		}))
+		defer server.Close()
+
+		fetcher := javaUpdater.NewHTTPJavaVersionFetcherWithURL(server.Client(), server.URL)
+
+		// when
+		_, err := fetcher.FetchLatestVersion(context.Background())
+
+		// then
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `unrecognized Java release "jdk-25.0.4"`)
 	})
 
 	t.Run("should skip EOL releases even if LTS", func(t *testing.T) {
@@ -213,6 +261,57 @@ func TestHTTPJavaVersionFetcher(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no active LTS Java release found")
 	})
+}
+
+func TestJDKVersion(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		release string
+		jdk     string
+	}{
+		{"a respin and a build number", "25.0.4.1+1", "25.0.4"},
+		{"a build number", "21.0.12+7", "21.0.12"},
+		{"the first release of a line", "27+35", "27"},
+		{"a plain JDK version", "21.0.5", "21.0.5"},
+	}
+
+	for _, testCase := range cases {
+		t.Run("should drop what follows the JDK version from "+testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given / when
+			jdk, err := javaUpdater.JDKVersion(testCase.release)
+
+			// then
+			require.NoError(t, err)
+			assert.Equal(t, testCase.jdk, jdk)
+		})
+	}
+
+	unreadable := []struct {
+		name    string
+		release string
+	}{
+		// Java 8 kept its own update numbering; its line is never the newest LTS.
+		{"Java 8 update numbering", "8u504-b01"},
+		{"a prefix", "jdk-25.0.4"},
+		{"a pre-release", "26-ea"},
+		{"an empty name", ""},
+	}
+
+	for _, testCase := range unreadable {
+		t.Run("should return error for "+testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given / when
+			_, err := javaUpdater.JDKVersion(testCase.release)
+
+			// then
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestIsLTSRelease(t *testing.T) {

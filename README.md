@@ -59,9 +59,12 @@ version is strictly newer** than the one already there.
 The distinction matters because "latest" is a narrower answer than it looks. The Node.js feed reports
 the newest **LTS** line, the Java feed the newest **LTS** JDK, and the Python and Ruby feeds the newest
 **stable** series. A repository that has deliberately moved past that line -- Node.js `26` while the LTS
-line is `24`, a JDK `25` build while the LTS is `21`, a Python `3.14` pre-release series -- is *ahead* of
+line is `24`, a JDK `27` build while the LTS is `25`, a Python `3.14` pre-release series -- is *ahead* of
 "latest", and a plain "is it different?" check would roll it back inside a pull request titled as an
 upgrade.
+
+The Java feed is Eclipse Temurin's, and `.java-version` receives the JDK version alone: a Temurin
+release named `25.0.4.1+1` is written as `25.0.4`.
 
 Comparison follows Semantic Versioning precedence, so a pre-release is never rolled out over the final
 release of the same version, and two pins differing only in build metadata (`1.0.0+build.1` and

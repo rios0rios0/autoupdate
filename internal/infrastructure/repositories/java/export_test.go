@@ -124,3 +124,8 @@ func GradleWrapperVersion(content string) string {
 func ObserveArtifactChanges(ctx context.Context, repoDir string) ([]entities.DependencyChange, error) {
 	return observeArtifactChanges(ctx, repoDir)
 }
+
+// JDKVersion is exported for testing.
+func JDKVersion(releaseName string) (string, error) {
+	return jdkVersion(releaseName)
+}
