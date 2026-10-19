@@ -320,7 +320,16 @@ there. `support.IsNewerVersion` (`internal/support/version.go`) is the single an
 and every updater goes through it — never `current != latest`, which is what made autoupdate downgrade
 a repository that had moved past the release feed. The feeds answer a narrower question than they look:
 nodejs.org/dist reports the newest *LTS* line, the Java feed the newest *LTS* JDK, the Python and Ruby
-feeds the newest *stable* series, so a repository on Node 26 or JDK 25 is ahead of "latest".
+feeds the newest *stable* series, so a repository on Node 26 or JDK 27 is ahead of "latest".
+
+The Java feed is endoflife.date's `eclipse-temurin` product. Its `java` product, which the updater read
+before, is gone and answers 404, and since a failed lookup only means "leave the pin alone", every
+`.java-version` silently stopped moving. Temurin names a release by more than the JDK version:
+`25.0.4.1+1` is JDK 25.0.4 rebuilt once, build 1. `jdkVersion` (`java/version_fetcher.go`) therefore
+trims the name to `MAJOR.MINOR.PATCH` before it reaches `.java-version`, the branch name and the
+commit message, and refuses a name it cannot read rather than writing it. The fetcher also takes
+the highest active LTS cycle rather than the first one listed, because the feed does not list the
+cycles in order.
 
 The rule exists on both sides of the Go/bash seam, because both sides act on it. Go decides
 `NeedsVersionUpgrade`, which picks the branch name, the commit message, the changelog entry and the PR
