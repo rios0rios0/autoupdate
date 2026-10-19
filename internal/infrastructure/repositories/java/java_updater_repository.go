@@ -46,6 +46,10 @@ const (
 	javaChangelogEntryDeps = "- changed the Java dependencies to their latest versions"
 )
 
+// jvmBuildSlots is how many Gradle or Maven builds the updater runs at once, across
+// every repository of a run (see acquireBuildSlot).
+const jvmBuildSlots = 1
+
 // defaultRunner is the package-level command runner for remote-mode functions.
 var defaultRunner cmdrunner.Runner = cmdrunner.NewDefaultRunner() //nolint:gochecknoglobals // test override
 
@@ -56,6 +60,8 @@ var defaultRunner cmdrunner.Runner = cmdrunner.NewDefaultRunner() //nolint:goche
 type UpdaterRepository struct {
 	versionFetcher VersionFetcher
 	cmdRunner      cmdrunner.Runner
+	// builds holds one token per Gradle or Maven build running; see jvmBuildSlots.
+	builds chan struct{}
 }
 
 // NewUpdaterRepository creates a new Java updater with default dependencies.
@@ -63,12 +69,17 @@ func NewUpdaterRepository() repositories.UpdaterRepository {
 	return &UpdaterRepository{
 		versionFetcher: NewHTTPJavaVersionFetcher(&http.Client{Timeout: javaVersionTimeout}),
 		cmdRunner:      cmdrunner.NewDefaultRunner(),
+		builds:         make(chan struct{}, jvmBuildSlots),
 	}
 }
 
 // NewUpdaterRepositoryWithDeps creates a Java updater with injected dependencies (for testing).
 func NewUpdaterRepositoryWithDeps(vf VersionFetcher) repositories.UpdaterRepository {
-	return &UpdaterRepository{versionFetcher: vf, cmdRunner: cmdrunner.NewDefaultRunner()}
+	return &UpdaterRepository{
+		versionFetcher: vf,
+		cmdRunner:      cmdrunner.NewDefaultRunner(),
+		builds:         make(chan struct{}, jvmBuildSlots),
+	}
 }
 
 func (u *UpdaterRepository) Name() string { return updaterName }
@@ -186,7 +197,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	logger.Infof("[java] Processing local clone of %s/%s", repo.Organization, repo.Name)
 
 	// resolveLocalVersionContext handles fetching + comparison
-	vCtx := resolveLocalVersionContext(ctx, repoDir)
+	vCtx := resolveLocalVersionContext(ctx, u.versionFetcher, repoDir)
 
 	buildSys := detectLocalBuildSystem(repoDir)
 
@@ -195,6 +206,10 @@ func (u *UpdaterRepository) ApplyUpdates(
 		env = append(env, "JAVA_VERSION="+vCtx.LatestVersion)
 	}
 
+	release, slotErr := u.acquireBuildSlot(ctx, repo)
+	if slotErr != nil {
+		return nil, slotErr
+	}
 	outputStr, runErr := cmdrunner.RunScript(ctx, u.cmdRunner, cmdrunner.ScriptRun{
 		Body:        buildBatchJavaScript(buildSys, opts.AllowMajorUpdates),
 		TempPattern: "autoupdate-java-local-*",
@@ -203,6 +218,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		LogPrefix:   updaterName,
 		Verbose:     true,
 	})
+	release()
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -230,6 +246,36 @@ func (u *UpdaterRepository) ApplyUpdates(
 		PRTitle:       prTitle,
 		PRDescription: GeneratePRDescription(vCtx.LatestVersion, buildSys, javaVersionUpdated),
 	}, nil
+}
+
+// acquireBuildSlot waits until the run may start one more Gradle or Maven build, and
+// returns the function that frees the slot again.
+//
+// Those builds are the memory-hungry part of a run. Each starts a client JVM and a
+// build JVM, often a Kotlin compile daemon besides, with heaps a large build sized for
+// a developer's machine; a batch run processes several repositories at once, and two
+// such builds side by side took a hosted CI agent to 95% of its memory. Repositories of
+// every other ecosystem carry on while a JVM build waits for its turn, and Java
+// repositories are few, so the wait costs a run little.
+func (u *UpdaterRepository) acquireBuildSlot(
+	ctx context.Context, repo entities.Repository,
+) (func(), error) {
+	if u.builds == nil {
+		return func() {}, nil
+	}
+
+	select {
+	case u.builds <- struct{}{}:
+	default:
+		logger.Infof("[java] %s/%s is waiting for another repository's Gradle or Maven build to finish",
+			repo.Organization, repo.Name)
+		select {
+		case u.builds <- struct{}{}:
+		case <-ctx.Done():
+			return nil, fmt.Errorf("stopped waiting for a Gradle or Maven build slot: %w", ctx.Err())
+		}
+	}
+	return func() { <-u.builds }, nil
 }
 
 // buildBatchJavaScript generates a bash script with only language-specific
@@ -369,8 +415,9 @@ func resolveVersionContext(
 
 // resolveLocalVersionContext fetches the latest Java version and compares
 // it against the local .java-version to build a versionContext.
-func resolveLocalVersionContext(ctx context.Context, repoDir string) *versionContext {
-	fetcher := NewHTTPJavaVersionFetcher(&http.Client{Timeout: javaVersionTimeout})
+func resolveLocalVersionContext(
+	ctx context.Context, fetcher VersionFetcher, repoDir string,
+) *versionContext {
 	latestJavaVersion, err := fetcher.FetchLatestVersion(ctx)
 	if err != nil {
 		logger.Warnf("[java] Failed to fetch latest Java version: %v (continuing without version upgrade)", err)

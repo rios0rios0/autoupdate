@@ -51,7 +51,7 @@ func NewUpdaterRepositoryForTest(vf VersionFetcher, runner ...cmdrunner.Runner) 
 	if len(runner) > 0 {
 		r = runner[0]
 	}
-	return &UpdaterRepository{versionFetcher: vf, cmdRunner: r}
+	return &UpdaterRepository{versionFetcher: vf, cmdRunner: r, builds: make(chan struct{}, jvmBuildSlots)}
 }
 
 // UpgradeParamsExported is exported for testing.

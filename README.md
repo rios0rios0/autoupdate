@@ -41,7 +41,7 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 | Java           | `build.gradle`, `pom.xml`              | Upgrades dependencies through Gradle or Maven, whichever the repository builds with                                                                              |
 | C#             | `*.csproj`, `*.sln`                    | Upgrades NuGet package references                                                                                                                                |
 | Dockerfile     | `Dockerfile`                           | Upgrades base image tags, verifying each against the registry, and re-pins the `@sha256:` digest of a digest-pinned image to the one the new tag resolves to      |
-| Pipeline/CI    | pipeline YAML                          | Upgrades pinned action refs (`uses: owner/repo@v4`) and language versions in `.github/workflows/`, `azure-devops/`, `azure-pipelines.yml` and `.azure-pipelines.yml` |
+| Pipeline/CI    | pipeline YAML                          | Upgrades pinned action refs (`uses: owner/repo@v4`, whose tags are always read from GitHub, wherever the workflow is hosted) and language versions in `.github/workflows/`, `azure-devops/`, `azure-pipelines.yml` and `.azure-pipelines.yml` |
 
 Scans cover everything the repository commits, including hidden directories such as `.github/` and
 `.devcontainer/`. Trees a repository does not author are never scanned: version-control metadata
@@ -429,7 +429,9 @@ space cannot be read, the Go caches stay in each repository's directory.
 
 No process outlives its repository either. Gradle runs with `--no-daemon`, because a Gradle
 daemon and the Kotlin compile daemon it starts otherwise stay resident for hours, about a
-gigabyte per repository with Kotlin build logic. MSBuild's node reuse is turned off.
+gigabyte per repository with Kotlin build logic. MSBuild's node reuse is turned off. And only one
+Gradle or Maven build runs at a time across the run, since each takes a few gigabytes of memory;
+repositories of other ecosystems keep being processed meanwhile.
 
 Your configuration is still read from where you keep it: `~/.npmrc`, `~/.m2/settings.xml`,
 `pip.conf`, `NuGet.Config`, `~/.bundle/config`, `.netrc` and `go env -w` are untouched, and

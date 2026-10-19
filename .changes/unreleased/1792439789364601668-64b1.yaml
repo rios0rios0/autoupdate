@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed the pipeline updater never updating a GitHub Action used by a workflow kept outside GitHub: it asked the repository''s own host for the action''s tags, which Azure DevOps answered with a 401 for `actions/checkout`, so the tags are now read from GitHub''s git endpoint, which needs no token and is not subject to the REST API''s rate limit for anonymous callers'
+time: '2026-10-19T19:56:29.36452108Z'

@@ -442,6 +442,15 @@ branches on the resolved value, as `GenerateGoPRDescription` does.
 refs are the majority of what this updater changes -- gating only the language pin would
 have left the key close to inert here.
 
+**Action tags always come from GitHub.** An action is published on GitHub whatever hosts the
+workflow that uses it, so `actionTagsFor` (`internal/infrastructure/repositories/pipeline/action_tags.go`)
+asks the provider only when it *is* GitHub. Any other provider looked `owner/repo` up as one of
+its own repositories -- Azure DevOps read `actions/checkout` as project `actions`, repository
+`checkout`, and answered 401 -- so a workflow kept anywhere else never had an action updated.
+Those tags are listed from GitHub's git endpoint (`listRemoteTags`, an `ls-remote` through go-git,
+peeled entries ignored), which needs no token and is not subject to the REST API's rate limit
+for anonymous callers. `githubGitURLFormat` is a variable only so tests can serve it locally.
+
 `dockerfile` moved furthest. It refused every major *unconditionally*, which made it the
 only updater whose answer no configuration could change: a Dockerfile on `node:20` stayed
 on 20 for ever. With majors allowed its two version-distance rules fall away together --
@@ -751,6 +760,14 @@ for a killed run's leftover, and the go commands writing deep inside it never to
 modification time; so a heartbeat (`keepAlive`, every `heartbeatInterval`) renews that time
 until `Remove` stops it, and the sweep of another run on the same machine never deletes a live
 cache.
+
+The Java updater also runs **one Gradle or Maven build at a time across the whole run**
+(`jvmBuildSlots`, `acquireBuildSlot`): each build starts a client JVM and a build JVM, often a
+Kotlin compile daemon besides, sized for a developer's machine, and two of them side by side took
+a hosted CI agent to 95% of its memory. The slot is held only around the script, so every other
+ecosystem keeps running while a JVM build waits, and the registry holds one updater instance per
+run, which is what makes the slot run-wide. `ApplyUpdates` reads the Java version through the
+injected `versionFetcher`, like the remote path, rather than building its own HTTP fetcher.
 
 No process may outlive its repository either. The Java script runs Gradle with
 `--no-daemon`: a Gradle daemon and the Kotlin compile daemon it starts for Kotlin build logic
