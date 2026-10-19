@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"testing"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
@@ -202,3 +203,16 @@ func CreateUpgradePR(
 func DependencyChanges(upgrades []upgradeTask) []entities.DependencyChange {
 	return dependencyChanges(upgrades)
 }
+
+// SetGitHubGitURLFormat points the GitHub git endpoint somewhere else for the rest
+// of a test, and restores it afterwards. Callers must not run in parallel.
+func SetGitHubGitURLFormat(t *testing.T, format string) {
+	t.Helper()
+
+	previous := githubGitURLFormat
+	githubGitURLFormat = format
+	t.Cleanup(func() { githubGitURLFormat = previous })
+}
+
+// ListRemoteTags is exported for testing.
+var ListRemoteTags = listRemoteTags //nolint:gochecknoglobals // test export

@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed `autoupdate run` filling the memory of the machine it runs on when two repositories built with Gradle or Maven were processed at the same time: only one such build now runs at a time across the run, while repositories of every other ecosystem keep being processed'
+time: '2026-10-19T19:56:29.366691121Z'

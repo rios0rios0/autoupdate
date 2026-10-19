@@ -631,7 +631,8 @@ func azureDevOpsRules() []languageRule {
 
 // --- GitHub Actions tag resolution and version comparison ---
 
-// resolveActionTags fetches tags for a GitHub Action repo, using the cache.
+// resolveActionTags fetches tags for a GitHub Action repo, using the cache. The tags are
+// read from GitHub whatever hosts the repository being updated (see actionTagsFor).
 func resolveActionTags(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
@@ -643,11 +644,7 @@ func resolveActionTags(
 		return tags
 	}
 
-	actionRepo := entities.Repository{
-		Organization: owner,
-		Name:         repo,
-	}
-	tags, err := provider.GetTags(ctx, actionRepo)
+	tags, err := actionTagsFor(provider)(ctx, owner, repo)
 	if err != nil {
 		logger.Warnf("[pipeline] Failed to fetch tags for %s/%s: %v", owner, repo, err)
 		cache[key] = nil
