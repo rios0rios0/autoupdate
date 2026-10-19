@@ -85,6 +85,8 @@ func TestCleanupStaleTempDirs(t *testing.T) {
 		//nolint:usetesting // the name and the location are what is being tested
 		cacheDir, err := os.MkdirTemp("", support.SharedCachePattern)
 		require.NoError(t, err)
+		// A directory needs the owner search bit, so 0o700 is the least-privilege mode.
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		require.NoError(t, os.MkdirAll(filepath.Join(cacheDir, "go", "mod"), 0o700))
 		past := time.Now().Add(-time.Hour)
 		require.NoError(t, os.Chtimes(cacheDir, past, past))
