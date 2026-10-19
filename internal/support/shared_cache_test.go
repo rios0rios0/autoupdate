@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -56,15 +58,42 @@ func TestNewSharedCache(t *testing.T) {
 		assert.DirExists(t, cache.Dir())
 	})
 
-	t.Run("should read the free space of the disk it is created on", func(t *testing.T) {
+	t.Run("should share only where the platform can read the free space of its disk", func(t *testing.T) {
 		t.Parallel()
 
 		// given / when
 		cache, err := support.NewSharedCache()
 
-		// then
-		require.NoError(t, err, "the platforms autoupdate is released for can read their free space")
-		assert.NoError(t, cache.Remove())
+		// then the platforms autoupdate is released for share, and any other falls back
+		// to keeping the Go caches in each repository's workspace
+		if slices.Contains([]string{"linux", "darwin", "windows"}, runtime.GOOS) {
+			require.NoError(t, err)
+			assert.NoError(t, cache.Remove())
+		} else {
+			require.Error(t, err)
+			assert.Nil(t, cache)
+		}
+	})
+
+	t.Run("should keep its modification time fresh while it lives", func(t *testing.T) {
+		t.Parallel()
+
+		// given a cache whose own modification time is two hours old, which is how a busy
+		// cache looks when every write lands deep inside it
+		if !slices.Contains([]string{"linux", "darwin", "windows"}, runtime.GOOS) {
+			t.Skip("no shared cache on a platform that cannot read its free space")
+		}
+		cache, err := support.NewSharedCacheWithHeartbeat(10 * time.Millisecond)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = cache.Remove() })
+		past := time.Now().Add(-2 * time.Hour)
+		require.NoError(t, os.Chtimes(cache.Dir(), past, past))
+
+		// when / then the heartbeat renews it, so no sweep takes it for abandoned
+		assert.Eventually(t, func() bool {
+			info, statErr := os.Stat(cache.Dir())
+			return statErr == nil && time.Since(info.ModTime()) < time.Minute
+		}, 5*time.Second, 10*time.Millisecond)
 	})
 }
 

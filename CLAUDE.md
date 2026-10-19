@@ -745,7 +745,12 @@ while it runs, and `Trim` takes the write lock, so a cache is never emptied unde
 Reading the free space is per platform (`disk_space_unix.go` for Linux and macOS,
 `disk_space_windows.go`); where it cannot be read, `NewSharedCache` fails and the run keeps the
 Go caches in each workspace, as before -- an unbounded shared cache is what filled the disk
-before workspaces existed. A nil `*SharedCache` is valid and shares nothing.
+before workspaces existed. A nil `*SharedCache` is valid and shares nothing. The cache lives
+for the whole run, far past the 30 minutes after which `CleanupStaleTempDirs` takes a directory
+for a killed run's leftover, and the go commands writing deep inside it never touch its own
+modification time; so a heartbeat (`keepAlive`, every `heartbeatInterval`) renews that time
+until `Remove` stops it, and the sweep of another run on the same machine never deletes a live
+cache.
 
 No process may outlive its repository either. The Java script runs Gradle with
 `--no-daemon`: a Gradle daemon and the Kotlin compile daemon it starts for Kotlin build logic

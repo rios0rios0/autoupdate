@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	logger "github.com/sirupsen/logrus"
 )
@@ -24,6 +25,10 @@ const (
 	// minFreeSpaceDivisor scales minFreeSpace down on a filesystem smaller than
 	// ten times it, where a tenth of the filesystem is left free instead.
 	minFreeSpaceDivisor = 10
+	// heartbeatInterval is how often a live cache's modification time is renewed.
+	// It has to stay well under the age at which the stale-directory sweep removes
+	// a directory, which is half an hour.
+	heartbeatInterval = time.Minute
 )
 
 // SharedCache is the one directory a batch run shares between the repositories it
@@ -42,6 +47,12 @@ const (
 // script holds it through Use, and the run removes it when it ends. A run that
 // cannot read how much space is left does not share at all.
 //
+// The cache also outlives the age at which the stale-directory sweep of another run
+// on the same machine removes what it takes for a killed run's leftovers, and the go
+// commands writing deep inside it never touch its own modification time. A heartbeat
+// therefore renews that time while the cache lives, so only a cache whose run is gone
+// ever looks stale.
+//
 // A nil *SharedCache is valid and shares nothing: Dir is empty, so ScriptEnv keeps
 // every cache in the repository's workspace, and Use, Trim and Remove do nothing.
 type SharedCache struct {
@@ -51,15 +62,20 @@ type SharedCache struct {
 	inUse sync.RWMutex
 	// space reports the free and total bytes of the filesystem holding a path.
 	space func(path string) (free, total uint64, err error)
+	// stopHeartbeat ends the heartbeat, once.
+	stopHeartbeat func()
 }
 
 // NewSharedCache creates a shared cache under the system temporary directory,
 // which TMPDIR relocates.
 func NewSharedCache() (*SharedCache, error) {
-	return newSharedCache(DiskSpace)
+	return newSharedCache(DiskSpace, heartbeatInterval)
 }
 
-func newSharedCache(space func(path string) (free, total uint64, err error)) (*SharedCache, error) {
+func newSharedCache(
+	space func(path string) (free, total uint64, err error),
+	heartbeat time.Duration,
+) (*SharedCache, error) {
 	root, err := os.MkdirTemp("", SharedCachePattern)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create the shared cache: %w", err)
@@ -71,7 +87,31 @@ func newSharedCache(space func(path string) (free, total uint64, err error)) (*S
 		_ = RemoveTree(root)
 		return nil, fmt.Errorf("failed to read the free space for the shared cache: %w", err)
 	}
-	return &SharedCache{root: root, space: space}, nil
+
+	done := make(chan struct{})
+	go keepAlive(root, heartbeat, done)
+	var stop sync.Once
+	return &SharedCache{
+		root:          root,
+		space:         space,
+		stopHeartbeat: func() { stop.Do(func() { close(done) }) },
+	}, nil
+}
+
+// keepAlive renews the modification time of root every interval until done is
+// closed. A renewal that fails is not reported: the worst it can cost is the
+// sweep of another run treating the cache as abandoned.
+func keepAlive(root string, interval time.Duration, done <-chan struct{}) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case now := <-ticker.C:
+			_ = os.Chtimes(root, now, now)
+		}
+	}
 }
 
 // Dir returns the directory the shared caches live in, or "" for a nil cache.
@@ -122,12 +162,13 @@ func (c *SharedCache) Trim() bool {
 	return true
 }
 
-// Remove deletes the cache and everything in it, once no script is using it.
-// Calling it again is harmless.
+// Remove deletes the cache and everything in it, once no script is using it, and
+// stops its heartbeat. Calling it again is harmless.
 func (c *SharedCache) Remove() error {
 	if c == nil {
 		return nil
 	}
+	c.stopHeartbeat()
 	c.inUse.Lock()
 	defer c.inUse.Unlock()
 	return RemoveTree(c.root)

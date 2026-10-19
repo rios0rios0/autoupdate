@@ -422,7 +422,9 @@ in common, and downloading every module and compiling every dependency again for
 repository made a run over many Go services several times slower. The shared cache bounds
 itself instead: once a repository is done, the cache is emptied if the filesystem it lives on
 has less than 10 GiB free (or a tenth of a disk smaller than 100 GiB), after any Go command
-still using it has finished, and it is deleted when the run ends. On a platform where the free
+still using it has finished, and it is deleted when the run ends. A run renews the cache every
+minute while it lasts, so another run on the same machine never takes it for a leftover, while
+the cache of a killed run is cleaned up by the next one like a working directory. On a platform where the free
 space cannot be read, the Go caches stay in each repository's directory.
 
 No process outlives its repository either. Gradle runs with `--no-daemon`, because a Gradle
