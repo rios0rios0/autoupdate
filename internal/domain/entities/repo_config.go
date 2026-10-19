@@ -67,9 +67,10 @@ func ParseRepoConfig(data []byte) (*RepoConfig, error) {
 var projectLayerKeys = map[string]struct{}{
 	"skip": {}, "reason": {},
 	"updaters": {}, "exclude_repos": {},
-	"cleanup_stale_branches": {},
-	"allow_major_updates":    {},
-	"exclude_forks":          {}, "exclude_archived": {},
+	"cleanup_stale_branches":   {},
+	"allow_major_updates":      {},
+	"prepare_major_migrations": {},
+	"exclude_forks":            {}, "exclude_archived": {},
 }
 
 // narrowToProjectSchema reduces a repository's document to the keys the project layer may

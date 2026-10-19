@@ -39,6 +39,11 @@ type LocalGitContext struct {
 	repoDir  string
 	resolver PushAuthResolver
 	stashRef string // commit hash of the stash entry created by StashIfDirty
+	// originalBranch is the branch the checkout was on when PrepareBranch
+	// opened it, which is the branch a pull request opened for the upgrade would
+	// target -- and which nothing else can recover once the upgrade branch is
+	// checked out.
+	originalBranch string
 }
 
 // NewLocalGitContext opens the repository at the given path and returns
@@ -92,6 +97,7 @@ func PrepareBranch(
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to determine current branch: %w", err)
 	}
+	gitCtx.originalBranch = originalBranch
 
 	stashed, err := gitCtx.StashIfDirty()
 	if err != nil {
@@ -201,6 +207,13 @@ func (c *LocalGitContext) CurrentBranch() (string, error) {
 		return "", fmt.Errorf("failed to get HEAD: %w", err)
 	}
 	return head.Name().Short(), nil
+}
+
+// OriginalBranch returns the branch the checkout was on when the context was
+// prepared: what a pull request the run opens targets, and what a worktree has
+// to be created from to carry a change of its own.
+func (c *LocalGitContext) OriginalBranch() string {
+	return c.originalBranch
 }
 
 // CheckoutBranch switches the worktree to an existing branch.

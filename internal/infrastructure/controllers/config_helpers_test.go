@@ -102,6 +102,7 @@ func TestResolveOperatorConfigPath(t *testing.T) {
 func TestResolveConfigLayers(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
+	//nolint:paralleltest // the parent uses t.Setenv
 	t.Run("should run on the built-in defaults alone", func(t *testing.T) {
 		// given -- no --config, nothing in $HOME, the published defaults unreachable, and
 		// local mode, which takes its provider from the repository's own origin remote
@@ -115,6 +116,7 @@ func TestResolveConfigLayers(t *testing.T) {
 			"every updater must be configured with no configuration at all")
 	})
 
+	//nolint:paralleltest // the parent uses t.Setenv
 	t.Run("should require a provider only in batch mode", func(t *testing.T) {
 		// when
 		_, localErr := controllers.ResolveWithFetch("", false, offlineFetch)
@@ -125,6 +127,7 @@ func TestResolveConfigLayers(t *testing.T) {
 		require.ErrorIs(t, batchErr, entities.ErrNoProvidersConfigured)
 	})
 
+	//nolint:paralleltest // the parent uses t.Setenv
 	t.Run("should fold the operator's file onto the built-in defaults", func(t *testing.T) {
 		// given
 		configPath := writeConfig(t, t.TempDir(),
@@ -140,6 +143,7 @@ func TestResolveConfigLayers(t *testing.T) {
 			"an updater the operator did not mention keeps the built-in default")
 	})
 
+	//nolint:paralleltest // the parent uses t.Setenv
 	t.Run("should ignore a credential the published defaults try to set", func(t *testing.T) {
 		// given -- bytes fetched over the network are not the operator speaking
 		published := func(string) ([]byte, error) {
@@ -154,6 +158,7 @@ func TestResolveConfigLayers(t *testing.T) {
 		assert.Empty(t, settings.GitHubAccessToken)
 	})
 
+	//nolint:paralleltest // the parent uses t.Setenv
 	t.Run("should return an error when the named config does not exist", func(t *testing.T) {
 		// given
 		missing := filepath.Join(t.TempDir(), "nonexistent.yaml")
@@ -166,6 +171,7 @@ func TestResolveConfigLayers(t *testing.T) {
 		assert.Nil(t, settings)
 	})
 
+	//nolint:paralleltest // the parent uses t.Setenv
 	t.Run("should return an error when the aggregate prefix is unusable", func(t *testing.T) {
 		// given -- caught at startup, before a single branch has been listed, let alone
 		// deleted
@@ -184,6 +190,7 @@ func TestResolveConfigLayers(t *testing.T) {
 func TestConfigLayerAssembly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
+	//nolint:paralleltest // the parent uses t.Setenv
 	t.Run("should assemble the three operator-facing layers in order", func(t *testing.T) {
 		// given
 		configPath := writeConfig(t, t.TempDir(), providerSettings)
@@ -201,6 +208,7 @@ func TestConfigLayerAssembly(t *testing.T) {
 		}, names)
 	})
 
+	//nolint:paralleltest // the parent uses t.Setenv
 	t.Run("should omit the published defaults when they cannot be fetched", func(t *testing.T) {
 		// given
 		configPath := writeConfig(t, t.TempDir(), providerSettings)

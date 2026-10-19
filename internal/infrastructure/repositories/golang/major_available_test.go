@@ -72,10 +72,10 @@ func TestGenerateGoPRDescriptionReportsNewerMajors(t *testing.T) {
 	t.Parallel()
 
 	// given
-	majors := golang.ParseMajorsAvailable(scriptOutputFixture)
+	migrations := golang.UnpreparedMigrations(golang.ParseMajorsAvailable(scriptOutputFixture))
 
 	// when
-	description := golang.GenerateGoPRDescription("1.27.1", false, false, true, majors)
+	description := golang.GenerateGoPRDescription("1.27.1", false, false, true, migrations)
 
 	// then
 	assert.Contains(t, description, "Newer major versions available (not in this PR)")
@@ -95,7 +95,7 @@ func TestGenerateGoPRDescriptionReportsNewerMajors(t *testing.T) {
 func TestGenerateGoPRDescriptionSaysNothingWhenThereAreNoNewerMajors(t *testing.T) {
 	t.Parallel()
 
-	for name, majors := range map[string][]golang.MajorAvailable{
+	for name, migrations := range map[string][]golang.MigrationPrepared{
 		"none found":  {},
 		"never asked": nil,
 	} {
@@ -103,7 +103,7 @@ func TestGenerateGoPRDescriptionSaysNothingWhenThereAreNoNewerMajors(t *testing.
 			t.Parallel()
 
 			// given / when
-			description := golang.GenerateGoPRDescription("1.27.1", false, false, true, majors)
+			description := golang.GenerateGoPRDescription("1.27.1", false, false, true, migrations)
 
 			// then
 			// A "nothing to report" line on every pull request is one readers
@@ -113,4 +113,84 @@ func TestGenerateGoPRDescriptionSaysNothingWhenThereAreNoNewerMajors(t *testing.
 				"the rest of the description is unaffected")
 		})
 	}
+}
+
+// migrationRow is one finding with whatever the run did about it.
+func migrationRow(path string, prepared bool, note string) golang.MigrationPrepared {
+	return golang.MigrationPrepared{
+		ModuleDir:      ".",
+		Path:           "github.com/example/" + path,
+		CurrentVersion: "v1.2.3",
+		NextPath:       "github.com/example/" + path + "/v3",
+		NextVersion:    "v3.0.1",
+		Prepared:       prepared,
+		Branch:         "chore/migrate-example-" + path + "-v3",
+		URL: "https://github.com/example/repo/compare/main...chore/migrate-example-" +
+			path + "-v3?expand=1",
+		Note: note,
+	}
+}
+
+func TestGenerateGoPRDescriptionLinksThePreparedMigration(t *testing.T) {
+	t.Parallel()
+
+	// given
+	migrations := []golang.MigrationPrepared{migrationRow("lib", true, "")}
+
+	// when
+	description := golang.GenerateGoPRDescription("1.27.1", false, false, true, migrations)
+
+	// then
+	// The reader needs a link, not a branch name to go and find: the whole
+	// point of preparing the branch is that nothing else has to be done by hand.
+	assert.Contains(t,
+		description,
+		"[Create pull request](https://github.com/example/repo/compare/"+
+			"main...chore/migrate-example-lib-v3?expand=1)",
+	)
+	assert.Contains(t, description, "| Migration |", "the column is there when it has something to say")
+	assert.Contains(t, description, "A branch carrying the mechanical half of the migration")
+	// The notice stops being a heads-up once there is something to click.
+	assert.NotContains(t, description, "This is a notice, not a finding")
+}
+
+func TestGenerateGoPRDescriptionKeepsThreeColumnsWhenNothingWasPrepared(t *testing.T) {
+	t.Parallel()
+
+	// given
+	migrations := golang.UnpreparedMigrations(golang.ParseMajorsAvailable(scriptOutputFixture))
+
+	// when
+	description := golang.GenerateGoPRDescription("1.27.1", false, false, true, migrations)
+
+	// then
+	// A column of dashes on every pull request is the line readers stop
+	// seeing, and it would then be there on the one where it mattered.
+	assert.NotContains(t, description, "| Migration |")
+	assert.Contains(t, description, "| Module | In use | Newer major |")
+	assert.Contains(t, description, "This is a notice, not a finding")
+}
+
+func TestGenerateGoPRDescriptionRendersADashWithoutAProviderPage(t *testing.T) {
+	t.Parallel()
+
+	// given: a provider whose "new pull request" page cannot be constructed, so
+	// there is a branch to open one for but no link to it.
+	prepared := migrationRow("lib", true, "")
+	prepared.URL = ""
+	notPrepared := migrationRow("alpha", false, "the migration changed nothing")
+
+	// when
+	description := golang.GenerateGoPRDescription(
+		"1.27.1", false, false, true, []golang.MigrationPrepared{prepared, notPrepared},
+	)
+
+	// then
+	assert.Contains(t, description, "| Migration |", "one prepared row is enough for the column")
+	assert.Equal(t, 2, strings.Count(description, "| — |"),
+		"a row with no link, and a row with no preparation at all")
+
+	// What the run could not do is said underneath the table, where there is
+	// room for a sentence rather than a cell.
+	assert.Contains(t, description, "- `github.com/example/alpha`: the migration changed nothing")
 }

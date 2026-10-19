@@ -389,6 +389,8 @@ func CleanupStaleTempDirs() {
 		"autoupdate-csharp-*",
 		"autoupdate-ruby-*",
 		"autoupdate-dart-*",
+		"autoupdate-migration-*",
+		"autoupdate-gitconfig-*",
 		"autoupdate-changelog-*.md",
 	} {
 		matches, _ := filepath.Glob(filepath.Join(tmpDir, pattern))

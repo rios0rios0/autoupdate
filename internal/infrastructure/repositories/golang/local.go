@@ -10,6 +10,8 @@ import (
 
 	logger "github.com/sirupsen/logrus"
 
+	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
 	"github.com/rios0rios0/autoupdate/internal/support"
@@ -28,6 +30,16 @@ type LocalUpgradeOptions struct {
 	// AllowMajorUpdates decides whether the major-version guard runs. Resolved by
 	// entities.MajorUpdatesAllowed, which defaults it to true.
 	AllowMajorUpdates bool
+	// Repository and Provider are what the migration preparation needs to push
+	// a branch carrying a newer major: the repository the provider API is asked
+	// about, and the API itself. A caller without a provider leaves them empty
+	// and the findings are reported without a migration.
+	Repository entities.Repository
+	Provider   repositories.ProviderRepository
+	// PrepareMajorMigrations decides whether a branch is prepared for each newer
+	// major the upgrade could not reach. Resolved by
+	// entities.PrepareMajorMigrationsEnabled, which defaults it to true.
+	PrepareMajorMigrations bool
 }
 
 // LocalResult holds the outcome of a local upgrade operation.
@@ -37,6 +49,9 @@ type LocalResult struct {
 	LatestVersion    string
 	BranchName       string
 	Output           string
+	// Migrations are the newer majors the upgrade found, each with what the run
+	// did about it. They are what the pull request description reports.
+	Migrations []MigrationPrepared
 }
 
 // RunLocalUpgrade runs the Go dependency upgrade directly in a local
@@ -192,13 +207,63 @@ func executeLocalUpgrade(
 		return nil, pushErr
 	}
 
+	// Only once the upgrade is pushed: the notice lives in the pull request
+	// description, and a run with nothing to propose never gets there.
+	var migrations []MigrationPrepared
+	if pushed {
+		migrations = prepareLocalMigrations(
+			ctx, repoDir, opts, outputStr, gitCtx.OriginalBranch(),
+		)
+	}
+
 	return &LocalResult{
 		HasChanges:       pushed,
 		GoVersionUpdated: goVersionUpdated,
 		LatestVersion:    vCtx.LatestVersion,
 		BranchName:       vCtx.BranchName,
 		Output:           outputStr,
+		Migrations:       migrations,
 	}, nil
+}
+
+// prepareLocalMigrations prepares a branch per newer major the upgrade could
+// not reach, exactly as the batch flow does for the same findings.
+//
+// Everything in here is soft. The upgrade has already been committed and pushed
+// by the time this runs, so a migration that cannot be prepared -- no toolchain,
+// no provider to hold the branch -- costs the reader a link and nothing else.
+func prepareLocalMigrations(
+	ctx context.Context,
+	repoDir string,
+	opts LocalUpgradeOptions,
+	output, baseBranch string,
+) []MigrationPrepared {
+	majors := ParseMajorsAvailable(output)
+
+	goBinary, err := findGoBinary()
+	if err != nil {
+		logger.Warnf("[golang] Could not prepare a migration for a newer major: %v", err)
+		return unpreparedMigrations(majors)
+	}
+
+	hasConfigSH := false
+	if _, statErr := os.Stat(filepath.Join(repoDir, "config.sh")); statErr == nil {
+		hasConfigSH = true
+	}
+
+	return prepareMigrationsForRun(ctx, migrationParams{
+		RepoDir:      repoDir,
+		BaseBranch:   baseBranch,
+		ProviderName: opts.ProviderName,
+		Provider:     opts.Provider,
+		Repo:         opts.Repository,
+		AuthToken:    opts.AuthToken,
+		GoBinary:     goBinary,
+		HasConfigSH:  hasConfigSH,
+		Majors:       majors,
+		DryRun:       opts.DryRun,
+		Runner:       localCmdRunner,
+	}, opts.PrepareMajorMigrations)
 }
 
 // runLanguageUpgradeScript builds and executes the bash script that

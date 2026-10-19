@@ -101,3 +101,15 @@ ce117d33ced5a786ac2d4da6cd1a482b9c529832:infrastructure/updater/python/python.go
 # commit hash, so rewriting history invalidates it: re-point the entry at the new hash
 # rather than adding a second one.
 3f716b3083411a4bec9f9be7edfd4e9607228e02:.github/skills/code-review/SKILL.md:Slack token:252
+
+# 2026-10-18: false positives raised by the major-migration pull request. The
+# gitauth.go entries are the same runtime credential templates described above,
+# moved to new line numbers by that change; the test entries are fixtures that
+# assert a token is rewritten or redacted, built at run time from a variable and
+# a placeholder value, so no credential is present in the source or history.
+# Suppressed by path, as the other current-tree entries in this file are.
+internal/support/gitauth.go:Password in URL:51
+internal/support/gitauth.go:Password in URL:55
+internal/support/gitauth_test.go:Password in URL:125
+internal/support/pull_request_url_test.go:Password in URL:21
+internal/infrastructure/repositories/golang/major_migration_test.go:Password in URL:421

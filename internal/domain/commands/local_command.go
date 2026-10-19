@@ -9,6 +9,7 @@ import (
 	logger "github.com/sirupsen/logrus"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	infraRepos "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	dartRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dart"
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
@@ -52,6 +53,7 @@ type remoteInfo struct {
 	Org          string
 	Project      string // Azure DevOps only
 	RepoName     string
+	RemoteURL    string
 }
 
 // serviceTypeToProvider returns a map from gitforge ServiceType to the provider name strings used by autoupdate.
@@ -78,6 +80,9 @@ type localPRInfo struct {
 	// AllowMajorUpdates is carried here rather than read at render time because
 	// prContentGenerators is a static map with no access to the settings.
 	AllowMajorUpdates bool
+	// Migrations are the newer majors the Go upgrade could not reach, each with
+	// what the run did about it. Empty for every other language.
+	Migrations []goRepo.MigrationPrepared
 }
 
 // LocalCommand handles the standalone local mode: upgrades dependencies in
@@ -162,8 +167,22 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 	}
 	logger.Infof("Default branch: %s", defaultBranch)
 
+	// Built before the upgrade runs, because the Go updater prepares a migration
+	// branch through this repository: the pull request it links to targets the
+	// same branch this run's own pull request does.
+	repo := entities.Repository{
+		ID:            remote.RepoName,
+		Name:          remote.RepoName,
+		Organization:  remote.Org,
+		Project:       remote.Project,
+		DefaultBranch: defaultBranch,
+		RemoteURL:     remote.RemoteURL,
+	}
+
 	// Run the appropriate upgrade
-	prInfo, upgradeErr := runLocalUpgrade(ctx, repoDir, projType, remote.ProviderType, token, opts, it.providerRegistry)
+	prInfo, upgradeErr := runLocalUpgrade(
+		ctx, repoDir, projType, remote.ProviderType, token, repo, opts, it.providerRegistry,
+	)
 	if upgradeErr != nil {
 		return upgradeErr
 	}
@@ -177,15 +196,6 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 		return nil
 	}
 
-	// Build repository struct for the provider API.
-	repo := entities.Repository{
-		ID:            remote.RepoName,
-		Name:          remote.RepoName,
-		Organization:  remote.Org,
-		Project:       remote.Project,
-		DefaultBranch: defaultBranch,
-	}
-
 	return it.createLocalPRForProject(ctx, remote.ProviderType, token, repo, prInfo)
 }
 
@@ -193,6 +203,7 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 type localUpgradeHandler func(
 	ctx context.Context,
 	repoDir, providerType, token string,
+	repo entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error)
@@ -275,6 +286,7 @@ func runLocalUpgrade(
 	repoDir string,
 	projType langEntities.Language,
 	providerType, token string,
+	repo entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error) {
@@ -282,12 +294,13 @@ func runLocalUpgrade(
 	if !ok || handler == nil {
 		return nil, fmt.Errorf("unsupported project type: %s", projType)
 	}
-	return handler(ctx, repoDir, providerType, token, opts, registry)
+	return handler(ctx, repoDir, providerType, token, repo, opts, registry)
 }
 
 func runGoLocalUpgrade(
 	ctx context.Context,
 	repoDir, providerType, token string,
+	repo entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error) {
@@ -299,6 +312,10 @@ func runGoLocalUpgrade(
 		PushAuth:     registry,
 
 		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
+
+		Repository:             repo,
+		Provider:               localMigrationProvider(registry, providerType, token, opts),
+		PrepareMajorMigrations: entities.PrepareMajorMigrationsEnabled(opts.Settings),
 	})
 	if err != nil {
 		return nil, err
@@ -311,12 +328,43 @@ func runGoLocalUpgrade(
 		HasChanges:     result.HasChanges,
 
 		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
+		Migrations:        result.Migrations,
 	}, nil
+}
+
+// localMigrationProvider resolves the provider API a prepared migration branch
+// would be pushed through, and answers nil when there is none to be had.
+//
+// The upgrade does not depend on it: a provider that cannot be reached costs
+// the notice its links, which is cheaper than failing a run that has already
+// produced the upgrade it was asked for.
+func localMigrationProvider(
+	registry *infraRepos.ProviderRegistry,
+	providerType, token string,
+	opts LocalOptions,
+) repositories.ProviderRepository {
+	// Nothing would be prepared under either of these, so the client is not
+	// built: a rehearsal opens no pull request, and disabled preparation
+	// prepares no branch.
+	if registry == nil || opts.DryRun || !entities.PrepareMajorMigrationsEnabled(opts.Settings) {
+		return nil
+	}
+
+	provider, err := registry.Get(providerType, token)
+	if err != nil {
+		logger.Warnf(
+			"[golang] Could not reach the %s API to prepare migrations: %v", providerType, err,
+		)
+		return nil
+	}
+
+	return provider
 }
 
 func runPythonLocalUpgrade(
 	ctx context.Context,
 	repoDir, providerType, token string,
+	_ entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error) {
@@ -345,6 +393,7 @@ func runPythonLocalUpgrade(
 func runJSLocalUpgrade(
 	ctx context.Context,
 	repoDir, providerType, token string,
+	_ entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error) {
@@ -373,6 +422,7 @@ func runJSLocalUpgrade(
 func runDartLocalUpgrade(
 	ctx context.Context,
 	repoDir, providerType, token string,
+	_ entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
 ) (*localPRInfo, error) {
@@ -449,11 +499,12 @@ func prContentGenerators() map[langEntities.Language]prContentGenerator {
 					info.LatestVersion,
 				)
 			}
-			// This path builds the description from the summary the CLI
-			// already has; the upgrade script's output does not reach it, so
-			// there are no newer-major findings to report here.
+			// The description is the one the batch flow renders, from the same
+			// findings: the newer majors `go get -u` cannot reach, and the branch
+			// the run prepared for each of them.
 			desc := goRepo.GenerateGoPRDescription(
-				info.LatestVersion, false, info.VersionUpdated, info.AllowMajorUpdates, nil,
+				info.LatestVersion, false, info.VersionUpdated, info.AllowMajorUpdates,
+				info.Migrations,
 			)
 			return title, desc
 		},
@@ -548,6 +599,7 @@ func parseRemoteURL(rawURL string) (*remoteInfo, error) {
 		Org:          parsed.Organization,
 		Project:      parsed.Project,
 		RepoName:     parsed.RepoName,
+		RemoteURL:    rawURL,
 	}, nil
 }
 

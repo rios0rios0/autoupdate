@@ -418,3 +418,51 @@ func TestAllowMajorUpdatesLayering(t *testing.T) {
 		assert.True(t, entities.MajorUpdatesAllowed(settings))
 	})
 }
+
+func TestPrepareMajorMigrationsLayering(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should default to enabled", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		layer := restrictedLayer("# nothing\n")
+
+		// when
+		settings, err := entities.ApplyLayer(&entities.Settings{}, layer) //nolint:exhaustruct // layers fill it
+
+		// then
+		require.NoError(t, err)
+		assert.True(t, entities.PrepareMajorMigrationsEnabled(settings))
+	})
+
+	t.Run("should let a repository turn preparation off", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		layer := restrictedLayer("prepare_major_migrations: false\n")
+
+		// when
+		settings, err := entities.ApplyLayer(&entities.Settings{}, layer) //nolint:exhaustruct // layers fill it
+
+		// then
+		require.NoError(t, err)
+		assert.False(t, entities.PrepareMajorMigrationsEnabled(settings))
+	})
+
+	t.Run("should let a repository re-enable what the operator turned off", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		disabled := false
+		base := &entities.Settings{PrepareMajorMigrations: &disabled} //nolint:exhaustruct // only this key
+		layer := restrictedLayer("prepare_major_migrations: true\n")
+
+		// when
+		settings, err := entities.ApplyLayer(base, layer)
+
+		// then
+		require.NoError(t, err)
+		assert.True(t, entities.PrepareMajorMigrationsEnabled(settings))
+	})
+}

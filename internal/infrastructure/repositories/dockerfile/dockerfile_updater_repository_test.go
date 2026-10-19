@@ -901,7 +901,8 @@ func TestAppendChangelogEntryWithUpgrades(t *testing.T) {
 }
 
 // TestDetermineUpgrades tests are sequential because they override a package-level function variable.
-func TestDetermineUpgrades(t *testing.T) {
+func TestDetermineUpgrades(t *testing.T) { //nolint:paralleltest // package-level registry function is overridden
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should return upgrade when newer tag available", func(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchTagsFunc(
@@ -926,6 +927,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		require.Len(t, upgrades, 1)
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should return empty when already at latest", func(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchTagsFunc(
@@ -947,6 +949,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		assert.Empty(t, upgrades)
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should skip image when fetch tags fails", func(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchTagsFunc(
@@ -968,6 +971,7 @@ func TestDetermineUpgrades(t *testing.T) {
 		assert.Empty(t, upgrades)
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should use cache for duplicate image references", func(t *testing.T) {
 		// given
 		callCount := 0
@@ -995,7 +999,11 @@ func TestDetermineUpgrades(t *testing.T) {
 }
 
 // TestCreateUpdatePRsWithDryRun tests are sequential because they override a package-level function variable.
-func TestCreateUpdatePRsWithDryRun(t *testing.T) {
+//
+//nolint:paralleltest // package-level registry function is overridden
+func TestCreateUpdatePRsWithDryRun(
+	t *testing.T,
+) {
 	t.Run("should return empty when no Docker Hub images found", func(t *testing.T) {
 		// given
 		content := "FROM ghcr.io/org/myapp:1.2.3\n"
@@ -1018,6 +1026,7 @@ func TestCreateUpdatePRsWithDryRun(t *testing.T) {
 		assert.Empty(t, prs)
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should log upgrades and return empty in dry run mode", func(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchTagsFunc(
@@ -1049,6 +1058,7 @@ func TestCreateUpdatePRsWithDryRun(t *testing.T) {
 		assert.Empty(t, provider.PRInputs)
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should create PR when upgrades found and not dry run", func(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchTagsFunc(
@@ -1082,6 +1092,7 @@ func TestCreateUpdatePRsWithDryRun(t *testing.T) {
 		assert.NotEmpty(t, provider.PRInputs)
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should skip when PR already exists for upgrade branch", func(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchTagsFunc(
@@ -1113,6 +1124,7 @@ func TestCreateUpdatePRsWithDryRun(t *testing.T) {
 		assert.Empty(t, provider.BranchInputs)
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should return empty when all images are up to date", func(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchTagsFunc(

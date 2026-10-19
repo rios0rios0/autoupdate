@@ -34,6 +34,13 @@
 # `npm-check-updates`, and for Ruby the Gemfile's `~>` bounds raised around `bundle update`.
 #allow_major_updates: false
 
+# (optional) prepare a branch containing the mechanical part of each Go major
+# migration found in the notice: imports are rewritten, modules are moved onto
+# the new path and tidied, and the PR description gets a link to open the
+# migration pull request. Enabled by default; set this to false when this
+# repository must not receive migration branches.
+#prepare_major_migrations: false
+
 # (optional) number of repositories processed in parallel within an organization.
 # Omit it (or set 0) for the built-in default of 4; 1 processes them sequentially.
 #concurrency: 4
