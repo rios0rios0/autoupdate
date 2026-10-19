@@ -56,6 +56,21 @@ type Settings struct {
 	// Set it to false for a repository that must not move majors unattended; the
 	// guard then holds each one at its previous version and reports it.
 	AllowMajorUpdates *bool `yaml:"allow_major_updates"`
+	// PrepareMajorMigrations controls whether a run prepares, on a branch of its
+	// own, the mechanical half of the migration to each newer major a dependency
+	// has published under a different module path. Nil (not set) defaults to
+	// true.
+	//
+	// The notice in the pull request description is what it serves. `go get -u`
+	// cannot reach a `/vN` path, so the dependency sits behind forever unless a
+	// person decides to move it -- and the decision is much cheaper when the
+	// imports are already rewritten and the modules already tidied. The branch
+	// carries that and nothing else: the API changes are left to whoever opens
+	// the pull request it links to.
+	//
+	// Nothing merges on its own. The branch is created and left alone, and the
+	// pull request it proposes is opened by a reader, from a link.
+	PrepareMajorMigrations *bool `yaml:"prepare_major_migrations"`
 	// AggregateBranchPrefix overrides the prefix of the dated aggregate branch. The
 	// same value decides which branches the cleanup above removes.
 	AggregateBranchPrefix  string `yaml:"aggregate_branch_prefix"`
@@ -84,6 +99,22 @@ func MajorUpdatesAllowed(settings *Settings) bool {
 		return true
 	}
 	return *settings.AllowMajorUpdates
+}
+
+// PrepareMajorMigrationsEnabled reports whether a run prepares a branch for
+// each newer major it finds published under a different module path. Unset
+// means enabled.
+//
+// On by default because the preparation is what turns the notice into
+// something a reader can act on in one click, and the alternative it replaces
+// is a branch somebody assembles by hand once the line is noticed. A
+// repository that would rather nothing were pushed on its behalf says so once;
+// the notice itself stays either way.
+func PrepareMajorMigrationsEnabled(settings *Settings) bool {
+	if settings == nil || settings.PrepareMajorMigrations == nil {
+		return true
+	}
+	return *settings.PrepareMajorMigrations
 }
 
 // ResolveAggregateBranchPrefix returns the configured aggregate branch prefix,

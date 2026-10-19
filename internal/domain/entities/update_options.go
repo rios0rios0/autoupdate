@@ -11,6 +11,12 @@ type UpdateOptions struct {
 	// zero-valued UpdateOptions is the *restrictive* case -- construct it through
 	// the run command rather than by hand where the distinction matters.
 	AllowMajorUpdates bool
+	// PrepareMajorMigrations lets the run prepare a branch for each newer major
+	// a dependency published under a different module path, so the notice in the
+	// pull request description links to a pull request instead of describing a
+	// chore. Resolved by PrepareMajorMigrationsEnabled, which defaults it to
+	// true, with the same zero-value caveat as AllowMajorUpdates above.
+	PrepareMajorMigrations bool
 	// ToolingDir is where the scripts an updater runs keep their package managers'
 	// caches, downloads and temporary files. A batch run gives each repository its
 	// own and removes it with the repository, so nothing a repository needed

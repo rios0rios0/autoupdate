@@ -68,7 +68,11 @@ func TestScanDockerfileDigest(t *testing.T) {
 
 // TestDetermineUpgradesWithDigest is sequential because it overrides a
 // package-level function variable.
-func TestDetermineUpgradesWithDigest(t *testing.T) {
+//
+//nolint:paralleltest // package-level registry function is overridden
+func TestDetermineUpgradesWithDigest(
+	t *testing.T,
+) {
 	t.Run("should resolve the digest of the tag it upgrades to", func(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchRegistryTagsFunc(registryReporting(map[string]string{
@@ -90,6 +94,7 @@ func TestDetermineUpgradesWithDigest(t *testing.T) {
 		assert.Equal(t, newDigest, dockerfile.UpgradeTaskDigest(upgrades[0]))
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should skip the upgrade when the registry reports no digest for the new tag",
 		func(t *testing.T) {
 			// given: rewriting the tag alone would leave the previous manifest
@@ -113,6 +118,7 @@ func TestDetermineUpgradesWithDigest(t *testing.T) {
 			assert.Empty(t, upgrades)
 		})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should still upgrade a clause that pins no digest", func(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchTagsFunc(
@@ -138,7 +144,8 @@ func TestDetermineUpgradesWithDigest(t *testing.T) {
 
 // TestApplyUpgradesWithDigest is sequential because it overrides a
 // package-level function variable.
-func TestApplyUpgradesWithDigest(t *testing.T) {
+func TestApplyUpgradesWithDigest(t *testing.T) { //nolint:paralleltest // package-level registry function is overridden
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should rewrite the tag and the digest together", func(t *testing.T) {
 		// given
 		cleanup := dockerfile.SetFetchRegistryTagsFunc(registryReporting(map[string]string{
@@ -161,6 +168,7 @@ func TestApplyUpgradesWithDigest(t *testing.T) {
 		assert.Equal(t, "FROM python:3.14-slim@"+newDigest+"\nRUN true\n", changes[0].Content)
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should rewrite a digest-pinned and a plain clause in the same file", func(t *testing.T) {
 		// given: the same file pins python twice, once by digest and once by tag
 		cleanup := dockerfile.SetFetchRegistryTagsFunc(registryReporting(map[string]string{
@@ -188,6 +196,7 @@ func TestApplyUpgradesWithDigest(t *testing.T) {
 			changes[0].Content)
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should not rewrite a digest-pinned clause it skipped", func(t *testing.T) {
 		// given: the registry publishes the new tag but reports no digest, so the
 		// digest-pinned clause is skipped -- and the plain clause below it must
@@ -219,6 +228,7 @@ func TestApplyUpgradesWithDigest(t *testing.T) {
 			changes[0].Content)
 	})
 
+	//nolint:paralleltest // package-level registry function is overridden
 	t.Run("should not rewrite a tag that merely starts with the pinned one", func(t *testing.T) {
 		// given: "python:3.1" also occurs inside "python:3.13"
 		cleanup := dockerfile.SetFetchTagsFunc(

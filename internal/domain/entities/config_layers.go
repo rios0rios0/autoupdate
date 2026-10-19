@@ -219,12 +219,13 @@ func ApplyRepoOverlay(base *Settings, config *RepoConfig) (*Settings, error) {
 // The booleans are pointers so that "absent" and "false" stay distinguishable, which is
 // what lets a layer turn an inherited default *off* rather than only confirm it.
 type RestrictedConfig struct {
-	Updaters             map[string]UpdaterConfig `yaml:"updaters"`
-	CleanupStaleBranches *bool                    `yaml:"cleanup_stale_branches"`
-	AllowMajorUpdates    *bool                    `yaml:"allow_major_updates"`
-	ExcludeForks         *bool                    `yaml:"exclude_forks"`
-	ExcludeArchived      *bool                    `yaml:"exclude_archived"`
-	ExcludeRepos         []string                 `yaml:"exclude_repos"`
+	Updaters               map[string]UpdaterConfig `yaml:"updaters"`
+	CleanupStaleBranches   *bool                    `yaml:"cleanup_stale_branches"`
+	AllowMajorUpdates      *bool                    `yaml:"allow_major_updates"`
+	PrepareMajorMigrations *bool                    `yaml:"prepare_major_migrations"`
+	ExcludeForks           *bool                    `yaml:"exclude_forks"`
+	ExcludeArchived        *bool                    `yaml:"exclude_archived"`
+	ExcludeRepos           []string                 `yaml:"exclude_repos"`
 }
 
 // applyTo folds the restricted layer onto settings, returning a copy.
@@ -243,6 +244,13 @@ func (r RestrictedConfig) applyTo(settings *Settings, layerName string) *Setting
 	// upgrades for itself, which is its own business either way.
 	if r.AllowMajorUpdates != nil {
 		next.AllowMajorUpdates = r.AllowMajorUpdates
+	}
+	// Both directions, for the same reason the line above gives: it starts
+	// nothing and destroys nothing. It decides whether a branch is pushed on the
+	// repository's behalf, and the repository is the party that knows whether it
+	// wants that. The upgrade itself is unaffected either way.
+	if r.PrepareMajorMigrations != nil {
+		next.PrepareMajorMigrations = r.PrepareMajorMigrations
 	}
 	if r.ExcludeForks != nil {
 		next.ExcludeForks = *r.ExcludeForks

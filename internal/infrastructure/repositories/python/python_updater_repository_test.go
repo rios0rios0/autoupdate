@@ -1120,6 +1120,7 @@ func envToMap(env []string) map[string]string {
 }
 
 func TestRunLanguageUpgradeScript(t *testing.T) { //nolint:paralleltest // mutates package-level localCmdRunner
+	//nolint:paralleltest // the parent mutates package-level localCmdRunner
 	t.Run("should return script output when runner succeeds", func(t *testing.T) {
 		// given
 		stub := repositorydoubles.NewStubCommandRunner(cmdrunner.RunResult{
@@ -1154,6 +1155,7 @@ func TestRunLanguageUpgradeScript(t *testing.T) { //nolint:paralleltest // mutat
 		assert.Equal(t, repoDir, stub.Calls[0].Opts.Dir)
 	})
 
+	//nolint:paralleltest // the parent mutates package-level localCmdRunner
 	t.Run("should return error when runner fails", func(t *testing.T) {
 		// given
 		stub := repositorydoubles.NewStubCommandRunnerWithError(errors.New("script crashed"))
@@ -1177,6 +1179,7 @@ func TestRunLanguageUpgradeScript(t *testing.T) { //nolint:paralleltest // mutat
 		assert.Contains(t, err.Error(), "upgrade script failed")
 	})
 
+	//nolint:paralleltest // the parent mutates package-level localCmdRunner
 	t.Run("should pass verbose output through logger without error", func(t *testing.T) {
 		// given
 		stub := repositorydoubles.NewStubCommandRunner(cmdrunner.RunResult{
@@ -1231,6 +1234,7 @@ func TestRunLanguageUpgradeScriptMajorMode(t *testing.T) { //nolint:paralleltest
 		},
 	}
 
+	//nolint:paralleltest // each subtest overrides the package-level runner
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			// given -- a PDM project, whose upgrade command is the one that

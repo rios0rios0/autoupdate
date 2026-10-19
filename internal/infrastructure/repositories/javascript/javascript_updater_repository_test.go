@@ -1608,6 +1608,7 @@ func TestRunLanguageUpgradeScriptMajorMode(t *testing.T) { //nolint:paralleltest
 		},
 	}
 
+	//nolint:paralleltest // each subtest overrides the package-level runner
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			// given

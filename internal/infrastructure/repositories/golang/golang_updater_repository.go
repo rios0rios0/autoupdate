@@ -241,6 +241,14 @@ func (u *UpdaterRepository) ApplyUpdates(
 		changelogEntry(goVersionUpdated, vCtx.LatestVersion), goChangelogSummary,
 	)
 
+	// The newer majors `go get -u` structurally cannot reach, and a branch
+	// carrying each migration, so the reader of this pull request has something
+	// to click instead of a chore to schedule. A failure anywhere in there is
+	// reported on its own row rather than failing the upgrade that earned it.
+	migrations := u.prepareMigrations(
+		ctx, repoDir, provider, repo, opts, goBinary, hasConfigSH, outputStr,
+	)
+
 	commitMsg := goCommitMsgDeps
 	prTitle := commitMsg
 	if goVersionUpdated {
@@ -257,9 +265,37 @@ func (u *UpdaterRepository) ApplyUpdates(
 		PRTitle:       prTitle,
 		PRDescription: GenerateGoPRDescription(
 			vCtx.LatestVersion, hasConfigSH, goVersionUpdated, opts.AllowMajorUpdates,
-			ParseMajorsAvailable(outputStr),
+			migrations,
 		),
 	}, nil
+}
+
+// prepareMigrations keeps the optional migration work outside the main upgrade
+// lifecycle and preserves its soft-failure boundary.
+func (u *UpdaterRepository) prepareMigrations(
+	ctx context.Context,
+	repoDir string,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+	opts entities.UpdateOptions,
+	goBinary string,
+	hasConfigSH bool,
+	output string,
+) []MigrationPrepared {
+	return prepareMigrationsForRun(ctx, migrationParams{
+		RepoDir:      repoDir,
+		ToolingDir:   opts.ToolingDir,
+		BaseBranch:   baseBranchName(support.TargetBranchRef(repo, opts)),
+		ProviderName: provider.Name(),
+		Provider:     provider,
+		Repo:         repo,
+		AuthToken:    provider.AuthToken(),
+		GoBinary:     goBinary,
+		HasConfigSH:  hasConfigSH,
+		Majors:       ParseMajorsAvailable(output),
+		Runner:       u.cmdRunner,
+		DryRun:       opts.DryRun,
+	}, opts.PrepareMajorMigrations)
 }
 
 // localResolveVersionContext reads the local go.mod to determine the version
@@ -352,7 +388,10 @@ func cloneAndUpgrade(
 		Title:  upgradeSubject(vCtx.LatestVersion, result.GoVersionUpdated),
 		Description: GenerateGoPRDescription(
 			vCtx.LatestVersion, hasConfigSH, result.GoVersionUpdated, opts.AllowMajorUpdates,
-			ParseMajorsAvailable(result.Output),
+			// This flow has no preparation: it pushes a branch inside the
+			// upgrade script, before the provider API could be asked to hold
+			// anything, so its findings are reported and nothing more.
+			unpreparedMigrations(ParseMajorsAvailable(result.Output)),
 		),
 	}, nil
 }
@@ -868,14 +907,14 @@ func findGoBinaryInGVM(home string) (string, bool) {
 // dependency upgrade.  Exported so that the local-mode CLI handler can
 // reuse the same description format.
 //
-// majorsAvailable are the newer majors the run found published under a
-// different module path, from ParseMajorsAvailable over the script output. A
-// caller without that output passes nil and the section is simply absent --
-// which is honest, because a run that did not look has nothing to report.
+// migrations are the newer majors the run found published under a different
+// module path, together with what it did about them. A caller without that
+// output passes nil and the section is simply absent -- which is honest,
+// because a run that did not look has nothing to report.
 func GenerateGoPRDescription(
 	goVersion string,
 	hasConfigSH, goVersionUpdated, allowMajorUpdates bool,
-	majorsAvailable []MajorAvailable,
+	migrations []MigrationPrepared,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("## Summary\n\n")
@@ -912,7 +951,7 @@ func GenerateGoPRDescription(
 	if hasConfigSH {
 		sb.WriteString("- `config.sh` was sourced before running Go commands (private package settings)\n")
 	}
-	writeMajorsAvailableSection(&sb, majorsAvailable)
+	writeMajorsAvailableSection(&sb, migrations)
 	sb.WriteString("\n### Review Checklist\n\n")
 	sb.WriteString("- [ ] Verify build passes\n")
 	sb.WriteString("- [ ] Verify tests pass\n")

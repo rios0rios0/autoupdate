@@ -201,6 +201,10 @@ updaters:
     auto_complete: true
   python:
     enabled: false
+
+# Go major migrations are prepared by default. The notice contains a link to
+# open a pull request for the mechanical migration branch.
+#prepare_major_migrations: false
 ```
 
 ### Per-Repository Configuration (`.autoupdate.yaml`)
@@ -232,6 +236,7 @@ updaters:
 exclude_forks: true     # ...and excludes itself if it is ever forked
 cleanup_stale_branches: false
 allow_major_updates: false   # this one reviews majors by hand
+prepare_major_migrations: false # this one wants notices without migration branches
 ```
 
 | Key | Purpose |
@@ -241,6 +246,7 @@ allow_major_updates: false   # this one reviews majors by hand
 | `exclude_repos`, `exclude_forks`, `exclude_archived` | Let the repository exclude *itself* |
 | `cleanup_stale_branches` | Only `false`, to keep this project's dated branches. An enable here would arrive after `--skip-cleanup` had been applied and would override it |
 | `allow_major_updates` | Either direction. On by default; set `false` to hold this repository on its current major line. Honoured by every updater |
+| `prepare_major_migrations` | Either direction. On by default; set `false` to report Go major migrations without creating their mechanical migration branches |
 
 And the keys it may **not** set, which are reported and ignored when a repository tries:
 

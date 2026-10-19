@@ -9,6 +9,13 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 )
 
+// UnpreparedMigrations exports unpreparedMigrations for testing: the pairing of
+// findings with the fact that nothing was done about them, which is what every
+// caller that cannot prepare a migration reports.
+func UnpreparedMigrations(majors []MajorAvailable) []MigrationPrepared {
+	return unpreparedMigrations(majors)
+}
+
 // ParseGoDirective is exported for testing.
 func ParseGoDirective(content string) string {
 	return parseGoDirective(content)
@@ -218,6 +225,159 @@ func ObserveModuleChanges(ctx context.Context, repoDir string) ([]entities.Depen
 // ChangelogEntry is exported for testing.
 func ChangelogEntry(goVersionUpdated bool, goVersion string) string {
 	return changelogEntry(goVersionUpdated, goVersion)
+}
+
+// MigrationParams is exported for testing.
+type MigrationParams = migrationParams
+
+// MigrationsForRun is exported for testing: the decision a run makes about the
+// newer majors it found, which is the whole of the preparation.
+func MigrationsForRun(
+	ctx context.Context, params MigrationParams, enabled bool,
+) []MigrationPrepared {
+	return prepareMigrationsForRun(ctx, params, enabled)
+}
+
+// PrepareLocalMigrations is exported for testing: what the local (standalone)
+// flow does about the newer majors an upgrade found.
+func PrepareLocalMigrations(
+	ctx context.Context,
+	repoDir string,
+	opts LocalUpgradeOptions,
+	output, baseBranch string,
+) []MigrationPrepared {
+	return prepareLocalMigrations(ctx, repoDir, opts, output, baseBranch)
+}
+
+// MigrationBranchName is exported for testing.
+func MigrationBranchName(major MajorAvailable) string {
+	return migrationBranchName(major)
+}
+
+// MigrationSlug is exported for testing.
+func MigrationSlug(modulePath string) string {
+	return migrationSlug(modulePath)
+}
+
+// MigrateImportPath is exported for testing.
+func MigrateImportPath(importPath, oldPath, newPath string) (string, bool) {
+	return migrateImportPath(importPath, oldPath, newPath)
+}
+
+// RewriteModuleImports is exported for testing.
+func RewriteModuleImports(root, oldPath, newPath string) ([]string, []string, error) {
+	return rewriteModuleImports(root, oldPath, newPath)
+}
+
+// RewriteFileImports is exported for testing.
+func RewriteFileImports(filePath, oldPath, newPath string) (bool, bool, error) {
+	return rewriteFileImports(filePath, oldPath, newPath)
+}
+
+// MigrateImportPathExcept is exported for testing sibling module protection.
+func MigrateImportPathExcept(importPath, oldPath, newPath string, protected []string) (string, bool) {
+	return migrateImportPathExcept(importPath, oldPath, newPath, protected)
+}
+
+// CollectMigrationChanges is exported for testing.
+func CollectMigrationChanges(
+	ctx context.Context, worktree string,
+) ([]entities.FileChange, string, error) {
+	return collectMigrationChanges(ctx, worktree)
+}
+
+// MigrationNote is exported for testing.
+func MigrationNote(message, token string) string {
+	return migrationNote(message, token)
+}
+
+// MigrationCommitMessage is exported for testing.
+func MigrationCommitMessage(major MajorAvailable, compiles bool, note string) string {
+	return migrationCommitMessage(major, migrationBuild{Compiles: compiles, Note: note})
+}
+
+// MigrationChangelogEntry is exported for testing.
+func MigrationChangelogEntry(major MajorAvailable) string {
+	return migrationChangelogEntry(major)
+}
+
+// BaseBranchName is exported for testing.
+func BaseBranchName(targetRef string) string {
+	return baseBranchName(targetRef)
+}
+
+// MigrationWorktree is exported for testing the worktree lifecycle.
+func MigrationWorktree(
+	ctx context.Context, params MigrationParams,
+) (string, func(), error) {
+	return addMigrationWorktree(ctx, params)
+}
+
+// RemoveMigrationWorktree is exported for testing cleanup fallbacks.
+func RemoveMigrationWorktree(ctx context.Context, repoDir, dir string) {
+	removeMigrationWorktree(ctx, repoDir, dir)
+}
+
+// MigrationBuild is exported for testing the in-worktree preparation.
+type MigrationBuild = migrationBuild
+
+// PrepareMigrationInWorktree is exported for testing the mechanical migration.
+func PrepareMigrationInWorktree(
+	ctx context.Context,
+	params MigrationParams,
+	major MajorAvailable,
+	worktree string,
+	env []string,
+) (MigrationBuild, error) {
+	return prepareMigrationInWorktree(ctx, params, major, worktree, env)
+}
+
+// MigrationRun is exported for testing command execution and redaction.
+func MigrationRun(
+	ctx context.Context,
+	params MigrationParams,
+	dir string,
+	args ...string,
+) error {
+	runner := &migrationRunner{
+		ctx: ctx, env: nil, goBinary: params.GoBinary,
+		token: params.AuthToken, runner: params.Runner,
+	}
+	return runner.run(dir, args...)
+}
+
+// ApplyEdits is exported for testing invalid edit ranges.
+func ApplyEdits(source []byte, edits []SourceEdit) []byte {
+	internal := make([]sourceEdit, 0, len(edits))
+	for _, edit := range edits {
+		internal = append(internal, sourceEdit{start: edit.Start, end: edit.End, text: edit.Text})
+	}
+	return applyEdits(source, internal)
+}
+
+// SourceEdit describes one test edit range.
+type SourceEdit struct {
+	Start int
+	End   int
+	Text  string
+}
+
+// VersionMajorNumber is exported for testing semantic version parsing.
+func VersionMajorNumber(version string) string { return versionMajorNumber(version) }
+
+// PathMajorSuffix is exported for testing module path parsing.
+func PathMajorSuffix(modulePath string) string { return pathMajorSuffix(modulePath) }
+
+// RefsHeads is exported for testing branch ref normalization.
+func RefsHeads(branch string) string { return refsHeads(branch) }
+
+// ShellQuote is exported for testing shell argument quoting.
+func ShellQuote(value string) string { return shellQuote(value) }
+
+// ReplacedModuleDir is exported for testing: the module whose go.mod redirects
+// the given path, which is what stops a migration from being prepared.
+func ReplacedModuleDir(worktree, modulePath string) string {
+	return replacedModuleDir(worktree, modulePath)
 }
 
 // GoChangelogSummary is exported for testing.

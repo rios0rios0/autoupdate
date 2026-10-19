@@ -99,3 +99,9 @@ providers:
 #  javascript:
 #    auto_complete: true
 #    target_branch: 'develop'
+
+# (optional) prepare a branch containing the mechanical part of Go major
+# migrations and add a "Create pull request" link to the upgrade notice.
+# The migration branch rewrites imports and tidies modules, but leaves API
+# changes for review. Enabled by default; set false to keep the notice only.
+#prepare_major_migrations: false
