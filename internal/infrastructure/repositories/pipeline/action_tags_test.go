@@ -85,10 +85,9 @@ func TestListRemoteTags(t *testing.T) {
 
 // TestFindActionUpgradesInFileOutsideGitHub is not parallel: it points the GitHub git
 // endpoint, a package-level setting, at local repositories.
-func TestFindActionUpgradesInFileOutsideGitHub(
-	t *testing.T,
-) { //nolint:paralleltest // mutates package-level githubGitURLFormat
-	//nolint:paralleltest // the parent mutates package-level githubGitURLFormat
+//
+//nolint:paralleltest // it and its subtests change the package-level githubGitURLFormat
+func TestFindActionUpgradesInFileOutsideGitHub(t *testing.T) {
 	t.Run("should read the tags of an action from GitHub when the repository is hosted elsewhere", func(t *testing.T) {
 		// given a workflow kept on Azure DevOps, whose provider would answer for a
 		// repository of its own if it were asked

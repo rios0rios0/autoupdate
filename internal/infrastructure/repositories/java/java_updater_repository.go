@@ -261,7 +261,9 @@ func (u *UpdaterRepository) acquireBuildSlot(
 	ctx context.Context, repo entities.Repository,
 ) (func(), error) {
 	if u.builds == nil {
-		return func() {}, nil
+		return func() {
+			// Without a slot pool no slot was taken, so there is none to free.
+		}, nil
 	}
 
 	select {
