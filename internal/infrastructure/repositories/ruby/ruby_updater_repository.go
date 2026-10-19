@@ -170,7 +170,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	// resolveLocalVersionContext (from local.go) handles fetching + comparison
 	vCtx := resolveLocalVersionContext(ctx, repoDir, opts.AllowMajorUpdates)
 
-	env := support.ScriptEnv(opts.ToolingDir)
+	env := support.ScriptEnv(opts.ToolingDir, opts.SharedToolingDir)
 	if pinVersion := rubyVersionFor(vCtx); pinVersion != "" {
 		env = append(env, "TARGET_RUBY_VERSION="+pinVersion)
 	}

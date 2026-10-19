@@ -31,7 +31,7 @@ func TestScriptEnv(t *testing.T) {
 		t.Parallel()
 
 		// given / when
-		env := support.ScriptEnv("")
+		env := support.ScriptEnv("", "")
 
 		// then
 		assert.Equal(t, os.Environ(), env)
@@ -46,7 +46,7 @@ func TestScriptEnv(t *testing.T) {
 			toolingDir := t.TempDir()
 
 			// when
-			env := effectiveEnv(support.ScriptEnv(toolingDir))
+			env := effectiveEnv(support.ScriptEnv(toolingDir, ""))
 
 			// then
 			for _, variable := range []string{
@@ -73,7 +73,7 @@ func TestScriptEnv(t *testing.T) {
 		toolingDir := t.TempDir()
 
 		// when
-		env := effectiveEnv(support.ScriptEnv(toolingDir))
+		env := effectiveEnv(support.ScriptEnv(toolingDir, ""))
 
 		// then
 		for _, variable := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"} {
@@ -81,6 +81,35 @@ func TestScriptEnv(t *testing.T) {
 		}
 		assert.NotContains(t, env, "YARN_CACHE_FOLDER",
 			"it would move a zero-install Yarn project's committed cache out of the repository")
+	})
+
+	t.Run("should keep the Go caches in the shared directory when the run shares one", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		toolingDir := t.TempDir()
+		sharedDir := t.TempDir()
+
+		// when
+		env := effectiveEnv(support.ScriptEnv(toolingDir, sharedDir))
+
+		// then the Go caches are shared, and everything else stays with the repository
+		assert.Equal(t, filepath.Join(sharedDir, "go", "mod"), env["GOMODCACHE"])
+		assert.Equal(t, filepath.Join(sharedDir, "go", "build"), env["GOCACHE"])
+		for _, variable := range []string{"TMPDIR", "XDG_CACHE_HOME", "npm_config_cache", "GRADLE_USER_HOME"} {
+			assert.True(t, strings.HasPrefix(env[variable], toolingDir+string(os.PathSeparator)),
+				"%s should stay in the repository's tooling directory, got %q", variable, env[variable])
+		}
+	})
+
+	t.Run("should ignore a shared directory when there is no tooling directory", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		env := support.ScriptEnv("", t.TempDir())
+
+		// then
+		assert.Equal(t, os.Environ(), env)
 	})
 
 	t.Run("should be honoured by the Go toolchain", func(t *testing.T) {
@@ -93,7 +122,7 @@ func TestScriptEnv(t *testing.T) {
 		}
 		toolingDir := t.TempDir()
 		cmd := exec.CommandContext(t.Context(), goBinary, "env", "GOMODCACHE", "GOCACHE")
-		cmd.Env = support.ScriptEnv(toolingDir)
+		cmd.Env = support.ScriptEnv(toolingDir, "")
 
 		// when
 		output, err := cmd.Output()
@@ -116,7 +145,7 @@ func TestScriptEnv(t *testing.T) {
 		}
 		workspace := newWorkspace(t)
 		cmd := exec.CommandContext(t.Context(), bash, "-c", "mktemp -d")
-		cmd.Env = support.ScriptEnv(workspace.ToolingDir())
+		cmd.Env = support.ScriptEnv(workspace.ToolingDir(), "")
 
 		// when
 		output, err := cmd.Output()
@@ -137,7 +166,7 @@ func TestScriptEnvOverridesPresetCaches(t *testing.T) {
 		toolingDir := t.TempDir()
 
 		// when
-		env := effectiveEnv(support.ScriptEnv(toolingDir))
+		env := effectiveEnv(support.ScriptEnv(toolingDir, ""))
 
 		// then
 		assert.Equal(t, filepath.Join(toolingDir, "go", "mod"), env["GOMODCACHE"])

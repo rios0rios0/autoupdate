@@ -41,4 +41,30 @@ func TestApplyUpdatesToolingDir(t *testing.T) {
 		assert.Contains(t, runner.Calls[0].Opts.Env, "GOCACHE="+filepath.Join(toolingDir, "go", "build"))
 		assert.Contains(t, runner.Calls[0].Opts.Env, "TMPDIR="+filepath.Join(toolingDir, "tmp"))
 	})
+
+	t.Run("should keep the module and build caches in the cache the run shares", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		root := gitrepo.New(t, map[string]string{"go.mod": appGoMod})
+		runner := repositorydoubles.NewFakeUpgradeRunner(nil, "")
+		updater := goUpdater.NewUpdaterRepositoryForTest(
+			&repositorydoubles.StubVersionFetcher{Version: "1.27.1"}, runner,
+		)
+		provider := repositorydoubles.NewSpyProviderRepositoryBuilder().BuildSpy()
+		toolingDir := t.TempDir()
+		sharedDir := t.TempDir()
+
+		// when
+		_, err := updater.ApplyUpdates(t.Context(), root, provider,
+			entities.Repository{Organization: "org", Name: "repo"},
+			entities.UpdateOptions{ToolingDir: toolingDir, SharedToolingDir: sharedDir})
+
+		// then the Go caches are the shared ones, and the temporary files stay the repository's
+		require.ErrorIs(t, err, repositories.ErrNoUpdatesNeeded)
+		require.Len(t, runner.Calls, 1)
+		assert.Contains(t, runner.Calls[0].Opts.Env, "GOMODCACHE="+filepath.Join(sharedDir, "go", "mod"))
+		assert.Contains(t, runner.Calls[0].Opts.Env, "GOCACHE="+filepath.Join(sharedDir, "go", "build"))
+		assert.Contains(t, runner.Calls[0].Opts.Env, "TMPDIR="+filepath.Join(toolingDir, "tmp"))
+	})
 }

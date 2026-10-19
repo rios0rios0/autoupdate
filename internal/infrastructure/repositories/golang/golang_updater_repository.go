@@ -202,7 +202,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	runResult, cmdErr := u.cmdRunner.Run(ctx, "bash", []string{scriptPath}, cmdrunner.RunOptions{
 		Dir: repoDir,
-		Env: append(support.ScriptEnv(opts.ToolingDir),
+		Env: append(support.ScriptEnv(opts.ToolingDir, opts.SharedToolingDir),
 			"AUTH_TOKEN="+provider.AuthToken(),
 			"GIT_HTTPS_TOKEN="+provider.AuthToken(),
 			"GO_VERSION="+vCtx.LatestVersion,
@@ -283,18 +283,19 @@ func (u *UpdaterRepository) prepareMigrations(
 	output string,
 ) []MigrationPrepared {
 	return prepareMigrationsForRun(ctx, migrationParams{
-		RepoDir:      repoDir,
-		ToolingDir:   opts.ToolingDir,
-		BaseBranch:   baseBranchName(support.TargetBranchRef(repo, opts)),
-		ProviderName: provider.Name(),
-		Provider:     provider,
-		Repo:         repo,
-		AuthToken:    provider.AuthToken(),
-		GoBinary:     goBinary,
-		HasConfigSH:  hasConfigSH,
-		Majors:       ParseMajorsAvailable(output),
-		Runner:       u.cmdRunner,
-		DryRun:       opts.DryRun,
+		RepoDir:          repoDir,
+		ToolingDir:       opts.ToolingDir,
+		SharedToolingDir: opts.SharedToolingDir,
+		BaseBranch:       baseBranchName(support.TargetBranchRef(repo, opts)),
+		ProviderName:     provider.Name(),
+		Provider:         provider,
+		Repo:             repo,
+		AuthToken:        provider.AuthToken(),
+		GoBinary:         goBinary,
+		HasConfigSH:      hasConfigSH,
+		Majors:           ParseMajorsAvailable(output),
+		Runner:           u.cmdRunner,
+		DryRun:           opts.DryRun,
 	}, opts.PrepareMajorMigrations)
 }
 

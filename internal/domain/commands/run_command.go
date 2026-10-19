@@ -72,6 +72,9 @@ func (it *RunCommand) Execute(
 
 	gitlocal.CleanupStaleTempDirs()
 
+	cache := newRunSharedCache()
+	defer removeRunSharedCache(cache)
+
 	totalPRs := 0
 	totalRepos := 0
 	totalErrors := 0
@@ -81,7 +84,7 @@ func (it *RunCommand) Execute(
 			continue
 		}
 
-		prs, repos, errs := it.processProvider(ctx, provCfg, settings, runOpts)
+		prs, repos, errs := it.processProvider(ctx, provCfg, settings, runOpts, cache)
 		totalPRs += prs
 		totalRepos += repos
 		totalErrors += errs
@@ -94,12 +97,35 @@ func (it *RunCommand) Execute(
 	return nil
 }
 
+// newRunSharedCache creates the cache the run shares between its repositories (see
+// support.SharedCache). A run that cannot create one -- or cannot read how much disk
+// is left to keep it bounded -- runs without it, which keeps every cache in each
+// repository's workspace: slower, and just as correct.
+func newRunSharedCache() *support.SharedCache {
+	cache, err := support.NewSharedCache()
+	if err != nil {
+		logger.Warnf("[autoupdate] Not sharing the Go caches between repositories: %v", err)
+		return nil
+	}
+	logger.Debugf("[autoupdate] Sharing the Go caches between repositories in %s", cache.Dir())
+	return cache
+}
+
+// removeRunSharedCache deletes the shared cache once the run is done, and says so
+// when it cannot, for the reason removeRepositoryWorkspace does.
+func removeRunSharedCache(cache *support.SharedCache) {
+	if err := cache.Remove(); err != nil {
+		logger.Warnf("[autoupdate] Could not remove the shared cache %s: %v", cache.Dir(), err)
+	}
+}
+
 // processProvider initializes a single provider and processes all its organizations.
 func (it *RunCommand) processProvider(
 	ctx context.Context,
 	provCfg entities.ProviderConfig,
 	settings *entities.Settings,
 	runOpts RunOptions,
+	cache *support.SharedCache,
 ) (int, int, int) {
 	provider, err := it.providerRegistry.Get(provCfg.Type, provCfg.Token)
 	if err != nil {
@@ -115,7 +141,7 @@ func (it *RunCommand) processProvider(
 			continue
 		}
 
-		prs, repos, errs := it.processOrganization(ctx, provider, org, settings, runOpts)
+		prs, repos, errs := it.processOrganization(ctx, provider, org, settings, runOpts, cache)
 		totalPRs += prs
 		totalRepos += repos
 		totalErrors += errs
@@ -131,6 +157,7 @@ func (it *RunCommand) processOrganization(
 	org string,
 	settings *entities.Settings,
 	runOpts RunOptions,
+	cache *support.SharedCache,
 ) (int, int, int) {
 	logger.Infof("Discovering repositories in %q...", org)
 
@@ -162,7 +189,7 @@ func (it *RunCommand) processOrganization(
 	group.SetLimit(concurrency)
 	for _, repo := range repos {
 		group.Go(func() error {
-			prs, errs := it.processRepository(ctx, provider, repo, settings, runOpts)
+			prs, errs := it.processRepository(ctx, provider, repo, settings, runOpts, cache)
 			mu.Lock()
 			totalPRs += len(prs)
 			totalErrors += errs
@@ -283,6 +310,7 @@ func (it *RunCommand) processRepository(
 	repo entities.Repository,
 	settings *entities.Settings,
 	runOpts RunOptions,
+	cache *support.SharedCache,
 ) ([]entities.PullRequest, int) {
 	// The repository's own configuration is the last layer. It is folded onto a copy, not
 	// through the shared settings: this runs inside the per-organization fan-out, so a
@@ -298,7 +326,7 @@ func (it *RunCommand) processRepository(
 	errorCount := 0
 
 	if len(localUpdaters) > 0 {
-		prs, errs := it.processLocalUpdaters(ctx, provider, repo, settings, localUpdaters)
+		prs, errs := it.processLocalUpdaters(ctx, provider, repo, settings, localUpdaters, cache)
 		allPRs = append(allPRs, prs...)
 		errorCount += errs
 	}
@@ -389,6 +417,7 @@ func (it *RunCommand) processLocalUpdaters(
 	repo entities.Repository,
 	settings *entities.Settings,
 	updaters []applicableUpdater,
+	cache *support.SharedCache,
 ) ([]entities.PullRequest, int) {
 	if allDryRun(updaters) {
 		logAggregateDryRun(updaters, repo)
@@ -429,6 +458,11 @@ func (it *RunCommand) processLocalUpdaters(
 			repo.Organization, repo.Name, err)
 		return nil, 1
 	}
+	// The run's shared cache is the one thing a repository leaves behind on purpose,
+	// so it is weighed against the disk once the repository is done -- after its
+	// workspace is gone (deferred calls run last-in, first-out), so the space the
+	// repository gave back counts.
+	defer cache.Trim()
 	defer removeRepositoryWorkspace(workspace, repo)
 
 	cloneURL := provider.CloneURL(repo)
@@ -462,7 +496,7 @@ func (it *RunCommand) processLocalUpdaters(
 	}
 
 	applied, errorCount := it.runUpdatersOnBranch(
-		ctx, batchCtx, workspace.ToolingDir(), updaters, provider, repo,
+		ctx, batchCtx, workspace.ToolingDir(), cache, updaters, provider, repo,
 	)
 	if len(applied) == 0 {
 		logger.Infof("[autoupdate] %s/%s: no updaters produced changes",
@@ -500,11 +534,14 @@ func removeRepositoryWorkspace(workspace *support.RepositoryWorkspace, repo enti
 // known-good snapshot, discarding only the failing updater's partial writes.
 //
 // Every updater's scripts keep their package managers' caches in toolingDir,
-// the repository's own, which is removed together with the clone.
+// the repository's own, which is removed together with the clone -- except the
+// Go caches, which go into the run's shared cache, held while the updater runs so
+// it is never emptied under a go command.
 func (it *RunCommand) runUpdatersOnBranch(
 	ctx context.Context,
 	batchCtx *gitlocal.BatchGitContext,
 	toolingDir string,
+	cache *support.SharedCache,
 	updaters []applicableUpdater,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
@@ -531,7 +568,10 @@ func (it *RunCommand) runUpdatersOnBranch(
 
 		opts := au.opts
 		opts.ToolingDir = toolingDir
+		opts.SharedToolingDir = cache.Dir()
+		release := cache.Use()
 		result, applyErr := lu.ApplyUpdates(ctx, batchCtx.RepoDir(), provider, repo, opts)
+		release()
 		if applyErr != nil {
 			if errors.Is(applyErr, repositories.ErrNoUpdatesNeeded) {
 				logger.Infof("[%s] %s/%s: already up to date",

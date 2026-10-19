@@ -2,6 +2,7 @@ package repositorydoubles
 
 import (
 	"context"
+	"sync"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
@@ -11,7 +12,12 @@ import (
 // and repositories.LocalUpdater. ApplyUpdateFn is invoked on each call,
 // allowing tests to write files to repoDir, simulate failures, and return
 // custom LocalUpdateResult values.
+//
+// A batch run detects and applies on several repositories at once, so what the
+// spy records is written under a lock; a test reads it once the run has returned.
 type SpyLocalUpdaterRepository struct {
+	mu sync.Mutex
+
 	// --- identity ---
 	UpdaterName string
 
@@ -40,6 +46,8 @@ func (u *SpyLocalUpdaterRepository) Name() string { return u.UpdaterName }
 func (u *SpyLocalUpdaterRepository) Detect(
 	_ context.Context, _ repositories.ProviderRepository, repo entities.Repository,
 ) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	u.DetectedRepos = append(u.DetectedRepos, repo)
 	return u.DetectResult
 }
@@ -66,7 +74,9 @@ func (u *SpyLocalUpdaterRepository) ApplyUpdates(
 	_ entities.Repository,
 	opts entities.UpdateOptions,
 ) (*repositories.LocalUpdateResult, error) {
+	u.mu.Lock()
 	u.ApplyCallCount++
+	u.mu.Unlock()
 	if u.ApplyUpdateFn != nil {
 		return u.ApplyUpdateFn(repoDir, opts)
 	}

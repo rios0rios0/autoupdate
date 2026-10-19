@@ -173,7 +173,10 @@ func runUpgradeScript(
 		Body:        buildBatchDartScript(opts.AllowMajorUpdates),
 		TempPattern: "autoupdate-dart-batch-*",
 		Dir:         repoDir,
-		Env:         append(support.ScriptEnv(opts.ToolingDir), "PUB_EXECUTABLE="+vCtx.Toolchain),
+		Env: append(
+			support.ScriptEnv(opts.ToolingDir, opts.SharedToolingDir),
+			"PUB_EXECUTABLE="+vCtx.Toolchain,
+		),
 	})
 }
 

@@ -403,7 +403,6 @@ Each repository gets one working directory under the system temporary directory 
 `/tmp` by default), named `autoupdate-batch-*`. The clone lives there, and so does everything
 the updaters' package managers write outside it:
 
-- the Go module and build caches, including any toolchain `GOTOOLCHAIN` downloads
 - the npm, pnpm, Yarn and corepack caches
 - the pip and PDM caches
 - the Gradle home and the Maven local repository
@@ -416,6 +415,18 @@ most a few repositories' worth on disk (one per `concurrency` slot), however man
 repositories it covers, and a run that is killed before it can clean up is cleaned up by the
 next run on the same machine.
 
+The Go module and build caches, including any toolchain `GOTOOLCHAIN` downloads, are the
+exception: a run shares them between all its repositories, in one directory named
+`autoupdate-cache-*` beside the working directories. They are what Go repositories have most
+in common, and downloading every module and compiling every dependency again for each
+repository made a run over many Go services several times slower. The shared cache bounds
+itself instead: once a repository is done, the cache is emptied if the filesystem it lives on
+has less than 10 GiB free (or a tenth of a disk smaller than 100 GiB), after any Go command
+still using it has finished, and it is deleted when the run ends. A run renews the cache every
+minute while it lasts, so another run on the same machine never takes it for a leftover, while
+the cache of a killed run is cleaned up by the next one like a working directory. On a platform where the free
+space cannot be read, the Go caches stay in each repository's directory.
+
 No process outlives its repository either. Gradle runs with `--no-daemon`, because a Gradle
 daemon and the Kotlin compile daemon it starts otherwise stay resident for hours, about a
 gigabyte per repository with Kotlin build logic. MSBuild's node reuse is turned off.
@@ -425,8 +436,8 @@ Your configuration is still read from where you keep it: `~/.npmrc`, `~/.m2/sett
 `~/.gradle/gradle.properties` and its init scripts are linked into each repository's Gradle
 home.
 
-The trade-off is that repositories no longer share a download cache, so each one downloads
-its own dependencies. If the temporary directory is memory-backed (`df -h /tmp` reports
+The trade-off is that repositories other than Go ones no longer share a download cache, so
+each one downloads its own dependencies. If the temporary directory is memory-backed (`df -h /tmp` reports
 `tmpfs`), point `TMPDIR` at a directory on disk before running AutoUpdate, or every clone
 and cache counts against RAM. Standalone mode (`autoupdate .`) is unaffected: it upgrades
 your own checkout once, with your own caches.

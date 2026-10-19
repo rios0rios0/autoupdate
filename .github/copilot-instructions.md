@@ -152,7 +152,8 @@ rather than by copying a sibling.
 - **Script environment** (`internal/support/tooling_env.go`): `ScriptEnv` is what
   every `ApplyUpdates` builds its script environment from, never `os.Environ()`
   directly -- it moves the package managers' caches into the repository's
-  workspace (see "Per-Repository Workspace" below).
+  workspace, and the Go caches into the cache the run shares between repositories
+  (see "Per-Repository Workspace" below).
 
 ### Configuration System
 - **Configuration is layered.** Four sources, each overriding only the keys its document declares: built-in defaults (`configs/autoupdate.yaml`, embedded via `configs/embed.go`) → published defaults (the same file fetched from `entities.DefaultConfigURL`, best effort) → the operator's file (`--config`, else `~/` then `~/.config/`, names `.autoupdate.{yml,yaml}` and `autoupdate.{yml,yaml}`) → the target repository's own `.autoupdate.yaml`
@@ -213,7 +214,8 @@ Push transport is auto-detected from the origin remote URL:
 
 ### Per-Repository Workspace (Batch Mode)
 - `processLocalUpdaters` gives each repository a `support.RepositoryWorkspace` (`autoupdate-batch-*` under `os.TempDir()`): the clone in `repo/`, the package managers' caches and temporary files in `tooling/`. `defer removeRepositoryWorkspace` deletes it on every outcome (pull request, no changes, updater failure, clone failure), so a batch run's disk use is bounded by `concurrency`. `BatchGitContext` clones into `workspace.RepoDir()` and owns nothing.
-- Every `ApplyUpdates` builds its environment with `support.ScriptEnv(opts.ToolingDir)`, never `os.Environ()` directly. `toolingRedirects` in `internal/support/tooling_env.go` is the single table of what moves (TMPDIR, XDG_CACHE_HOME, Go, npm/pnpm/Yarn Berry/corepack, pip/PDM, Gradle, Maven via `AUTOUPDATE_MAVEN_REPOSITORY`, pub, NuGet, Bundler) — caches only, never configuration. `YARN_CACHE_FOLDER` and `npm_config_store_dir` are deliberately absent. The operator's Gradle configuration is linked into each repository's Gradle home.
+- Every `ApplyUpdates` builds its environment with `support.ScriptEnv(opts.ToolingDir, opts.SharedToolingDir)`, never `os.Environ()` directly. `toolingRedirects` in `internal/support/tooling_env.go` is the single table of what moves (TMPDIR, XDG_CACHE_HOME, Go, npm/pnpm/Yarn Berry/corepack, pip/PDM, Gradle, Maven via `AUTOUPDATE_MAVEN_REPOSITORY`, pub, NuGet, Bundler) — caches only, never configuration. `YARN_CACHE_FOLDER` and `npm_config_store_dir` are deliberately absent. The operator's Gradle configuration is linked into each repository's Gradle home.
+- The Go module and build caches are `shared` in `toolingRedirects`: `Execute` creates one `support.SharedCache` per run (`autoupdate-cache-*`), every `ApplyUpdates` gets its directory as `UpdateOptions.SharedToolingDir` and holds it through `Use` while it runs, and `processLocalUpdaters` defers `cache.Trim()` before the workspace removal, which empties the cache when the filesystem has less than `min(10 GiB, a tenth of it)` free. The run removes it at the end, and a heartbeat renews its modification time meanwhile so a concurrent run's `CleanupStaleTempDirs` never deletes it; a platform where free space cannot be read gets no shared cache.
 - `support.RemoveTree` deletes trees `os.RemoveAll` cannot (Go's read-only module cache), chmodding through an `os.Root` so no symlink escapes the tree; `CleanupStaleTempDirs` uses it for workspaces a killed run left behind.
 - No process outlives its repository: Gradle runs with `--no-daemon` (a Gradle plus Kotlin daemon pair measured about 1 GB resident for hours) and `MSBUILDDISABLENODEREUSE=1` is set.
 

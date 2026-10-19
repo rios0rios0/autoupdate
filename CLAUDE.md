@@ -105,7 +105,8 @@ rather than by copying a sibling.
 - **Script environment** (`internal/support/tooling_env.go`): `ScriptEnv` is what
   every `ApplyUpdates` builds its script environment from, never `os.Environ()`
   directly -- it moves the package managers' caches into the repository's
-  workspace (see "Per-Repository Workspace" below).
+  workspace, and the Go caches into the cache the run shares between repositories
+  (see "Per-Repository Workspace" below).
 
 ### Commit Signing
 
@@ -702,7 +703,7 @@ each outcome.
 
 The updaters reach the tooling directory through `entities.UpdateOptions.ToolingDir`, which
 `runUpdatersOnBranch` sets, and every `ApplyUpdates` builds its script environment with
-`support.ScriptEnv(opts.ToolingDir)` -- an updater that used `os.Environ()` directly would put
+`support.ScriptEnv(opts.ToolingDir, opts.SharedToolingDir)` -- an updater that used `os.Environ()` directly would put
 its caches back in the operator's home, where they grow with every repository. `toolingRedirects`
 (`internal/support/tooling_env.go`) is the one table of what moves: `TMPDIR`, `XDG_CACHE_HOME`,
 `GOMODCACHE`/`GOCACHE` (the module cache also holds every toolchain `GOTOOLCHAIN` downloads),
@@ -726,6 +727,30 @@ directories, so `os.RemoveAll` alone gives up at the first one and leaves the wh
 behind; `RemoveTree` makes the directories writable through an `os.Root` opened on the
 parent, so no symbolic link can carry a chmod outside the tree, and tries again.
 `CleanupStaleTempDirs` uses it too, for the workspaces a killed run leaves behind.
+
+The Go module and build caches are the exception, marked `shared` in `toolingRedirects`.
+`Execute` creates one `support.SharedCache` per run (`autoupdate-cache-*` under
+`os.TempDir()`, swept by `CleanupStaleTempDirs` like the workspaces), `runUpdatersOnBranch`
+hands its directory to every updater as `UpdateOptions.SharedToolingDir`, and `ScriptEnv`
+points `GOMODCACHE` and `GOCACHE` there. A workspace starts empty, so with those caches in it
+every Go repository downloaded its whole module graph and toolchain again and compiled every
+dependency from scratch for the compile guard (`go vet`, up to three times a module): a run
+over an organization of Go services went from minutes per repository to the hosted agent's
+timeout. Both caches are built for several go commands at once. The bound the workspace gave
+the disk is kept by the cache itself: `processLocalUpdaters` defers `cache.Trim()` *before*
+`removeRepositoryWorkspace` (deferred calls run last-in, first-out, so the space the repository
+gave back counts), and `Trim` empties the cache when the filesystem has less free than
+`min(10 GiB, a tenth of it)`. Every `ApplyUpdates` holds the cache through `Use` (a read lock)
+while it runs, and `Trim` takes the write lock, so a cache is never emptied under a go command.
+Reading the free space is per platform (`disk_space_unix.go` for Linux and macOS,
+`disk_space_windows.go`); where it cannot be read, `NewSharedCache` fails and the run keeps the
+Go caches in each workspace, as before -- an unbounded shared cache is what filled the disk
+before workspaces existed. A nil `*SharedCache` is valid and shares nothing. The cache lives
+for the whole run, far past the 30 minutes after which `CleanupStaleTempDirs` takes a directory
+for a killed run's leftover, and the go commands writing deep inside it never touch its own
+modification time; so a heartbeat (`keepAlive`, every `heartbeatInterval`) renews that time
+until `Remove` stops it, and the sweep of another run on the same machine never deletes a live
+cache.
 
 No process may outlive its repository either. The Java script runs Gradle with
 `--no-daemon`: a Gradle daemon and the Kotlin compile daemon it starts for Kotlin build logic

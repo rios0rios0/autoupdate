@@ -14,6 +14,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
+	"github.com/rios0rios0/autoupdate/internal/support"
 	gitops "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
 )
 
@@ -77,6 +78,42 @@ func TestCreateBranchFromDefault_PreservesChangesWithStash(t *testing.T) {
 func TestCleanupStaleTempDirs(t *testing.T) {
 	// Not parallel: t.Setenv modifies process-wide env vars and the function
 	// under test operates on the OS temp directory.
+
+	t.Run("should remove the shared cache a killed run left behind", func(t *testing.T) {
+		// given a shared cache nobody has renewed for an hour
+		t.Setenv("TMPDIR", t.TempDir())
+		//nolint:usetesting // the name and the location are what is being tested
+		cacheDir, err := os.MkdirTemp("", support.SharedCachePattern)
+		require.NoError(t, err)
+		// A directory needs the owner search bit, so 0o700 is the least-privilege mode.
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Join(cacheDir, "go", "mod"), 0o700))
+		past := time.Now().Add(-time.Hour)
+		require.NoError(t, os.Chtimes(cacheDir, past, past))
+
+		// when
+		gitlocal.CleanupStaleTempDirs()
+
+		// then
+		assert.NoDirExists(t, cacheDir)
+	})
+
+	t.Run("should keep a shared cache its run renewed within the threshold", func(t *testing.T) {
+		// given a shared cache whose heartbeat renewed it a minute ago (see
+		// support.SharedCache: a live run keeps renewing it)
+		t.Setenv("TMPDIR", t.TempDir())
+		//nolint:usetesting // the name and the location are what is being tested
+		cacheDir, err := os.MkdirTemp("", support.SharedCachePattern)
+		require.NoError(t, err)
+		renewed := time.Now().Add(-time.Minute)
+		require.NoError(t, os.Chtimes(cacheDir, renewed, renewed))
+
+		// when another run sweeps the same temporary directory
+		gitlocal.CleanupStaleTempDirs()
+
+		// then
+		assert.DirExists(t, cacheDir)
+	})
 
 	t.Run("should remove stale autoupdate temp directories and changelog files", func(t *testing.T) {
 		// given — scope os.TempDir() to a test-owned directory so we don't

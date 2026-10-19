@@ -190,7 +190,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 
 	buildSys := detectLocalBuildSystem(repoDir)
 
-	env := append(support.ScriptEnv(opts.ToolingDir), "BUILD_SYSTEM="+buildSys)
+	env := append(support.ScriptEnv(opts.ToolingDir, opts.SharedToolingDir), "BUILD_SYSTEM="+buildSys)
 	if vCtx.LatestVersion != "" {
 		env = append(env, "JAVA_VERSION="+vCtx.LatestVersion)
 	}
