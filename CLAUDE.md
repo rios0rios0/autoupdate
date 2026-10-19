@@ -607,14 +607,56 @@ either wording can change without breaking the other; it de-duplicates across mo
 because a description that reshuffles between runs reads as a change when nothing changed.
 `GenerateGoPRDescription` renders them as a table above the review checklist, and writes
 **nothing at all** when there are none — a "no newer majors" line on every pull request is one
-readers stop seeing, and it would then be there on the one that mattered. The local CLI path in
-`local_command.go` has no script output and passes `nil`, which is honest: a run that did not
-look has nothing to report.
+readers stop seeing, and it would then be there on the one that mattered. Both entry points report
+the same findings: the batch flow parses the script's output, and the local path parses its own
+the same way (`LocalResult.Migrations`), so `autoupdate .` does not get a second, quieter
+description.
 
-It reports rather than upgrading, and that is not a half measure. Crossing a major means
-rewriting every import of the module and then fixing whatever the new API renamed — a migration
-someone decides to make, not a diff a bot produces unattended. What a bot can do is make sure
-nobody has to notice on their own.
+**The notice offers the migration rather than a chore to schedule.** `major_migration.go`
+prepares one branch per finding with the mechanical half of the migration already committed, and
+the table gains a fourth column linking the provider's own "open a pull request" page for it —
+GitHub's `compare`, GitLab's `merge_requests/new`, Azure DevOps' `pullrequestcreate`
+(`support.PullRequestCreationURL`); a provider with no such page renders a dash rather than a
+guessed link, and the column is absent entirely when nothing was prepared, because a column of
+dashes is the line readers stop seeing.
+
+The work happens in a `git worktree` of the pull request's **base** branch rather than in the
+run's own checkout, so the upgrade branch being assembled is not touched. Imports of the module
+and of its subpackages are replaced at the offsets of their own literals, in a file parsed for its
+imports alone, so nothing else in the file can move and a file that does not parse keeps its
+imports rather than being damaged. Every module that requires the dependency or had a file
+rewritten then runs `go get <new>@<version>`, `go mod tidy` and — where the repository vendors —
+`go mod vendor`; `go vet ./...` decides whether the result builds, and a module that does not is
+*kept*, reported as `it does not build yet` with the first compiler line, which is the state a
+migration branch is expected to be in. The go commands reach private modules through the same
+credentials the upgrade scripts use, written as a `GIT_CONFIG_GLOBAL` file seeded from the
+operator's own gitconfig (`support.FileGitAuthConfig`) because none of them is a shell.
+
+It declines rather than guesses, in four places, each because the branch would otherwise point the
+build somewhere nobody asked for. A `replace` directive naming the module — read from the
+manifest's **syntax**, since `modfile.ParseLax` is by definition a dependency's parse and drops
+the main module's own statements — means the repository deliberately does not use the published
+module. A change set containing a deletion or a rename is refused, because the provider commit
+APIs express only added and edited files; re-vendoring replaces a tree wholesale, so this happens
+for real. A repository with no module requiring or importing the dependency has nothing to
+migrate. And a provider answering "already exists" marks the row prepared without claiming this
+run built it.
+
+The branch is created through the provider's commit API rather than pushed with go-git: those
+commits are signed by the host, and the rulesets these repositories run under require a verified
+signature that a go-git push does not carry. Its name is derived from the dependency
+(`chore/migrate-<module>-v<N>`) so that a second run finds the first one's work instead of
+proposing a duplicate — an open pull request short-circuits the preparation before any checkout,
+and every failure is reported on its own row as a note rather than failing the upgrade that earned
+it. `prepare_major_migrations` (`entities.PrepareMajorMigrationsEnabled`, unset means **true**)
+turns the preparation off, in either direction from any layer, like `allow_major_updates` and for
+the same reason: it starts nothing destructive.
+
+The half that is deliberately not attempted is the API changes, and that is not a half measure.
+Crossing a major means rewriting every import of the module and then fixing whatever the new API
+renamed — the rewrite is mechanical, the rest is a migration someone decides to make. The branch
+is worth having anyway: rewriting the imports and the module graph by hand is the part everybody
+puts off, and what a bot can do is make sure nobody has to notice on their own.
 
 ### Digest-Pinned Base Images
 
