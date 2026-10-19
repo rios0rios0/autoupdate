@@ -21,3 +21,9 @@ func MergeIntoChangelog(content string, plain []string, changes []entities.Depen
 func WriteGitAuthConfig(w io.Writer, operatorConfig []byte, providerName, token string) error {
 	return writeGitAuthConfig(w, operatorConfig, providerName, token)
 }
+
+// NewSharedCacheWithSpace is exported for testing, with the free-space reading
+// injected so a test can run the disk low on demand.
+func NewSharedCacheWithSpace(space func(path string) (uint64, uint64, error)) (*SharedCache, error) {
+	return newSharedCache(space)
+}

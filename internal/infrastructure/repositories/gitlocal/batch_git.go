@@ -381,6 +381,7 @@ func CleanupStaleTempDirs() {
 
 	for _, pattern := range []string{
 		support.RepositoryWorkspacePattern,
+		support.SharedCachePattern,
 		"autoupdate-local-*",
 		"autoupdate-go-*",
 		"autoupdate-js-*",

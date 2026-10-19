@@ -178,7 +178,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 	vCtx := resolveLocalVersionContext(ctx, repoDir)
 	pkgMgr := detectLocalPackageManager(repoDir)
 
-	env := append(support.ScriptEnv(opts.ToolingDir), "PACKAGE_MANAGER="+pkgMgr)
+	env := append(support.ScriptEnv(opts.ToolingDir, opts.SharedToolingDir), "PACKAGE_MANAGER="+pkgMgr)
 	if vCtx.LatestVersion != "" {
 		env = append(env, "NODE_VERSION="+vCtx.LatestVersion)
 	}

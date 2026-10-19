@@ -27,10 +27,12 @@ const toolingTempDir = "tmp"
 const toolingDirMode = 0o700
 
 // toolingRedirect points one package-manager variable at a directory under the
-// repository's tooling directory.
+// repository's tooling directory -- or, for a shared one, under the directory the
+// run shares between repositories when it has one (see SharedCache).
 type toolingRedirect struct {
 	variable string
 	dir      string
+	shared   bool
 }
 
 // toolingRedirects moves everything a package manager run by an updater writes
@@ -44,6 +46,12 @@ type toolingRedirect struct {
 // guard's `go vet` fills the latter on every Go repository), every Gradle
 // distribution a wrapper names, every npm, pip, pub, NuGet and gem package. A
 // batch over a hundred repositories fills a CI agent long before it finishes.
+//
+// The entries marked shared go to the run's SharedCache instead, when it has one.
+// A tooling directory starts empty, so with the Go caches in it every Go
+// repository downloaded its whole module graph and toolchain again and compiled
+// every dependency from scratch, which multiplied the time a run spends on Go;
+// the shared cache is reused across repositories and bounds the disk itself.
 //
 // Every entry moves a cache or a download, never configuration: `~/.npmrc`,
 // `~/.m2/settings.xml`, `pip.conf`, `NuGet.Config`, `~/.bundle/config`, `.netrc`
@@ -73,9 +81,10 @@ var toolingRedirects = []toolingRedirect{ //nolint:gochecknoglobals // read-only
 	{variable: "XDG_CACHE_HOME", dir: "cache"},
 
 	// Go: the module cache, which also holds every toolchain GOTOOLCHAIN
-	// downloads, and the build cache.
-	{variable: "GOMODCACHE", dir: "go/mod"},
-	{variable: "GOCACHE", dir: "go/build"},
+	// downloads, and the build cache. Shared, because both are safe for several
+	// go commands at once and both are what one Go repository fills for the next.
+	{variable: "GOMODCACHE", dir: "go/mod", shared: true},
+	{variable: "GOCACHE", dir: "go/build", shared: true},
 
 	// JavaScript.
 	{variable: "npm_config_cache", dir: "npm"},
@@ -133,21 +142,28 @@ var gradleConfigEntries = []string{ //nolint:gochecknoglobals // read-only looku
 
 // ScriptEnv returns the environment an upgrade script starts from: the process
 // environment, with every package manager's caches, downloads and temporary
-// files moved into toolingDir. The caller appends its own variables, which win
-// over these because exec keeps the last value of a duplicated key.
+// files moved into toolingDir -- except the caches marked shared, which go into
+// sharedDir when the run shares one between repositories. The caller appends its
+// own variables, which win over these because exec keeps the last value of a
+// duplicated key.
 //
 // An empty toolingDir returns the process environment unchanged, so a caller that
 // was given no workspace runs exactly as it did before there was one. Standalone
 // mode never gets here: it upgrades the operator's own checkout once, through its
 // own environment, and is better served by the caches already on their machine.
-func ScriptEnv(toolingDir string) []string {
+// An empty sharedDir keeps the shared caches in toolingDir with everything else.
+func ScriptEnv(toolingDir, sharedDir string) []string {
 	env := os.Environ()
 	if toolingDir == "" {
 		return env
 	}
 
 	for _, redirect := range toolingRedirects {
-		env = append(env, redirect.variable+"="+filepath.Join(toolingDir, redirect.dir))
+		base := toolingDir
+		if redirect.shared && sharedDir != "" {
+			base = sharedDir
+		}
+		env = append(env, redirect.variable+"="+filepath.Join(base, redirect.dir))
 	}
 	return append(env, toolingSettings...)
 }

@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed `autoupdate run` taking several times longer since every repository got its own working directory: each Go repository downloaded its whole module graph and toolchain again and compiled every dependency from scratch for the compile guard, which pushed a run over an organization of Go services past a two-hour CI timeout; the Go module and build caches are now shared by all the repositories of a run, emptied once a repository is done whenever the disk has less than 10 GiB free (or a tenth of a smaller disk) and never while a Go command uses them, and removed when the run ends'
+time: '2026-10-19T18:53:51.292070247Z'

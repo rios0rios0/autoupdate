@@ -22,4 +22,8 @@ type UpdateOptions struct {
 	// own and removes it with the repository, so nothing a repository needed
 	// outlives it. Empty leaves the scripts on the process environment.
 	ToolingDir string
+	// SharedToolingDir is where a batch run keeps the caches it shares between
+	// repositories -- the Go module and build caches -- for as long as the run
+	// lasts. Empty keeps them in ToolingDir with everything else.
+	SharedToolingDir string
 }

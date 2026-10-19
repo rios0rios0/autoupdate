@@ -104,6 +104,9 @@ type migrationParams struct {
 	// live during the preparation. Empty leaves them on the process
 	// environment, which is what standalone mode wants.
 	ToolingDir string
+	// SharedToolingDir is where the run shares the Go caches between
+	// repositories, when it does; see entities.UpdateOptions.
+	SharedToolingDir string
 	// BaseBranch is the short name of the branch the migration is proposed
 	// against -- the one the pull request that carries the notice targets.
 	BaseBranch   string
@@ -166,7 +169,7 @@ func prepareMajorMigrations(ctx context.Context, params migrationParams) []Migra
 	defer cleanupConfig()
 
 	env := append(
-		support.ScriptEnv(params.ToolingDir),
+		support.ScriptEnv(params.ToolingDir, params.SharedToolingDir),
 		support.GitAuthEnv(configPath, params.AuthToken)...,
 	)
 	webURL := support.RepositoryWebURL(params.Repo, params.ProviderName)
