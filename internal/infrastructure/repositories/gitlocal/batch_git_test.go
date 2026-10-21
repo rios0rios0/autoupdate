@@ -21,7 +21,7 @@ import (
 func TestCreateBranchFromDefault_PreservesUncommittedChanges(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should keep uncommitted changes when the branch is created without a stash", func(t *testing.T) {
+	t.Run("should keep uncommitted changes when the branch is created", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -38,35 +38,6 @@ func TestCreateBranchFromDefault_PreservesUncommittedChanges(t *testing.T) {
 		content, err := os.ReadFile(trackedFile)
 		require.NoError(t, err)
 		assert.Equal(t, "upgraded content", string(content), "creating the branch should keep the changes")
-	})
-
-	t.Run("should preserve uncommitted changes when stash is used around branch creation", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := createTestRepoWithCommit(t)
-		batchCtx := newBatchGitContext(t, repoDir)
-		trackedFile := filepath.Join(repoDir, "README.md")
-		require.NoError(t, os.WriteFile(trackedFile, []byte("upgraded content"), 0o600))
-
-		// when - stash before branch, pop after (the fix)
-		stashed, stashErr := batchCtx.StashChanges()
-		require.NoError(t, stashErr)
-		assert.True(t, stashed, "StashChanges should indicate a stash was created")
-		require.NoError(t, batchCtx.CreateBranchFromDefault("chore/upgrade-test"))
-		require.NoError(t, batchCtx.PopStash())
-
-		// then - changes are preserved
-		content, err := os.ReadFile(trackedFile)
-		require.NoError(t, err)
-		assert.Equal(t, "upgraded content", string(content), "stash/pop should preserve upgrade changes")
-
-		// verify we're on the new branch
-		repo, err := git.PlainOpen(repoDir)
-		require.NoError(t, err)
-		head, err := repo.Head()
-		require.NoError(t, err)
-		assert.Equal(t, "refs/heads/chore/upgrade-test", head.Name().String())
 	})
 }
 
@@ -430,91 +401,6 @@ func TestResetToDefault(t *testing.T) {
 
 		// then
 		require.NoError(t, err)
-	})
-}
-
-func TestStashChanges(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should return false when worktree is clean", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := createTestRepoWithCommit(t)
-		ctx := newBatchGitContext(t, repoDir)
-
-		// when
-		stashed, err := ctx.StashChanges()
-
-		// then
-		require.NoError(t, err)
-		assert.False(t, stashed)
-	})
-
-	t.Run("should stash and pop tracked file modifications", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := createTestRepoWithCommit(t)
-		ctx := newBatchGitContext(t, repoDir)
-		trackedFile := filepath.Join(repoDir, "README.md")
-		require.NoError(t, os.WriteFile(trackedFile, []byte("stash me"), 0o600))
-
-		// when
-		stashed, err := ctx.StashChanges()
-
-		// then
-		require.NoError(t, err)
-		assert.True(t, stashed)
-
-		// verify file is reverted
-		content, readErr := os.ReadFile(trackedFile)
-		require.NoError(t, readErr)
-		assert.Equal(t, "# Test", string(content))
-
-		// pop and verify restoration
-		require.NoError(t, ctx.PopStash())
-		content, readErr = os.ReadFile(trackedFile)
-		require.NoError(t, readErr)
-		assert.Equal(t, "stash me", string(content))
-	})
-}
-
-func TestDropStash(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should not panic when no stash exists", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := createTestRepoWithCommit(t)
-		ctx := newBatchGitContext(t, repoDir)
-
-		// when / then
-		assert.NotPanics(t, func() {
-			ctx.DropStash()
-		})
-	})
-
-	t.Run("should drop stash entry without restoring changes", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := createTestRepoWithCommit(t)
-		ctx := newBatchGitContext(t, repoDir)
-		trackedFile := filepath.Join(repoDir, "README.md")
-		require.NoError(t, os.WriteFile(trackedFile, []byte("will be dropped"), 0o600))
-		stashed, err := ctx.StashChanges()
-		require.NoError(t, err)
-		require.True(t, stashed)
-
-		// when
-		ctx.DropStash()
-
-		// then - file should remain at its committed state (stash was dropped, not popped)
-		content, readErr := os.ReadFile(trackedFile)
-		require.NoError(t, readErr)
-		assert.Equal(t, "# Test", string(content))
 	})
 }
 
