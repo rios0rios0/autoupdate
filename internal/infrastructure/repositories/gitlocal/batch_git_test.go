@@ -18,10 +18,10 @@ import (
 	gitops "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
 )
 
-func TestCreateBranchFromDefault_PreservesChangesWithStash(t *testing.T) {
+func TestCreateBranchFromDefault_PreservesUncommittedChanges(t *testing.T) {
 	t.Parallel()
 
-	t.Run("should lose uncommitted changes when force-checkout creates branch without stash", func(t *testing.T) {
+	t.Run("should keep uncommitted changes when the branch is created without a stash", func(t *testing.T) {
 		t.Parallel()
 
 		// given
@@ -30,19 +30,14 @@ func TestCreateBranchFromDefault_PreservesChangesWithStash(t *testing.T) {
 		trackedFile := filepath.Join(repoDir, "README.md")
 		require.NoError(t, os.WriteFile(trackedFile, []byte("upgraded content"), 0o600))
 
-		// verify the change exists before branch creation
+		// when
+		err := batchCtx.CreateBranchFromDefault("chore/upgrade-test")
+
+		// then the switch leaves the working tree alone, as `git switch -c` does
+		require.NoError(t, err)
 		content, err := os.ReadFile(trackedFile)
 		require.NoError(t, err)
-		assert.Equal(t, "upgraded content", string(content))
-
-		// when - force-checkout branch creation (this is the bug scenario)
-		err = batchCtx.CreateBranchFromDefault("chore/upgrade-test")
-		require.NoError(t, err)
-
-		// then - changes are LOST due to force-checkout
-		content, err = os.ReadFile(trackedFile)
-		require.NoError(t, err)
-		assert.Equal(t, "# Test", string(content), "force-checkout should have wiped the changes")
+		assert.Equal(t, "upgraded content", string(content), "creating the branch should keep the changes")
 	})
 
 	t.Run("should preserve uncommitted changes when stash is used around branch creation", func(t *testing.T) {
