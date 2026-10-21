@@ -22,6 +22,26 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-21
+
+### Added
+
+- added one-click Go major migration branches with provider pull request links
+
+### Changed
+
+- changed the Go modules `github.com/Microsoft/go-winio` from `v0.6.3` to `v0.6.4`, `github.com/rios0rios0/cliforge` from `v0.5.0` to `v0.5.1`, `github.com/rios0rios0/gitforge/v4` from `v4.2.10` to `v4.3.1`, `github.com/rios0rios0/langforge` from `v1.1.8` to `v1.1.9` and `github.com/rios0rios0/testkit` from `v0.3.5` to `v0.3.6`
+- changed the Go version from `1.27.2` to `1.27.3`
+- documented the one-click Go major migration preparation in `CLAUDE.md`
+
+### Fixed
+
+- fixed `autoupdate run` filling the memory of the machine it runs on when two repositories built with Gradle or Maven were processed at the same time: only one such build now runs at a time across the run, while repositories of every other ecosystem keep being processed
+- fixed `autoupdate run` taking several times longer since every repository got its own working directory: each Go repository downloaded its whole module graph and toolchain again and compiled every dependency from scratch for the compile guard, which pushed a run over an organization of Go services past a two-hour CI timeout; the Go module and build caches are now shared by all the repositories of a run, emptied once a repository is done whenever the disk has less than 10 GiB free (or a tenth of a smaller disk) and never while a Go command uses them, and removed when the run ends
+- fixed the CI test stage failing since the gitforge `4.3.1` update by expecting the batch branch creation to keep uncommitted changes, now that gitforge switches to the new branch without the forced checkout that used to discard them
+- fixed the Java updater never moving the `.java-version` pin: endoflife.date removed the `java` feed it read, which now answers 404, so the newest LTS JDK is now read from its `eclipse-temurin` feed, from the highest active LTS line rather than the first one listed, and trimmed to the JDK version (`25.0.4.1+1` becomes `25.0.4`) because that value is written into `.java-version`
+- fixed the pipeline updater never updating a GitHub Action used by a workflow kept outside GitHub: it asked the repository's own host for the action's tags, which Azure DevOps answered with a 401 for `actions/checkout`, so the tags are now read from GitHub's git endpoint, which needs no token and is not subject to the REST API's rate limit for anonymous callers
+
 ## [1.2.2] - 2026-10-14
 
 ### Changed

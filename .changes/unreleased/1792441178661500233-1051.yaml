@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed the Java updater never moving the `.java-version` pin: endoflife.date removed the `java` feed it read, which now answers 404, so the newest LTS JDK is now read from its `eclipse-temurin` feed, from the highest active LTS line rather than the first one listed, and trimmed to the JDK version (`25.0.4.1+1` becomes `25.0.4`) because that value is written into `.java-version`'
-time: '2026-10-19T20:19:38.661375992Z'
