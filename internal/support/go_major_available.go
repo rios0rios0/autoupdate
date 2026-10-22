@@ -119,10 +119,26 @@ func goReportNewMajorsScript() string {
 # waiting, which is worse than not reporting at all -- a notice nobody can
 # trust is one everybody learns to skip.
 #
+# Only a FINISHED release on that list counts. "-versions" lists pre-releases
+# too, in semver order among the releases, so reading its last entry offered
+# go-git's /v6 -- published as v6.0.0-beta.1 and nothing else -- as a major to
+# migrate to, although a pre-release is never a candidate anywhere in this
+# tool. A version is read the way semver and "go get -u" read it: a "-" after
+# the patch number makes it unfinished whatever word follows, and build
+# metadata ("+incompatible") is no part of that. The newest finished release
+# is the one reported, so a major that went on to publish v2.1.0-rc.1 is still
+# offered at v2.0.0, and a major published only as pre-releases is a miss.
+#
 # The walk continues past a hit so a repository two majors behind is told about
 # the newer one, and stops at the first miss. It is capped because the loop is
 # driven by what a registry answers, and an unbounded remote-driven loop in an
-# unattended run is a way to hang a nightly job.
+# unattended run is a way to hang a nightly job. The cap is there to stop a
+# registry that never stops answering, not to decide how far behind a
+# dependency may be: at 8 it did the second, and go-github -- which publishes
+# more than a major a month -- was offered at v74 to a repository on v66 while
+# v93 was current, so the migration it prepared was nineteen majors behind
+# before anyone opened it. 100 majors is years of that pace, and each probe is
+# one sub-second query, made only while the registry keeps answering.
 #
 # Nothing here writes to go.mod: "-versions" is a query, and the module being
 # probed is deliberately not added to the build list.
@@ -142,10 +158,16 @@ autoupdate_go_report_new_majors() {
         found_version=""
         probes=0
 
-        while [ -n "$probe_path" ] && [ "$probes" -lt 8 ]; do
+        while [ -n "$probe_path" ] && [ "$probes" -lt 100 ]; do
             probes=$((probes + 1))
             probe_version="$("$go_binary" list -m -versions "$probe_path" 2>/dev/null |
-                awk 'NF >= 2 { print $NF }')"
+                awk '{
+                    for (i = NF; i >= 2; i--) {
+                        release = $i
+                        sub(/\+.*$/, "", release)
+                        if (index(release, "-") == 0) { print $i; exit }
+                    }
+                }')"
             [ -n "$probe_version" ] || break
             found_path="$probe_path"
             found_version="$probe_version"
