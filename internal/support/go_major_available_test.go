@@ -1,6 +1,7 @@
 package support_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,6 +96,34 @@ func runMajorProbe(t *testing.T, table string) (string, string) {
 	return runHarness(t, script), goLog
 }
 
+// libMajorMarker is the start of every marker reported for the fixture's
+// github.com/example/lib requirement; the newer path and version follow it.
+const libMajorMarker = "GO_MAJOR_AVAILABLE=tests/terratest|github.com/example/lib|v1.2.3|"
+
+// consecutiveMajorsTable publishes github.com/example/lib at every major from
+// first to last, one final release each.
+func consecutiveMajorsTable(first, last int) string {
+	var table strings.Builder
+	for major := first; major <= last; major++ {
+		fmt.Fprintf(&table, "github.com/example/lib/v%d v%d.0.0\n", major, major)
+	}
+
+	return table.String()
+}
+
+// majorMarkers returns the GO_MAJOR_AVAILABLE lines of the probe's output,
+// which is everything the Go half reads from it.
+func majorMarkers(output string) []string {
+	markers := make([]string, 0)
+	for line := range strings.SplitSeq(output, "\n") {
+		if strings.HasPrefix(line, "GO_MAJOR_AVAILABLE=") {
+			markers = append(markers, line)
+		}
+	}
+
+	return markers
+}
+
 func TestGoMajorAvailableScriptReportsANewerMajorUnderItsOwnPath(t *testing.T) {
 	t.Parallel()
 
@@ -125,6 +154,86 @@ func TestGoMajorAvailableScriptWalksPastTheFirstMajorItFinds(t *testing.T) {
 		"GO_MAJOR_AVAILABLE=tests/terratest|github.com/example/lib|v1.2.3|github.com/example/lib/v3|v3.0.1")
 	assert.NotContains(t, output, "|github.com/example/lib/v2|",
 		"only the newest major found should be reported")
+}
+
+func TestGoMajorAvailableScriptOffersOnlyFinishedReleases(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		table string
+		want  []string
+	}{
+		{
+			// go-git's /v6 when it was first proposed: nothing finished yet.
+			name:  "a major published only as pre-releases is not offered",
+			table: "github.com/example/lib/v2 v2.0.0-alpha.1 v2.0.0-beta.1\n",
+			want:  []string{},
+		},
+		{
+			name:  "a later pre-release does not displace the final release",
+			table: "github.com/example/lib/v2 v2.0.0 v2.1.0-rc.1\n",
+			want:  []string{libMajorMarker + "github.com/example/lib/v2|v2.0.0"},
+		},
+		{
+			name: "the walk stops below a major that has only pre-releases",
+			table: "github.com/example/lib/v2 v2.0.0 v2.1.0\n" +
+				"github.com/example/lib/v3 v3.0.0-beta.1\n",
+			want: []string{libMajorMarker + "github.com/example/lib/v2|v2.1.0"},
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			table := testCase.table
+
+			// when
+			output, _ := runMajorProbe(t, table)
+
+			// then
+			assert.Equal(t, testCase.want, majorMarkers(output))
+		})
+	}
+}
+
+func TestGoMajorAvailableScriptWalksMoreThanEightMajors(t *testing.T) {
+	t.Parallel()
+
+	// given
+	// go-github's shape: far more than eight majors published above the one
+	// required, every one of them final. Stopping early offers a major that is
+	// itself already behind.
+	table := consecutiveMajorsTable(2, 30)
+
+	// when
+	output, _ := runMajorProbe(t, table)
+
+	// then
+	assert.Equal(t, []string{libMajorMarker + "github.com/example/lib/v30|v30.0.0"},
+		majorMarkers(output))
+}
+
+func TestGoMajorAvailableScriptStillBoundsTheWalk(t *testing.T) {
+	t.Parallel()
+
+	// given
+	// A registry that never stops answering: the walk has to end on its own,
+	// a hundred majors above the one required.
+	table := consecutiveMajorsTable(2, 150)
+
+	// when
+	output, goLog := runMajorProbe(t, table)
+
+	// then
+	assert.Equal(t, []string{libMajorMarker + "github.com/example/lib/v101|v101.0.0"},
+		majorMarkers(output))
+	calls, err := os.ReadFile(goLog)
+	require.NoError(t, err)
+	assert.NotContains(t, string(calls), "github.com/example/lib/v102",
+		"the walk must stop at the cap however long the registry keeps answering")
 }
 
 func TestGoMajorAvailableScriptReportsNothingWhenNoMajorIsPublished(t *testing.T) {

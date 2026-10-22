@@ -54,9 +54,11 @@ var prereleaseShape = regexp.MustCompile(
 // that runs. It exists so the vocabulary above has one readable, directly
 // testable definition, and so TestMavenVersionIgnore can check the Maven
 // regexes against something other than a restatement of themselves. Neither
-// updater consults it: the Go path needs no filter, because `go get -u` already
-// declines pre-releases, and the Java path delegates the decision to Maven
-// through MavenVersionIgnore.
+// updater consults it. The Go path needs no vocabulary: `go get -u` already
+// declines pre-releases, and the one query there that lists them -- the major
+// probe in GoMajorAvailableScript -- reads semver's own marker instead, because
+// a Go module version is always semver. The Java path delegates the decision to
+// Maven through MavenVersionIgnore.
 //
 // The distinction it captures is not semver precedence, which is the bug this
 // file exists for. Semver already ranks `3.0.0-beta3` below `3.0.0` -- but it

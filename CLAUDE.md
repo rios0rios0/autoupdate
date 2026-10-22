@@ -502,8 +502,10 @@ vocabulary -- alpha, beta, milestone, cr, rc, preview, pre, dev, snapshot. Both
 that slice rather than restating it, so neither can drift by being edited alone.
 
 `IsPrereleaseVersion` has **no production caller**, and nothing in the Go path filters
-pre-releases: `go get -u` already declines them, and the Java path delegates the decision to
-Maven. It exists so the vocabulary has one readable, directly testable definition, and so
+pre-releases by this vocabulary: `go get -u` already declines them, and the one Go query that lists
+them — the major probe, `support.GoMajorAvailableScript` — reads semver's own marker instead,
+because a Go module version is always semver. The Java path delegates the decision to Maven. It
+exists so the vocabulary has one readable, directly testable definition, and so
 `TestMavenVersionIgnore` can check the Maven regexes against something other than a
 restatement of themselves. Do not read it as a filter that runs, and do not add a caller on
 the assumption one is missing.
@@ -619,6 +621,17 @@ having a new major waiting. `gopkg.in`-style paths (`gopkg.in/yaml.v3`) encode t
 dot rather than a path element and are skipped outright rather than probed, because the answer
 is known in advance. The probe is read-only: `-versions` is a query and the module is
 deliberately not added to the build list.
+
+**Only finished releases count, and the walk reaches the newest one.** `-versions` lists
+pre-releases too, so reading the last entry offered go-git's `/v6` — published as
+`v6.0.0-beta.1` and nothing else — as a major to migrate to, against the rule that a pre-release
+is never a candidate. The probe reads a version the way semver and `go get -u` do (a `-` after the
+patch number means unfinished, whatever word follows; `+incompatible` is build metadata) and
+reports the newest *finished* release: a major that has since published `v2.1.0-rc.1` is still
+offered at `v2.0.0`, and a major with only pre-releases is a miss that ends the walk. The walk is
+capped at 100 majors. The cap exists to stop a registry that never stops answering, not to decide
+how far behind a dependency may be — at 8 it did the second, and go-github, which publishes more
+than a major a month, was offered at v74 to a repository on v66 while v93 was current.
 
 Each hit is echoed as a `GO_MAJOR_AVAILABLE=<dir>|<path>|<version>|<next path>|<next version>`
 marker. `golang.ParseMajorsAvailable` reads the markers rather than the prose beside them, so
