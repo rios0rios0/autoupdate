@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-git/go-git/v5/plumbing/transport"
+	"github.com/go-git/go-git/v6/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 

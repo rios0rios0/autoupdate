@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-git/go-git/v5/plumbing/transport"
+	"github.com/go-git/go-git/v6/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
