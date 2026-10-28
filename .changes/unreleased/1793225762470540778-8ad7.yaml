@@ -1,0 +1,3 @@
+kind: 'Changed'
+body: 'moved the agent instructions from `CLAUDE.md` to `AGENTS.md`, keeping a `CLAUDE.md` that imports it, and corrected the updater recipe, the gitforge type aliases, the provider registration and the dry-run validation step in `AGENTS.md`, `CONTRIBUTING.md`, `.github/copilot-instructions.md` and the code-review skill'
+time: '2026-10-28T22:16:02.470436799Z'

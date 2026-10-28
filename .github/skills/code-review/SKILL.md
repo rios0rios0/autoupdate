@@ -20,7 +20,7 @@ The canonical engineering standards live in the
 repo-tailored index into that guide plus the rules that only apply here. Precedence, highest
 first:
 
-1. This repository's `.github/copilot-instructions.md`, `CLAUDE.md`, and `CONTRIBUTING.md` —
+1. This repository's `.github/copilot-instructions.md`, `AGENTS.md`, and `CONTRIBUTING.md` —
    they describe *this* codebase and its load-bearing invariants.
 2. The **rios0rios0/guide** wiki — the shared standard.
 3. General language idiom.
@@ -87,12 +87,12 @@ internal/
   support/                     filesystem helpers, remote file checker, changelog writer
 ```
 
-- **A new ecosystem is three steps and nothing else**: a package under `internal/infrastructure/repositories/<ecosystem>/`, an implementation of `UpdaterRepository` (`Name()`, `Detect()`, `CreateUpdatePRs()`), and registration in `internal/infrastructure/repositories/container.go`. An updater that bypasses the interface, or that is never registered, is a Critical finding.
+- **A new ecosystem follows `CONTRIBUTING.md` → Adding a New Updater**: a package under `internal/infrastructure/repositories/<ecosystem>/` implementing `UpdaterRepository` (`Name()`, `Detect()`, `CreateUpdatePRs()`) *and* `LocalUpdater` (`ApplyUpdates()`), registration in `internal/infrastructure/repositories/container.go`, a default entry in `configs/autoupdate.yaml`, and — for local mode — the `Language`-keyed maps in `internal/domain/commands/local_command.go`. An updater that bypasses the interfaces, or that is never registered, is a Critical finding.
 - **Every updater goes through the shared changelog writer** in `internal/support/` (`changelog.go`, `chlog.go`). An updater that writes `CHANGELOG.md` or a fragment itself will drift from the others — reject it.
-- **Provider and ecosystem knowledge belongs upstream.** Git hosting comes from [`gitforge`](https://github.com/rios0rios0/gitforge) (whose `Repository`, `PullRequest`, and `Dependency` are re-exported here as type aliases), language detection from [`langforge`](https://github.com/rios0rios0/langforge), CLI self-update from [`cliforge`](https://github.com/rios0rios0/cliforge). Copying that logic in is a Critical finding.
-- **Version bumps must be conservative.** Check that a proposed upgrade cannot silently cross a major boundary, and that the branch name and PR title are deterministic — this tool force-pushes, so a non-deterministic name leaves orphaned branches behind in every scanned repository.
+- **Provider and ecosystem knowledge belongs upstream.** Git hosting comes from [`gitforge`](https://github.com/rios0rios0/gitforge) (whose `Repository`, `PullRequest`, and `FileChange` are re-exported here as type aliases; `Dependency` and `DependencyChange` are autoupdate's own), language detection from [`langforge`](https://github.com/rios0rios0/langforge), CLI self-update from [`cliforge`](https://github.com/rios0rios0/cliforge). Copying that logic in is a Critical finding.
+- **Version choices go through the shared gates.** A pin moves only forwards (`support.IsNewerVersion` / `support.AcceptsUpgrade`, never `current != latest`). Majors are allowed by default (`allow_major_updates`), so check that a major crossing is decided by `support.AcceptsUpgrade` or the ecosystem's major flag from `UpdateOptions.AllowMajorUpdates` rather than hardcoded either way, and that no pre-release can become a candidate. Branch names and PR titles must stay deterministic: same-day re-runs rely on the `PullRequestExists` check rather than force-pushing, and stale-branch cleanup finds old branches by `aggregate_branch_prefix`.
 - **Registries are abstract factories.** `provider_registry.go` and `updater_registry.go` are maps, not `switch` statements; keep them that way.
-- Command execution funnels through `cmdrunner`; a raw `exec.Command` added elsewhere bypasses the shared timeout and logging and is a finding.
+- Command execution funnels through `cmdrunner` (its `Runner` interface is the test seam), and git through `support.GitCommand`; a raw `exec.Command` added anywhere else bypasses both and is a finding.
 
 ### Commands a reviewer should be able to quote
 
@@ -177,7 +177,7 @@ and YAML blocks inside Markdown.
 
 See [Tests](https://github.com/rios0rios0/guide/wiki/Tests).
 
-- Tests live under `test/domain/` and `test/infrastructure/`, mirroring the layer they exercise, with builders based on [`testkit`](https://github.com/rios0rios0/testkit).
+- Tests sit beside the code they exercise, in external `_test` packages. Shared doubles and builders (based on [`testkit`](https://github.com/rios0rios0/testkit)) live under `test/domain/` and `test/infrastructure/`, mirroring the layer they serve.
 - Keep a stub on the same side of the import boundary as the interface it doubles — a domain stub never references an infrastructure type.
 - `testify/assert` and `testify/require`; `t.Parallel()` at parent and subtest level.
 
@@ -222,7 +222,7 @@ hand.
 - Fragment bodies start with a lowercase verb in simple past tense, capitalise proper nouns
   (GitHub, Go, Docker), and wrap code identifiers and versions in backticks.
 - `README.md` is updated whenever usage, setup, configuration, or architecture changes;
-  `.github/copilot-instructions.md` and `CLAUDE.md` whenever the workflow, commands, or
+  `.github/copilot-instructions.md` and `AGENTS.md` whenever the workflow, commands, or
   structure changes. Documentation and code ship in one commit.
 
 ## Git Flow and pull-request hygiene
@@ -286,7 +286,7 @@ A review that raises noise gets ignored. Do not report these:
 ### Change-control checklist
 - [ ] Changelog entry present for every behavioural change
 - [ ] `README.md` updated if usage, setup, or architecture changed
-- [ ] `.github/copilot-instructions.md` and `CLAUDE.md` updated if the workflow, commands, or structure changed
+- [ ] `.github/copilot-instructions.md` and `AGENTS.md` updated if the workflow, commands, or structure changed
 - [ ] Commit messages follow `type(SCOPE): message` in simple past tense
 - [ ] Breaking changes flagged in the commit footer, the changelog, and the PR description
 
