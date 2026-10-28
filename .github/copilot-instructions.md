@@ -2,14 +2,12 @@
 
 AutoUpdate is a Go CLI tool that automatically discovers repositories across multiple Git providers (GitHub, GitLab, Azure DevOps), scans them for outdated dependencies, and creates Pull Requests with version upgrades. It supports Terraform, Go, Python, JavaScript, Dart/Flutter, Ruby, Java, C#, Dockerfile, and CI/CD Pipeline ecosystems, with an extensible updater plugin interface.
 
-Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.
-
 ## Working Effectively
 
 ### Bootstrap, Build, and Test
 - Install dependencies: `go mod download` -- takes <1 second (after first download)
-- Build the binary: `make build` -- takes ~35 seconds first time, <1 second after. NEVER CANCEL. Set timeout to 60+ minutes.
-- Run tests: `go test ./...` -- takes <1 second (cached), ~10 seconds clean. NEVER CANCEL. Set timeout to 30+ minutes.
+- Build the binary: `make build` -- ~35 seconds the first time (module download and compile), <1 second after
+- Run tests: `go test ./...` -- <1 second cached, ~10 seconds clean
 - Format code: `go fmt ./...`
 - Static analysis: `go vet ./...`
 - Tidy dependencies: `go mod tidy`
@@ -38,7 +36,6 @@ git clone https://github.com/rios0rios0/pipelines.git /tmp/pipelines
 Note: The CI/CD pipeline automatically uses these scripts via the reusable workflow `rios0rios0/pipelines/.github/workflows/go-binary.yaml@main`.
 
 ### Running the Application
-- ALWAYS run the bootstrapping steps first.
 - Run via Makefile: `make run`
 - Run directly: `go run ./cmd/autoupdate`
 - Run built binary: `./bin/autoupdate`
@@ -46,7 +43,7 @@ Note: The CI/CD pipeline automatically uses these scripts via the reusable workf
 - Test run command help: `./bin/autoupdate run --help`
 
 ### Usage Modes
-- **Single repository**: `./bin/autoupdate .` or `./bin/autoupdate [path]` — updates dependencies in a local repository, detects project type, and creates a PR. The `local` subcommand was removed in `1.0.0` and is kept hidden and deprecated so the bare word is not read as a path
+- **Single repository**: `./bin/autoupdate .` or `./bin/autoupdate [path]` — updates dependencies in a local repository, detects project type, and creates a PR. `local` is a hidden, deprecated alias kept so the bare word is not read as a path; do not use it
 - **Batch (run) mode**: `./bin/autoupdate run` — reads config file, discovers repositories from all configured providers and orgs, and creates update PRs
 - **Self-update**: `./bin/autoupdate self-update` — downloads and installs the latest release from GitHub
 - **Version**: `./bin/autoupdate version` — prints the current build version
@@ -57,30 +54,9 @@ Note: The CI/CD pipeline automatically uses these scripts via the reusable workf
 
 ## Validation
 
-### CRITICAL: Manual Validation Requirements
-- ALWAYS test the built binary with `./bin/autoupdate --help` to ensure it works
-- ALWAYS run the tool in dry-run mode to validate functionality: `./bin/autoupdate run --dry-run`
-- ALWAYS exercise the run command help: `./bin/autoupdate run --help`
-
-### Testing Scenarios
-After making changes, ALWAYS run through these validation steps:
-1. `make build` - must complete successfully
-2. `go test ./...` - all tests must pass
-3. `./bin/autoupdate --help` - must show help text with available commands
-4. `./bin/autoupdate run --dry-run` - should process config and discover repos in dry-run mode
-5. `go fmt ./...` and `go vet ./...` - must pass clean
-
-### Pre-commit Validation
-- Always run `go fmt ./...` before committing or CI will fail
-- Always run `go vet ./...` before committing
-- Always run `go test ./...` to ensure no regressions
-- For full linting validation, use the pipeline script: `/tmp/pipelines/global/scripts/GoLang/GoLangCI-Lint/run.sh`
-- CI pipeline uses the rios0rios0/pipelines repository scripts which will fail if code style or quality issues exist
-
-## Build and Test Timing Expectations
-- **Build**: ~35 seconds first time, <1 second subsequent builds. NEVER CANCEL. Set timeout to 60+ minutes.
-- **Tests**: <1 second (cached), ~7 seconds clean run. NEVER CANCEL. Set timeout to 30+ minutes.
-- **Go mod operations**: <1 second after first download. Set timeout to 15+ minutes.
+- Before committing, `make build`, `go fmt ./...`, `go vet ./...` and `go test ./...` must pass; CI also runs the pipelines lint (see above) and fails on style or quality issues.
+- `./bin/autoupdate --help` and `./bin/autoupdate run --help` are quick smoke tests of the binary.
+- `./bin/autoupdate run --dry-run` needs an operator config that lists `providers` (start from `configs/autoupdate.example.yaml`; the built-in defaults carry none, and `ValidateSettings` refuses a batch run without one). It queries those providers' real organizations with the configured tokens, so run it only when that is what you intend.
 
 ## Architecture
 
@@ -102,16 +78,20 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 
 ### Key External Libraries
 
-- **gitforge** (`rios0rios0/gitforge`): Abstraction over GitHub/GitLab/Azure DevOps APIs. Domain entities (`Repository`, `PullRequest`, `Dependency`) are re-exported as type aliases from gitforge.
+- **gitforge** (`rios0rios0/gitforge`): Abstraction over GitHub/GitLab/Azure DevOps APIs. Domain entities (`Repository`, `PullRequest`, `FileChange`) are re-exported as type aliases from gitforge; `Dependency` and `DependencyChange` are autoupdate's own.
 - **langforge** (`rios0rios0/langforge`): Language/ecosystem detection and shared version fetchers.
 - **cliforge** (`rios0rios0/cliforge`): Shared CLI utilities including the self-update mechanism.
 - **testkit** (`rios0rios0/testkit`): Base builder pattern for test data construction.
 
 ### Adding a New Updater
 
+Follow `CONTRIBUTING.md` → "Adding a New Updater". In short:
+
 1. Create a new package under `internal/infrastructure/repositories/<ecosystem>/`
-2. Implement `UpdaterRepository` interface (`Name()`, `Detect()`, `CreateUpdatePRs()`)
+2. Implement `UpdaterRepository` (`Name()`, `Detect()`, `CreateUpdatePRs()`) and `LocalUpdater` (`ApplyUpdates()`), so `autoupdate run` uses the clone-once batch pipeline rather than the legacy `CreateUpdatePRs` clone
 3. Register in `internal/infrastructure/repositories/container.go`
+4. Add its default entry to `configs/autoupdate.yaml`
+5. For local mode, add it to the `Language`-keyed maps in `internal/domain/commands/local_command.go`
 
 ### Shared Updater Scaffolding
 

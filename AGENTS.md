@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents (Claude Code, Codex, Cursor, GitHub Copilot) when working with code in this repository.
 
 ## What This Project Does
 
@@ -26,9 +26,12 @@ go vet ./...                  # Static analysis
 go mod tidy                   # Clean up dependencies
 ```
 
-Unit tests carry **no build tag**. `//go:build unit` only hid them from plain
-`go test ./...` and from IDE runs while buying nothing, because an untagged file compiles
-under a `-tags` build too — the shared pipeline still runs every one of them. Reserve
+`make lint`, `make test` and `make sast` come from the shared
+[rios0rios0/pipelines](https://github.com/rios0rios0/pipelines) makefiles, which the `Makefile`
+`-include`s from `SCRIPTS_DIR` (default `~/Development/github.com/rios0rios0/pipelines`). Without
+that checkout the targets do not exist; pass `SCRIPTS_DIR=<path>` to point at another one.
+
+Unit tests carry **no build tag**, so plain `go test ./...` runs them. Reserve
 `//go:build integration` for tests that need real infrastructure; this repository has none
 today.
 
@@ -63,8 +66,15 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 ### Adding a New Updater
 
 1. Create a new package under `internal/infrastructure/repositories/<ecosystem>/`
-2. Implement `UpdaterRepository` interface (`Name()`, `Detect()`, `CreateUpdatePRs()`)
+2. Implement `UpdaterRepository` (`Name()`, `Detect()`, `CreateUpdatePRs()`) and `LocalUpdater`
+   (`ApplyUpdates()`); without `LocalUpdater`, `autoupdate run` falls back to the legacy
+   per-updater `CreateUpdatePRs` clone instead of the clone-once batch pipeline
 3. Register in `internal/infrastructure/repositories/container.go`
+4. Add the ecosystem's default entry (`enabled`, `auto_complete`) to `configs/autoupdate.yaml`,
+   the built-in defaults layer
+5. For local mode (`autoupdate .`), add it to the maps keyed by langforge `Language` in
+   `internal/domain/commands/local_command.go` (`updaterNameForLanguage`, `localUpgradeHandlers`,
+   `prContentGenerators`)
 
 ### Shared Updater Scaffolding
 
