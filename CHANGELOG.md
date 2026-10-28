@@ -22,6 +22,20 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-10-28
+
+### Changed
+
+- changed the Go modules `github.com/rios0rios0/cliforge` from `v0.5.1` to `v0.5.2`, `github.com/rios0rios0/langforge` from `v1.1.9` to `v1.1.10` and `github.com/rios0rios0/testkit` from `v0.3.6` to `v0.3.7`
+
+### Fixed
+
+- fixed the Go major probe proposing majors published only as pre-releases (go-git `v6.0.0-beta.1` was offered as a migration) and stopping eight majors short of the newest release (go-github `v74` was offered while `v93` was current): it now reports the newest finished release and walks up to 100 majors
+
+### Removed
+
+- removed the unused `BatchGitContext.StashChanges`, `PopStash` and `DropStash` and their tests: nothing has called them since batch mode began creating its aggregate branch on a fresh clone before any updater runs, and the reason they existed, carrying uncommitted changes across gitforge's forced branch switch, went away when gitforge `4.3` stopped forcing it
+
 ## [1.3.0] - 2026-10-21
 
 ### Added
