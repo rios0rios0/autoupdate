@@ -3,9 +3,9 @@ package gitlocal
 import (
 	"fmt"
 
-	"github.com/go-git/go-git/v5"
-	gitconfig "github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing/transport"
+	"github.com/go-git/go-git/v6"
+	gitconfig "github.com/go-git/go-git/v6/config"
+	"github.com/go-git/go-git/v6/plumbing/transport"
 	logger "github.com/sirupsen/logrus"
 
 	gitops "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
