@@ -681,8 +681,11 @@ the main module's own statements — means the repository deliberately does not 
 module. A change set containing a deletion or a rename is refused, because the provider commit
 APIs express only added and edited files; re-vendoring replaces a tree wholesale, so this happens
 for real. A repository with no module requiring or importing the dependency has nothing to
-migrate. And a provider answering "already exists" marks the row prepared without claiming this
-run built it.
+migrate. And a provider refusing the branch because it is already there marks the row prepared
+without claiming this run built it. GitHub and GitLab say so in as many words; Azure DevOps does
+not, because gitforge creates the branch there with a push expecting the ref not to exist yet, and
+it refuses that push with `TF401028` — the ref "has already been updated by another client" — so
+`migrationBranchExists` matches the code rather than a sentence.
 
 The branch is created through the provider's commit API rather than pushed with go-git: those
 commits are signed by the host, and the rulesets these repositories run under require a verified

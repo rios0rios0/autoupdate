@@ -1051,14 +1051,21 @@ func migrationSlug(modulePath string) string {
 }
 
 // migrationBranchExists reports whether the provider refused to create the
-// branch because it is already there. The wording differs per provider -- a
-// GitLab branch conflicts, a GitHub ref already exists, an Azure DevOps ref
-// does -- so what they have in common is what is matched.
+// branch because it is already there. The wording differs per provider: GitHub
+// answers that the reference already exists and GitLab that the branch does.
+//
+// Azure DevOps says neither. gitforge creates the branch there with a push that
+// expects the ref not to exist yet, and Azure DevOps refuses a push whose ref
+// has moved with TF401028, that the reference "has already been updated by
+// another client". On this call that can only mean the branch is there, so it
+// is matched by its code, which stays the same whatever language the sentence
+// after it is written in.
 func migrationBranchExists(err error) bool {
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "already exist") ||
 		strings.Contains(message, "already exists") ||
-		strings.Contains(message, "reference update failed")
+		strings.Contains(message, "reference update failed") ||
+		strings.Contains(message, "tf401028")
 }
 
 // migrationCommitMessage is the commit the migration is proposed with, which is

@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed the Go major-migration notice on Azure DevOps reporting every branch an earlier run had already prepared as a failed push (`TF401028`, HTTP 409) instead of linking it: Azure DevOps refuses the push that would recreate an existing branch rather than saying the branch exists, so the refusal went unrecognised and the "Create pull request" column was dropped from the table'
+time: '2026-10-29T17:12:53.993099764Z'
