@@ -199,27 +199,71 @@ func TestMigrationsForRunReportsWhatItCouldNotDo(t *testing.T) {
 	t.Run("should report a branch that is already there without claiming to have built it", func(t *testing.T) {
 		t.Parallel()
 
-		// given: the provider refuses a branch that exists, which is what a
-		// second run of the day runs into.
-		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
-		provider := &repositorydoubles.SpyProviderRepository{
-			ProviderName:    "github",
-			CreateBranchErr: errors.New("reference already exists"),
+		// Each refusal is worded the way the provider's client reports it once
+		// gitforge has wrapped it, because the wording is all there is to go
+		// on: a stand-in sentence is how Azure DevOps' went unrecognised.
+		cases := map[string]struct {
+			providerName string
+			repo         entities.Repository
+			refusal      string
+			expectedURL  string
+		}{
+			"GitHub answers that the reference already exists": {
+				providerName: "github",
+				repo:         entities.Repository{Organization: "example", Name: "app"},
+				refusal: "failed to create branch: POST https://api.github.com/repos/example/app/git/refs: " +
+					"422 Reference already exists []",
+				expectedURL: "https://github.com/example/app/compare/main...chore/migrate-example-lib-v3?expand=1",
+			},
+			"GitLab answers that the branch already exists": {
+				providerName: "gitlab",
+				repo:         entities.Repository{Organization: "example", Name: "app"},
+				refusal: "failed to create branch: POST https://gitlab.com/api/v4/projects/example%2Fapp/" +
+					"repository/branches: 400 {message: Branch already exists}",
+				expectedURL: "https://gitlab.com/example/app/-/merge_requests/new?" +
+					"merge_request%5Bsource_branch%5D=chore%2Fmigrate-example-lib-v3&" +
+					"merge_request%5Btarget_branch%5D=main",
+			},
+			"Azure DevOps refuses the push that would create the branch": {
+				providerName: "azuredevops",
+				repo:         entities.Repository{Organization: "example", Project: "platform", Name: "app"},
+				refusal: `failed to push changes: API error (status 409): {"$id":"1","innerException":null,` +
+					`"message":"TF401028: The reference 'refs/heads/chore/migrate-example-lib-v3' has ` +
+					`already been updated by another client, so you cannot update it. Please try again."}`,
+				expectedURL: "https://dev.azure.com/example/platform/_git/app/pullrequestcreate?" +
+					"sourceRef=refs%2Fheads%2Fchore%2Fmigrate-example-lib-v3&targetRef=refs%2Fheads%2Fmain",
+			},
 		}
 
-		// when
-		migrations := golang.MigrationsForRun(context.Background(), golang.MigrationParams{
-			RepoDir: repoDir, BaseBranch: "main", ProviderName: "github",
-			Provider: provider, Repo: entities.Repository{Organization: "example", Name: "app"},
-			GoBinary: "go", Majors: []golang.MajorAvailable{libMigration()},
-			Runner: &stubGoRunner{},
-		}, true)
+		for name, testCase := range cases {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		// then
-		require.Len(t, migrations, 1)
-		assert.True(t, migrations[0].Prepared, "the migration exists; this run just did not make it")
-		assert.False(t, migrations[0].Compiles, "and saying it compiles would claim a build nobody ran")
-		assert.Contains(t, migrations[0].Note, "the branch already existed")
+				// given: the provider refuses a branch that exists, which is
+				// what every run after the one that pushed it runs into.
+				repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+				provider := &repositorydoubles.SpyProviderRepository{
+					ProviderName:    testCase.providerName,
+					CreateBranchErr: errors.New(testCase.refusal),
+				}
+
+				// when
+				migrations := golang.MigrationsForRun(context.Background(), golang.MigrationParams{
+					RepoDir: repoDir, BaseBranch: "main", ProviderName: testCase.providerName,
+					Provider: provider, Repo: testCase.repo,
+					GoBinary: "go", Majors: []golang.MajorAvailable{libMigration()},
+					Runner: &stubGoRunner{},
+				}, true)
+
+				// then
+				require.Len(t, migrations, 1)
+				assert.True(t, migrations[0].Prepared, "the migration exists; this run just did not make it")
+				assert.False(t, migrations[0].Compiles, "and saying it compiles would claim a build nobody ran")
+				assert.Contains(t, migrations[0].Note, "the branch already existed")
+				assert.Equal(t, testCase.expectedURL, migrations[0].URL,
+					"the reader is still handed the link that opens the pull request")
+			})
+		}
 	})
 
 	t.Run("should report a migration that does not build", func(t *testing.T) {
