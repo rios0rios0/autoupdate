@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed the Go major migration giving up without a branch when the new major moved or dropped a package the code imports (go-git `v6` moved `plumbing/protocol/packp/capability`): `go mod tidy` and `go mod vendor` now run again with `-e` when those packages are the only errors they report, and the branch is kept as not building yet, naming them'
-time: '2026-11-02T18:23:31.797004865Z'

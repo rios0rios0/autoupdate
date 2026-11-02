@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed a Go major migration in a repository that vendors being refused when another dependency still vendored an older major of the same module: migrating `github.com/cenkalti/backoff/v4` to `v5` while something else still vendors `github.com/cenkalti/backoff` read every deleted `v4` file as belonging to `v1`; each deleted vendored file is now attributed to the longest module path that owns it, before or after re-vendoring, and a refusal names that module'
-time: '2026-11-02T19:59:46.613611361Z'

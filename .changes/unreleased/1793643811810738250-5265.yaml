@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed the Go major migration notes quoting a go command progress line (`go: downloading …`, `go: finding module for package …`) or a `# <package>` build header instead of the error that stopped the migration, and raised their limit from 160 to 300 characters so the package paths in that error fit'
-time: '2026-11-02T18:23:31.810685782Z'

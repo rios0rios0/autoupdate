@@ -1,3 +1,0 @@
-kind: 'Security'
-body: 'redacted the provider token from the Go major-migration notes on every path before they are written into the migration branch''s commit message, where it had only been done for repositories that vendor, so a toolchain error echoing the credential URL can never reach a pushed commit'
-time: '2026-11-02T19:59:46.626904652Z'
