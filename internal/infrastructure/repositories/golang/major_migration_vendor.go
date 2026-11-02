@@ -1,6 +1,7 @@
 package golang
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -8,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/rios0rios0/autoupdate/internal/support"
 )
 
 const (
@@ -33,12 +36,18 @@ type vendorDir struct {
 	// modules are the module paths the manifest lists, each one vendored in
 	// the directory of that name under prefix.
 	modules []string
+	// previous are the module paths the manifest listed before the migration
+	// re-vendored it -- the base's, read at HEAD -- which is where the files
+	// re-vendoring deleted came from.
+	previous []string
 }
 
 // vendoredModules reads the vendor directory of every module in the worktree
-// that has a readable manifest. One without a manifest is left out, so nothing
-// in it is ever taken for a file the build does not read.
-func vendoredModules(worktree string) []vendorDir {
+// that has a readable manifest, as it is now and as the base had it. One
+// without a manifest now is left out, so nothing in it is ever taken for a file
+// the build does not read; one the base had no manifest for has no previous
+// modules, which only ever makes the ownership of a file look more vendored.
+func vendoredModules(ctx context.Context, worktree string) []vendorDir {
 	var dirs []vendorDir
 	for _, moduleDir := range discoverLocalModuleDirs(worktree) {
 		prefix := path.Join(moduleDir, vendorDirName) + "/"
@@ -47,7 +56,17 @@ func vendoredModules(worktree string) []vendorDir {
 		if err != nil {
 			continue
 		}
-		dirs = append(dirs, vendorDir{prefix: prefix, modules: vendorManifestModules(string(manifest))})
+
+		var previous []string
+		if before, headErr := support.HeadFileContent(ctx, worktree, prefix+vendorManifestName); headErr == nil {
+			previous = vendorManifestModules(string(before))
+		}
+
+		dirs = append(dirs, vendorDir{
+			prefix:   prefix,
+			modules:  vendorManifestModules(string(manifest)),
+			previous: previous,
+		})
 	}
 
 	return dirs
@@ -90,6 +109,13 @@ func vendorManifestModules(manifest string) []string {
 // package: when the newer version merged it into another one, every
 // declaration in it is redeclared. That deletion is refused, as is every one
 // outside a module's vendor directory.
+//
+// Which module a file belongs to is the longest module path it lies under,
+// across the manifest before the migration and after it. Any listed path
+// that is a prefix is not enough: v1 of a module sits at the root of the tree
+// every later major's suffixed path lies inside, so migrating `/v4` to `/v5`
+// while something else still vendors v1 read every deleted `/v4` file as v1's,
+// and refused a migration whose deletions were all inert.
 func deletionRefusal(name string, vendored []vendorDir) string {
 	// The module discovery skips anything below a vendor directory, so no
 	// module's vendor directory lies inside another's, and at most one prefix
@@ -99,17 +125,32 @@ func deletionRefusal(name string, vendored []vendorDir) string {
 		if !found {
 			continue
 		}
-		if slices.ContainsFunc(dir.modules, func(module string) bool {
-			return strings.HasPrefix(rel, module+"/")
-		}) {
+		if owner := owningVendoredModule(rel, dir.modules, dir.previous); slices.Contains(dir.modules, owner) {
 			return fmt.Sprintf(
-				"`%s` is deleted from a module that is still vendored, which the provider API cannot push", name,
+				"`%s` is deleted from `%s`, which is still vendored, and the provider API cannot push the deletion",
+				name, owner,
 			)
 		}
 		return ""
 	}
 
 	return deletedOrRenamedRefusal(name)
+}
+
+// owningVendoredModule returns the module a vendored file belongs to: the
+// longest of the given module paths that the file's path, relative to the
+// vendor directory, lies under. It is empty when none does.
+func owningVendoredModule(rel string, manifests ...[]string) string {
+	owner := ""
+	for _, modules := range manifests {
+		for _, module := range modules {
+			if len(module) > len(owner) && strings.HasPrefix(rel, module+"/") {
+				owner = module
+			}
+		}
+	}
+
+	return owner
 }
 
 // leftInPlaceNote tells the reader what the branch keeps that a clean re-vendor

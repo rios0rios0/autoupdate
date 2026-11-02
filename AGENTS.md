@@ -739,6 +739,21 @@ a file between the two, and left in place it is compiled with the rest of its pa
 newer version merged it into another file, every declaration in it is redeclared. A vendor
 directory without a readable manifest leaves nothing in place either.
 
+Which module a deleted file belongs to is the **longest** module path it lies under, across the
+manifest before the migration (the base's, read at `HEAD`) and after it (`owningVendoredModule`).
+Any listed path that is a prefix is not enough, because v1 of a module sits at the root of the tree
+every later major's suffixed path lies inside: migrating `github.com/cenkalti/backoff/v4` to `/v5`
+while another dependency still vendors `github.com/cenkalti/backoff` read every deleted `/v4` file
+as v1's, refused a migration whose deletions were all inert, and blamed v1 for it. The refusal now
+names the module it attributes the file to.
+
+The note goes into the commit message the branch is pushed with, and the token sits in the git
+configuration the go commands ran with, as a credential URL a toolchain error can echo. So
+`prepareOneMigration` redacts the note with the real token on every path, before the commit
+message is built from it and before `withStandingNote` can cut it; `migrationCommitMessage` itself
+has no token to redact with. The runner already scrubs the token from every command's output, so
+this is the guarantee at the boundary rather than the only one.
+
 A package the new major moved or dropped is the one failure tidy and vendor may carry on past
 (`runAllowingMissing`). go-git v6 moved `plumbing/protocol/packp/capability` to
 `plumbing/protocol/capability`, and gitforge's migration stopped on it with no branch at all, which
