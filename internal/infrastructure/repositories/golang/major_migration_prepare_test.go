@@ -64,6 +64,27 @@ func libMigration() golang.MajorAvailable {
 	}
 }
 
+// movedPackageTidyOutput is what `go mod tidy` prints when an import was
+// rewritten onto the new major but the new major moved the package away --
+// go-git's `plumbing/protocol/packp/capability` in v6, as the real toolchain
+// reports it.
+const movedPackageTidyOutput = "go: finding module for package github.com/example/lib/v3/pkg\n" +
+	"go: example.com/app imports\n" +
+	"\tgithub.com/example/lib/v3/pkg: module github.com/example/lib/v3@latest found (v3.0.1), " +
+	"but does not contain package github.com/example/lib/v3/pkg\n"
+
+// movedPackageVendorOutput is what `go mod vendor` prints for the same package
+// once tidy has carried on past it.
+const movedPackageVendorOutput = "go: example.com/app imports\n" +
+	"\tgithub.com/example/lib/v3/pkg: no required module provides package " +
+	"github.com/example/lib/v3/pkg; to add it:\n" +
+	"\tgo get github.com/example/lib/v3/pkg\n"
+
+// unreachableRegistryOutput is a failure that has nothing to do with the
+// migration: the registry did not answer.
+const unreachableRegistryOutput = "go: github.com/example/other@v1.0.0: Get \"https://proxy.golang.org/" +
+	"github.com/example/other/@v/v1.0.0.mod\": dial tcp: lookup proxy.golang.org: no such host\n"
+
 // migrationCheckoutFixture is the tree every flow test starts from.
 func migrationCheckoutFixture() map[string]string {
 	return map[string]string{
@@ -80,6 +101,10 @@ type stubGoRunner struct {
 	calls  []stubGoCall
 	failOn string
 	output string
+	// answers scripts the toolchain per command line ("mod tidy -e"), for the
+	// flows where one command fails and the next one does not. A command line
+	// it does not name falls through to failOn.
+	answers map[string]stubGoAnswer
 }
 
 // stubGoCall is one command the preparation ran.
@@ -89,10 +114,26 @@ type stubGoCall struct {
 	dir  string
 }
 
+// stubGoAnswer is what the stub toolchain prints for one command line, and
+// whether the command fails. `-e` exits zero while printing the errors it
+// carried on past, which is why a success can carry output too.
+type stubGoAnswer struct {
+	output string
+	fails  bool
+}
+
 func (r *stubGoRunner) Run(
 	_ context.Context, name string, args []string, opts cmdrunner.RunOptions,
 ) (*cmdrunner.RunResult, error) {
 	r.calls = append(r.calls, stubGoCall{name: name, args: args, dir: opts.Dir})
+
+	if answer, scripted := r.answers[strings.Join(args, " ")]; scripted {
+		if answer.fails {
+			return &cmdrunner.RunResult{Output: answer.output, ExitCode: 1},
+				fmt.Errorf("command %s exited with code 1", name)
+		}
+		return &cmdrunner.RunResult{Output: answer.output}, nil
+	}
 
 	if r.failOn != "" && slices.Contains(args, r.failOn) {
 		return &cmdrunner.RunResult{Output: r.output, ExitCode: 1},
@@ -295,6 +336,33 @@ func TestMigrationsForRunReportsWhatItCouldNotDo(t *testing.T) {
 		assert.Contains(t, provider.BranchInputs[0].CommitMessage, "It does not build yet.")
 	})
 
+	t.Run("should name why go get failed rather than what it downloaded", func(t *testing.T) {
+		t.Parallel()
+
+		// given: the download line comes first, and it was all the note said.
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"get github.com/example/lib/v3@v3.0.1": {
+				output: "go: downloading github.com/example/lib/v3 v3.0.1\n" +
+					"go: github.com/example/lib/v3@v3.0.1: parsing go.mod:\n" +
+					"\tmodule declares its path as: example.land/lib/v3\n" +
+					"\t        but was required as: github.com/example/lib/v3\n",
+				fails: true,
+			},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "go get github.com/example/lib/v3@v3.0.1 failed")
+		assert.Contains(t, migrations[0].Note, "module declares its path as: example.land/lib/v3")
+		assert.NotContains(t, migrations[0].Note, "downloading")
+	})
+
 	t.Run("should decline a module the repository redirects elsewhere", func(t *testing.T) {
 		t.Parallel()
 
@@ -440,6 +508,155 @@ func TestMigrationsForRunReportsWhatItCouldNotDo(t *testing.T) {
 		require.Len(t, migrations, 1)
 		assert.False(t, migrations[0].Prepared)
 	})
+}
+
+func TestMigrationsForRunCarriesOnPastPackagesTheNewMajorDropped(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should keep the branch when the new major no longer has a package the code imports", func(t *testing.T) {
+		t.Parallel()
+
+		// given: tidy cannot resolve an import the rewrite produced, because
+		// the new major moved the package it names.
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"mod tidy":    {output: movedPackageTidyOutput, fails: true},
+			"mod tidy -e": {output: movedPackageTidyOutput},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.True(t, migrations[0].Prepared, "a branch that does not build yet beats no branch at all")
+		assert.False(t, migrations[0].Compiles)
+		assert.Equal(t, "it does not build yet: `github.com/example/lib/v3` has no package `pkg`",
+			migrations[0].Note)
+		assert.Equal(t, []string{
+			"get github.com/example/lib/v3@v3.0.1",
+			"mod tidy",
+			"mod tidy -e",
+		}, runner.commands(), "vet has nothing to add about a package known to be missing")
+		require.Len(t, provider.BranchInputs, 1)
+		assert.Contains(t, provider.BranchInputs[0].CommitMessage, "It does not build yet.")
+		assert.Contains(t, provider.BranchInputs[0].CommitMessage, "has no package `pkg`")
+	})
+
+	t.Run("should vendor past the same packages", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		files := migrationCheckoutFixture()
+		files["vendor/modules.txt"] = "# github.com/example/lib v1.2.3\n"
+		repoDir := newMigrationCheckout(t, files)
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"mod tidy":      {output: movedPackageTidyOutput, fails: true},
+			"mod tidy -e":   {output: movedPackageTidyOutput},
+			"mod vendor":    {output: movedPackageVendorOutput, fails: true},
+			"mod vendor -e": {output: movedPackageVendorOutput},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.True(t, migrations[0].Prepared)
+		assert.False(t, migrations[0].Compiles)
+		assert.Equal(t, []string{
+			"get github.com/example/lib/v3@v3.0.1",
+			"mod tidy",
+			"mod tidy -e",
+			"mod vendor",
+			"mod vendor -e",
+		}, runner.commands())
+	})
+
+	t.Run("should not carry on past anything else", func(t *testing.T) {
+		t.Parallel()
+
+		// given: the moved package, and a registry that did not answer. A
+		// branch is never rebuilt once it exists, so `-e` here would keep the
+		// half-resolved graph for good.
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"mod tidy": {output: movedPackageTidyOutput + unreachableRegistryOutput, fails: true},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "no such host", "the note names what actually stopped it")
+		assert.NotContains(t, runner.commands(), "mod tidy -e")
+		assert.Empty(t, provider.BranchInputs)
+	})
+
+	t.Run("should not carry on past a package outside the new major", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"mod tidy": {
+				output: strings.ReplaceAll(
+					movedPackageTidyOutput, "github.com/example/lib/v3", "github.com/example/other/v2",
+				),
+				fails: true,
+			},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "github.com/example/other/v2/pkg")
+		assert.NotContains(t, runner.commands(), "mod tidy -e")
+	})
+
+	t.Run("should give up when the second run reports anything else", func(t *testing.T) {
+		t.Parallel()
+
+		// given: `-e` exits zero whatever it carried on past, so its output is
+		// the only place a new failure shows.
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"mod tidy":    {output: movedPackageTidyOutput, fails: true},
+			"mod tidy -e": {output: movedPackageTidyOutput + unreachableRegistryOutput},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "go mod tidy -e failed")
+		assert.Contains(t, migrations[0].Note, "no such host")
+		assert.Empty(t, provider.BranchInputs)
+	})
+}
+
+// libMigrationParams is the run a flow test makes for the fixture's finding,
+// against a repository on GitHub.
+func libMigrationParams(
+	repoDir string, provider *repositorydoubles.SpyProviderRepository, runner *stubGoRunner,
+) golang.MigrationParams {
+	return golang.MigrationParams{
+		RepoDir: repoDir, BaseBranch: "main", ProviderName: "github",
+		Provider: provider, Repo: entities.Repository{Organization: "example", Name: "app"},
+		GoBinary: "go", Majors: []golang.MajorAvailable{libMigration()}, Runner: runner,
+	}
 }
 
 func TestPrepareLocalMigrations(t *testing.T) {

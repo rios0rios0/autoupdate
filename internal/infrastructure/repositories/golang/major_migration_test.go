@@ -429,7 +429,7 @@ func TestMigrationNote(t *testing.T) {
 		assert.Contains(t, note, "[REDACTED]")
 	})
 
-	t.Run("should cut a message longer than a table cell", func(t *testing.T) {
+	t.Run("should cut a message too long for the description", func(t *testing.T) {
 		t.Parallel()
 
 		// given: a message long enough to be cut, with a rune on the boundary.
@@ -439,10 +439,142 @@ func TestMigrationNote(t *testing.T) {
 		note := golang.MigrationNote(message, "")
 
 		// then
-		assert.LessOrEqual(t, len(note), 163, "the limit plus the ellipsis")
+		assert.LessOrEqual(t, len(note), 303, "the limit plus the ellipsis")
 		assert.True(t, strings.HasSuffix(note, "..."), "the cut is marked")
 		assert.Equal(t, strings.ToValidUTF8(note, ""), note, "the cut is on a rune boundary")
 	})
+
+	t.Run("should keep the package paths a go error names", func(t *testing.T) {
+		t.Parallel()
+
+		// given: the error that stopped gitforge's migration to go-git v6,
+		// whose reason comes after two long package paths.
+		message := "go mod tidy failed: example.com/repro imports " +
+			"github.com/go-git/go-git/v6/plumbing/protocol/packp/capability: " +
+			"module github.com/go-git/go-git/v6@latest found (v6.0.0-beta.1), but does not contain package " +
+			"github.com/go-git/go-git/v6/plumbing/protocol/packp/capability"
+
+		// when
+		note := golang.MigrationNote(message, "")
+
+		// then
+		assert.Contains(t, note, "but does not contain package", "the cut must not fall before the reason")
+	})
+}
+
+func TestMigrationDetail(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{
+			// What aisync's notes read: the download, not why `go get` failed.
+			name: "should skip what the go command says it is doing",
+			output: "go: downloading github.com/example/lib/v3 v3.0.1\n" +
+				"go: github.com/example/lib/v3@v3.0.1: reading https://proxy.golang.org/github.com/example/lib/" +
+				"v3/@v/v3.0.1.mod: 404 Not Found\n",
+			want: "github.com/example/lib/v3@v3.0.1: reading https://proxy.golang.org/github.com/example/lib/" +
+				"v3/@v/v3.0.1.mod: 404 Not Found",
+		},
+		{
+			// What gitforge's note read: "go: finding module for package ...".
+			name: "should join an error the go command wrapped over several lines",
+			output: "go: finding module for package github.com/example/lib/v3/pkg\n" +
+				"go: example.com/app imports\n" +
+				"\tgithub.com/example/lib/v3/pkg: module github.com/example/lib/v3@latest found (v3.0.1), " +
+				"but does not contain package github.com/example/lib/v3/pkg\n",
+			want: "example.com/app imports github.com/example/lib/v3/pkg: module github.com/example/lib/v3@latest " +
+				"found (v3.0.1), but does not contain package github.com/example/lib/v3/pkg",
+		},
+		{
+			// What autoupdate's own migration note read: the package header.
+			name: "should skip the package header a build prints above its diagnostics",
+			output: "# example.com/app/internal/push\n" +
+				"internal/push/push.go:12:3: undefined: lib.Push\n",
+			want: "internal/push/push.go:12:3: undefined: lib.Push",
+		},
+		{
+			name: "should keep the lines that say why a module was refused",
+			output: "go: downloading github.com/example/lib/v3 v3.0.1\n" +
+				"go: github.com/example/lib/v3@v3.0.1: parsing go.mod:\n" +
+				"\tmodule declares its path as: example.land/lib/v3\n" +
+				"\t        but was required as: github.com/example/lib/v3\n",
+			want: "github.com/example/lib/v3@v3.0.1: parsing go.mod: module declares its path as: " +
+				"example.land/lib/v3 but was required as: github.com/example/lib/v3",
+		},
+		{
+			name:   "should report nothing when the output holds no error",
+			output: "go: downloading github.com/example/lib/v3 v3.0.1\n\n",
+			want:   "",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			output := testCase.output
+
+			// when
+			detail := golang.MigrationDetail(output)
+
+			// then
+			assert.Equal(t, testCase.want, detail)
+		})
+	}
+}
+
+func TestMissingPackagesNote(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		missing []string
+		want    string
+	}{
+		{
+			name:    "should name the one package the new major does not have",
+			missing: []string{"github.com/example/lib/v3/pkg"},
+			want:    "it does not build yet: `github.com/example/lib/v3` has no package `pkg`",
+		},
+		{
+			name:    "should name both of two",
+			missing: []string{"github.com/example/lib/v3/a", "github.com/example/lib/v3/b"},
+			want:    "it does not build yet: `github.com/example/lib/v3` has no packages `a` and `b`",
+		},
+		{
+			name: "should name two and count the rest",
+			missing: []string{
+				"github.com/example/lib/v3/a", "github.com/example/lib/v3/b",
+				"github.com/example/lib/v3/c", "github.com/example/lib/v3/d",
+			},
+			want: "it does not build yet: `github.com/example/lib/v3` has no packages `a`, `b` and 2 more",
+		},
+		{
+			name:    "should spell out the module's own package in full",
+			missing: []string{"github.com/example/lib/v3"},
+			want:    "it does not build yet: `github.com/example/lib/v3` has no package `github.com/example/lib/v3`",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			missing := testCase.missing
+
+			// when
+			note := golang.MissingPackagesNote("github.com/example/lib/v3", missing)
+
+			// then
+			assert.Equal(t, testCase.want, note)
+		})
+	}
 }
 
 func TestMigrationCommitMessage(t *testing.T) {

@@ -643,6 +643,26 @@ capped at 100 majors. The cap exists to stop a registry that never stops answeri
 how far behind a dependency may be — at 8 it did the second, and go-github, which publishes more
 than a major a month, was offered at v74 to a repository on v66 while v93 was current.
 
+**A major is offered at the path its own `go.mod` declares.** A registry lists a repository's tags
+under every path that leads to it, including one the module no longer answers to: charmbracelet
+tags v2 in the same GitHub repositories as v1, so `github.com/charmbracelet/bubbletea/v2` lists
+`v2.1.1`, but its `go.mod` declares `charm.land/bubbletea/v2` and `go get` refuses the GitHub path
+(`module declares its path as … but was required as …`). Reporting the listed path offered aisync
+four migrations that could only fail. So every hit is also asked `go list -m -f '{{.GoMod}}'
+<path>@<version>` — which fetches the `go.mod` into the module cache without judging it — and its
+`module` line is read (`autoupdate_go_declared_path`). A different path on the same major moves the
+probe there: that path is asked for its own newest finished release, and the walk carries on from
+it, because the next major is published where this one moved to. A declared path on another major
+(a v2 tag whose `go.mod` forgot the `/v2`) is a miss, since nothing can require it as that major,
+and a `go.mod` that cannot be read keeps the probed path, so a registry hiccup never hides a notice
+the probe would have given before. A move counts as a probe, so the cap bounds it too.
+
+**Both queries pass `-mod=readonly`.** In a module that vendors its dependencies the go command
+defaults to `-mod=vendor`, where it refuses to list versions or fetch a `go.mod` at all ("can't
+determine available versions using the vendor directory"). With stderr discarded, the probe read
+that as "nothing newer", so a vendored module never got a notice. Read-only is already the default
+everywhere else, so nothing changes for the other modules.
+
 Each hit is echoed as a `GO_MAJOR_AVAILABLE=<dir>|<path>|<version>|<next path>|<next version>`
 marker. `golang.ParseMajorsAvailable` reads the markers rather than the prose beside them, so
 either wording can change without breaking the other; it de-duplicates across modules and sorts,
@@ -669,10 +689,32 @@ imports alone, so nothing else in the file can move and a file that does not par
 imports rather than being damaged. Every module that requires the dependency or had a file
 rewritten then runs `go get <new>@<version>`, `go mod tidy` and — where the repository vendors —
 `go mod vendor`; `go vet ./...` decides whether the result builds, and a module that does not is
-*kept*, reported as `it does not build yet` with the first compiler line, which is the state a
+*kept*, reported as `it does not build yet` with the first compiler error, which is the state a
 migration branch is expected to be in. The go commands reach private modules through the same
 credentials the upgrade scripts use, written as a `GIT_CONFIG_GLOBAL` file seeded from the
 operator's own gitconfig (`support.FileGitAuthConfig`) because none of them is a shell.
+
+A package the new major moved or dropped is the one failure tidy and vendor may carry on past
+(`runAllowingMissing`). go-git v6 moved `plumbing/protocol/packp/capability` to
+`plumbing/protocol/capability`, and gitforge's migration stopped on it with no branch at all, which
+is the one outcome worse than a branch that does not build yet. When every error the command
+reported is a package under the new path that the module "does not contain" (tidy) or that "no
+required module provides" (vendor), it runs again with `-e`, and the branch is kept as `it does
+not build yet`, naming the packages; vet is not asked, since it could only say the same thing less
+plainly. It is never a blanket `-e`. Any other error — a registry that did not answer, a checksum
+mismatch, a package outside the new major — fails the preparation as before, and the second run's
+output is held to the same standard, because `-e` exits zero whatever it carried on past and a
+branch is never rebuilt once it exists, so a transient failure would stay baked into it. "cannot
+find module providing package" is deliberately not accepted: it is also what an unanswered lookup
+looks like.
+
+A note quotes the first *error* the go command printed (`migrationDetail`), not its first line.
+The progress lines (`go: downloading`, `go: finding module for package`, `go: found`, …) and the
+`# <package>` header a build prints above its diagnostics come first, and they were what the notes
+said — `go mod tidy failed: go: finding module for package …` named the package being looked for
+and nothing about why the look failed. An error the go command wrapped over indented lines is
+joined back into one, and notes are cut at 300 characters, which fits the package paths a go error
+is mostly made of; at 160 the cut fell in the middle of them.
 
 It declines rather than guesses, in four places, each because the branch would otherwise point the
 build somewhere nobody asked for. A `replace` directive naming the module — read from the
