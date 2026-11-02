@@ -656,14 +656,15 @@ func TestMigrationsForRunCarriesOnPastPackagesTheNewMajorDropped(t *testing.T) {
 		assert.Empty(t, provider.BranchInputs)
 	})
 
-	t.Run("should vendor past the same packages, which the provider then refuses", func(t *testing.T) {
+	t.Run("should vendor past the same packages, leaving the old module's files in place", func(t *testing.T) {
 		t.Parallel()
 
 		// given: re-vendoring replaces the old module's tree, and the provider
-		// commit APIs cannot delete a file. A vendored repository gets the
-		// notice and the reason, never a half-pushed branch.
+		// commit APIs cannot delete a file. The old files stay on the branch,
+		// which starts from the base that has them, and the note says so after
+		// naming the package the new major no longer has.
 		files := migrationCheckoutFixture()
-		files["vendor/modules.txt"] = "# github.com/example/lib v1.2.3\n"
+		files["vendor/modules.txt"] = oldMajorVendorManifest
 		files["vendor/github.com/example/lib/lib.go"] = "package lib\n"
 		repoDir := newMigrationCheckout(t, files)
 		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
@@ -672,13 +673,7 @@ func TestMigrationsForRunCarriesOnPastPackagesTheNewMajorDropped(t *testing.T) {
 			"mod tidy":                             {output: movedPackageTidyOutput, fails: true},
 			"mod tidy -e":                          {output: movedPackageTidyOutput},
 			"mod vendor":                           {output: movedPackageVendorOutput, fails: true},
-			"mod vendor -e": {
-				output: movedPackageVendorOutput,
-				effect: func(dir string) {
-					require.NoError(t, os.RemoveAll(filepath.Join(dir, "vendor", "github.com", "example", "lib")))
-					writeTestFile(t, dir, "vendor/github.com/example/lib/v3/lib.go", "package lib\n")
-				},
-			},
+			"mod vendor -e":                        {output: movedPackageVendorOutput, effect: revendorNewMajor(t)},
 		}}
 
 		// when
@@ -686,10 +681,19 @@ func TestMigrationsForRunCarriesOnPastPackagesTheNewMajorDropped(t *testing.T) {
 
 		// then
 		require.Len(t, migrations, 1)
-		assert.False(t, migrations[0].Prepared)
-		assert.Contains(t, migrations[0].Note, "is deleted or renamed by the migration")
+		assert.True(t, migrations[0].Prepared, "a vendored repository gets its branch too")
+		assert.False(t, migrations[0].Compiles)
+		assert.Equal(t,
+			"it does not build yet: `github.com/example/lib/v3` has no package `pkg`; "+leftInPlaceVendorNote,
+			migrations[0].Note)
 		assert.Contains(t, runner.commands(), "mod vendor -e")
-		assert.Empty(t, provider.BranchInputs)
+
+		require.Len(t, provider.BranchInputs, 1)
+		pushed := changeTypesByPath(provider.BranchInputs[0].Changes)
+		assertOnlyAdditionsAndEdits(t, pushed, "vendor/github.com/example/lib/lib.go")
+		assert.Equal(t, "add", pushed["vendor/github.com/example/lib/v3/lib.go"])
+		assert.Equal(t, "edit", pushed["vendor/modules.txt"])
+		assert.Contains(t, provider.BranchInputs[0].CommitMessage, "has no package `pkg`; "+leftInPlaceVendorNote)
 	})
 
 	t.Run("should not carry on past anything else", func(t *testing.T) {
@@ -764,9 +768,110 @@ func TestMigrationsForRunCarriesOnPastPackagesTheNewMajorDropped(t *testing.T) {
 	})
 }
 
+func TestMigrationsForRunInAVendoredRepository(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should prepare the branch, leaving the old module's vendored files in place", func(t *testing.T) {
+		t.Parallel()
+
+		// given: an ordinary migration of a module that vendors. Re-vendoring
+		// deletes every file of the old module, which the provider cannot
+		// push, and that used to cost every vendored repository its branch.
+		files := migrationCheckoutFixture()
+		files["vendor/modules.txt"] = oldMajorVendorManifest
+		files["vendor/github.com/example/lib/lib.go"] = "package lib\n"
+		files["vendor/github.com/example/lib/pkg/pkg.go"] = "package pkg\n"
+		repoDir := newMigrationCheckout(t, files)
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"get github.com/example/lib/v3@v3.0.1": {effect: writeGoMod(t, newMajorGoMod)},
+			"mod vendor":                           {effect: revendorNewMajor(t)},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.True(t, migrations[0].Prepared)
+		assert.True(t, migrations[0].Compiles, "the files left in place are never read, so vet's answer stands")
+		assert.Equal(t, leftInPlaceVendorNote, migrations[0].Note)
+		assert.Equal(t, []string{
+			"get github.com/example/lib/v3@v3.0.1",
+			"mod tidy",
+			"mod vendor",
+			"vet ./...",
+		}, runner.commands())
+
+		require.Len(t, provider.BranchInputs, 1)
+		pushed := changeTypesByPath(provider.BranchInputs[0].Changes)
+		assertOnlyAdditionsAndEdits(t, pushed,
+			"vendor/github.com/example/lib/lib.go", "vendor/github.com/example/lib/pkg/pkg.go")
+		assert.Equal(t, map[string]string{
+			"CHANGELOG.md": "edit",
+			"go.mod":       "edit",
+			"main.go":      "edit",
+			"vendor/github.com/example/lib/v3/lib.go": "add",
+			"vendor/modules.txt":                      "edit",
+		}, pushed)
+		message := provider.BranchInputs[0].CommitMessage
+		assert.Contains(t, message, "It builds as it is")
+		assert.Contains(t, message, leftInPlaceVendorNote,
+			"the commit message the pull request is prefilled with says it as well")
+	})
+
+	t.Run("should refuse a migration that deletes a file from a module still vendored", func(t *testing.T) {
+		t.Parallel()
+
+		// given: the new major also moved a shared dependency to a version
+		// that dropped a file. Left in place, that file would be compiled with
+		// the rest of its package, so nothing is pushed.
+		files := migrationCheckoutFixture()
+		files["vendor/modules.txt"] = oldMajorVendorManifest +
+			"# github.com/example/shared v1.0.0\n## explicit\ngithub.com/example/shared\n"
+		files["vendor/github.com/example/lib/lib.go"] = "package lib\n"
+		files["vendor/github.com/example/shared/a.go"] = "package shared\n"
+		files["vendor/github.com/example/shared/b.go"] = "package shared\n"
+		repoDir := newMigrationCheckout(t, files)
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"get github.com/example/lib/v3@v3.0.1": {effect: writeGoMod(t, newMajorGoMod)},
+			"mod vendor": {effect: func(dir string) {
+				revendorNewMajor(t)(dir)
+				require.NoError(t, os.Remove(filepath.Join(dir, "vendor", "github.com", "example", "shared", "b.go")))
+				writeTestFile(t, dir, "vendor/modules.txt", newMajorVendorManifest+
+					"# github.com/example/shared v1.1.0\n## explicit\ngithub.com/example/shared\n")
+			}},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note,
+			"`vendor/github.com/example/shared/b.go` is deleted from a module that is still vendored")
+		assert.Empty(t, provider.BranchInputs)
+	})
+}
+
 // newMajorGoMod is the fixture's manifest once `go get` has moved it onto the
 // new major, which is what a later step reads back.
 const newMajorGoMod = "module example.com/app\n\ngo 1.25\n\nrequire github.com/example/lib/v3 v3.0.1\n"
+
+// oldMajorVendorManifest is the fixture's vendor/modules.txt before the
+// migration, and newMajorVendorManifest the one re-vendoring writes after it,
+// which no longer lists the old module.
+const (
+	oldMajorVendorManifest = "# github.com/example/lib v1.2.3\n## explicit\ngithub.com/example/lib\n"
+	newMajorVendorManifest = "# github.com/example/lib/v3 v3.0.1\n## explicit\ngithub.com/example/lib/v3\n"
+)
+
+// leftInPlaceVendorNote is what a prepared migration says about the old
+// module's vendored files, which the provider API cannot delete.
+const leftInPlaceVendorNote = "the old module's vendored files are still under `vendor/`: " +
+	"the provider API cannot delete files, and `go mod vendor` removes them"
 
 // writeGoMod is a stub command's effect of rewriting the module's manifest.
 func writeGoMod(t *testing.T, content string) func(dir string) {
@@ -774,6 +879,41 @@ func writeGoMod(t *testing.T, content string) func(dir string) {
 
 	return func(dir string) {
 		writeTestFile(t, dir, "go.mod", content)
+	}
+}
+
+// revendorNewMajor is a stub `go mod vendor`: it replaces the old module's
+// vendored tree with the new major's, manifest included, as the real one does.
+func revendorNewMajor(t *testing.T) func(dir string) {
+	t.Helper()
+
+	return func(dir string) {
+		require.NoError(t, os.RemoveAll(filepath.Join(dir, "vendor", "github.com", "example", "lib")))
+		writeTestFile(t, dir, "vendor/github.com/example/lib/v3/lib.go", "package lib\n")
+		writeTestFile(t, dir, "vendor/modules.txt", newMajorVendorManifest)
+	}
+}
+
+// changeTypesByPath indexes a change set by the path each change is for.
+func changeTypesByPath(changes []entities.FileChange) map[string]string {
+	byPath := make(map[string]string, len(changes))
+	for _, change := range changes {
+		byPath[change.Path] = change.ChangeType
+	}
+
+	return byPath
+}
+
+// assertOnlyAdditionsAndEdits checks that a pushed change set holds nothing the
+// provider APIs cannot express, and nothing for the files that were deleted.
+func assertOnlyAdditionsAndEdits(t *testing.T, pushed map[string]string, deleted ...string) {
+	t.Helper()
+
+	for filePath, changeType := range pushed {
+		assert.Contains(t, []string{"add", "edit"}, changeType, "%s is pushed as %q", filePath, changeType)
+	}
+	for _, filePath := range deleted {
+		assert.NotContains(t, pushed, filePath, "a deletion is never pushed")
 	}
 }
 
@@ -1086,7 +1226,7 @@ func TestMigrationCleanupAndCollectionErrors(t *testing.T) {
 
 	// when
 	golang.RemoveMigrationWorktree(t.Context(), filepath.Join(dir, "not-a-repo"), dir)
-	_, _, collectErr := golang.CollectMigrationChanges(t.Context(), t.TempDir())
+	_, collectErr := golang.CollectMigrationChanges(t.Context(), t.TempDir())
 
 	// then
 	assert.Error(t, collectErr, "a non-git worktree cannot provide migration changes")

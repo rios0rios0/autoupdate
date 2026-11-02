@@ -45,6 +45,12 @@ const (
 	// itself: at 160 the cut fell in the middle of them.
 	migrationNoteLimit = 300
 
+	// noteSeparator is what joinNotes puts between two notes.
+	noteSeparator = "; "
+
+	// noteEllipsis marks where a note was cut.
+	noteEllipsis = "..."
+
 	// replaceVerb is the directive that redirects a module somewhere other than
 	// where its path says it lives.
 	replaceVerb = "replace"
@@ -226,25 +232,42 @@ func prepareOneMigration(
 		return prepared
 	}
 
-	changes, skipReason, err := collectMigrationChanges(ctx, worktree)
+	changes, err := collectMigrationChanges(ctx, worktree)
 	if err != nil {
 		prepared.Note = migrationNote(err.Error(), params.AuthToken)
 		return prepared
 	}
-	if skipReason != "" {
-		prepared.Note = migrationNote(skipReason, params.AuthToken)
+	if changes.Skip != "" {
+		prepared.Note = migrationNote(changes.Skip, params.AuthToken)
 		return prepared
+	}
+	if len(changes.LeftInPlace) > 0 {
+		// In the build's note rather than beside it, so that the commit message
+		// the provider prefills the pull request with says it as well. Redacted
+		// before it is cut, because a cut through the token would leave a
+		// piece of it the redaction after it no longer recognises.
+		build.Note = withStandingNote(
+			support.RedactTokens(build.Note, params.AuthToken), leftInPlaceNote(changes.LeftInPlace),
+		)
+		logger.Infof(
+			"[golang] Leaving %d vendored file(s) the migration of %s deleted on branch %s: "+
+				"the provider API cannot delete files",
+			len(changes.LeftInPlace), major.Path, prepared.Branch,
+		)
 	}
 
 	err = params.Provider.CreateBranchWithChanges(ctx, params.Repo, entities.BranchInput{
 		BranchName:    prepared.Branch,
 		BaseBranch:    refsHeads(params.BaseBranch),
-		Changes:       changes,
+		Changes:       changes.Files,
 		CommitMessage: migrationCommitMessage(major, build),
 	})
 	switch {
 	case err == nil:
 		prepared.Prepared = true
+		// Vet never saw the files left in place, and its answer stands for the
+		// branch that has them all the same: nothing in the build reads them
+		// (see deletionRefusal).
 		prepared.Compiles = build.Compiles
 		prepared.Note = migrationNote(build.Note, params.AuthToken)
 		logger.Infof(
@@ -563,7 +586,7 @@ func bumpMigrationModule(
 			)
 		}
 	}
-	if !isDirectory(filepath.Join(moduleDir, "vendor")) {
+	if !isDirectory(filepath.Join(moduleDir, vendorDirName)) {
 		return missing, nil
 	}
 
@@ -1057,23 +1080,40 @@ func migrationCommandError(args []string, detail string) error {
 
 // --- collecting the result ---
 
+// migrationChanges is what the worktree's changes amount to for the provider:
+// what it commits, what the branch keeps without it, and whether to push at
+// all.
+type migrationChanges struct {
+	// Files are the added and edited files the provider commits.
+	Files []entities.FileChange
+	// LeftInPlace are the vendored files the migration deleted that stay on
+	// the branch, because the provider cannot delete them and nothing in the
+	// build reads them (see deletionRefusal).
+	LeftInPlace []string
+	// Skip explains why nothing should be pushed, empty when there is.
+	Skip string
+}
+
 // collectMigrationChanges reads the worktree's changes into the file changes
 // the provider commits on the run's behalf.
 //
-// Deletions and renames are refused rather than approximated. The provider
-// commit APIs express a set of added and edited files, and a migration that
-// deleted one would be pushed with it still there. That happens for real --
-// re-vendoring replaces a vendored tree wholesale -- so it is checked for and
-// reported, not worked around.
-func collectMigrationChanges(
-	ctx context.Context, worktree string,
-) ([]entities.FileChange, string, error) {
+// The provider commit APIs express a set of added and edited files and nothing
+// else, so a migration that deleted a file would be pushed with it still there.
+// That is refused rather than approximated, renames included -- with one
+// exception, without which a repository that vendors its dependencies never
+// gets a branch at all: re-vendoring deletes the vendored files of every module
+// the migration no longer needs, the old major first among them. Those are left
+// where they are. The branch starts from the base, which has them, and they
+// stay on it, inert, until somebody runs `go mod vendor`.
+func collectMigrationChanges(ctx context.Context, worktree string) (migrationChanges, error) {
 	output, err := support.GitCommand(ctx, worktree, "status", "--porcelain", "-z", "-uall").Output()
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to read the changes of the migration: %w", err)
+		return migrationChanges{}, fmt.Errorf("failed to read the changes of the migration: %w", err)
 	}
 
-	changes := make([]entities.FileChange, 0)
+	vendored := vendoredModules(worktree)
+
+	var collected migrationChanges
 	for record := range strings.SplitSeq(string(output), "\x00") {
 		// Two status characters, a space, and a path: anything shorter is the
 		// trailing empty record of the NUL-terminated output.
@@ -1082,32 +1122,50 @@ func collectMigrationChanges(
 		}
 
 		status, name := record[:2], record[3:]
-		if strings.ContainsAny(status, "DRC") {
-			return nil, fmt.Sprintf(
-				"`%s` is deleted or renamed by the migration, which the provider API cannot push",
-				name,
-			), nil
+		if strings.ContainsAny(status, "RC") {
+			return refusedMigrationChanges(deletedOrRenamedRefusal(name)), nil
+		}
+		if strings.Contains(status, "D") {
+			if refusal := deletionRefusal(name, vendored); refusal != "" {
+				return refusedMigrationChanges(refusal), nil
+			}
+			collected.LeftInPlace = append(collected.LeftInPlace, name)
+			continue
 		}
 
 		content, readErr := os.ReadFile(filepath.Join(worktree, filepath.FromSlash(name)))
 		if readErr != nil {
-			return nil, "", fmt.Errorf("failed to read %s: %w", name, readErr)
+			return migrationChanges{}, fmt.Errorf("failed to read %s: %w", name, readErr)
 		}
 
 		changeType := "edit"
 		if status == "??" {
 			changeType = "add"
 		}
-		changes = append(changes, entities.FileChange{
+		collected.Files = append(collected.Files, entities.FileChange{
 			Path: name, Content: string(content), ChangeType: changeType,
 		})
 	}
 
-	if len(changes) == 0 {
-		return nil, "the migration changed nothing", nil
+	if len(collected.Files) == 0 {
+		return refusedMigrationChanges("the migration changed nothing"), nil
 	}
 
-	return changes, "", nil
+	return collected, nil
+}
+
+// refusedMigrationChanges is a change set that is not pushed, and why.
+func refusedMigrationChanges(reason string) migrationChanges {
+	//nolint:exhaustruct // nothing is pushed, so there is nothing else to say
+	return migrationChanges{Skip: reason}
+}
+
+// deletedOrRenamedRefusal is why a deletion or a rename stops the migration
+// from being pushed.
+func deletedOrRenamedRefusal(name string) string {
+	return fmt.Sprintf(
+		"`%s` is deleted or renamed by the migration, which the provider API cannot push", name,
+	)
 }
 
 // --- the branch ---
@@ -1298,7 +1356,25 @@ func joinNotes(notes ...string) string {
 		}
 	}
 
-	return strings.Join(kept, "; ")
+	return strings.Join(kept, noteSeparator)
+}
+
+// withStandingNote appends to a note one that has to reach the reader whole.
+//
+// The cut exists for a toolchain's output, which runs to any length. A sentence
+// the run wrote itself is short and of use only whole, so it keeps its place at
+// the end, and the note before it gives up the room it needs.
+func withStandingNote(note, standing string) string {
+	if standing == "" {
+		return note
+	}
+
+	head := collapseWhitespace(note)
+	if room := migrationNoteLimit - len(noteSeparator) - len(standing); len(head) > room {
+		head = truncateNoteAt(head, max(room-len(noteEllipsis), 0))
+	}
+
+	return joinNotes(head, standing)
 }
 
 // collapseWhitespace puts a message on one line, so a message from a toolchain
@@ -1309,17 +1385,22 @@ func collapseWhitespace(message string) string {
 
 // truncateNote cuts a note at the limit, marking what it cut.
 func truncateNote(note string) string {
-	if len(note) <= migrationNoteLimit {
+	return truncateNoteAt(note, migrationNoteLimit)
+}
+
+// truncateNoteAt cuts a note at the given length, marking what it cut.
+func truncateNoteAt(note string, limit int) string {
+	if len(note) <= limit {
 		return note
 	}
 
 	// Cut on a rune boundary, since the note is rendered rather than parsed.
-	cut := migrationNoteLimit
+	cut := limit
 	for cut > 0 && !utf8.RuneStart(note[cut]) {
 		cut--
 	}
 
-	return strings.TrimSpace(note[:cut]) + "..."
+	return strings.TrimSpace(note[:cut]) + noteEllipsis
 }
 
 // shellQuote quotes a value for bash, single quotes included.

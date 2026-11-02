@@ -700,11 +700,44 @@ and of its subpackages are replaced at the offsets of their own literals, in a f
 imports alone, so nothing else in the file can move and a file that does not parse keeps its
 imports rather than being damaged. Every module that requires the dependency or had a file
 rewritten then runs `go get <new>@<version>`, `go mod tidy` and — where the repository vendors —
-`go mod vendor`; `go vet ./...` decides whether the result builds, and a module that does not is
-*kept*, reported as `it does not build yet` with the first compiler error, which is the state a
-migration branch is expected to be in. The go commands reach private modules through the same
-credentials the upgrade scripts use, written as a `GIT_CONFIG_GLOBAL` file seeded from the
-operator's own gitconfig (`support.FileGitAuthConfig`) because none of them is a shell.
+`go mod vendor`, whose deletions stay on the branch rather than being pushed (below); `go vet ./...`
+decides whether the result builds, and a module that does not is *kept*, reported as `it does not
+build yet` with the first compiler error, which is the state a migration branch is expected to be
+in. The go commands reach private modules through the same credentials the upgrade scripts use,
+written as a `GIT_CONFIG_GLOBAL` file seeded from the operator's own gitconfig
+(`support.FileGitAuthConfig`) because none of them is a shell.
+
+**What re-vendoring deletes stays on the branch.** `go mod vendor` replaces the vendor tree
+wholesale, so migrating `github.com/x/lib` to `/v3` deletes every file under
+`vendor/github.com/x/lib/` beside the new `vendor/github.com/x/lib/v3/`. The provider commit APIs
+the branch is created through express added and edited files only — GitHub ignores the change type
+altogether — so the deletions are not pushed: the branch starts from the base, which has those
+files, and they stay on it. Refusing them instead, as the preparation used to, meant a repository
+that vendors never got a branch, and since nothing persists between runs, every nightly run
+repeated the whole preparation to end on the same refusal. `collectMigrationChanges` reports what
+it left in place, and the row's note — copied into the commit message the provider prefills the
+pull request with — says the old module's vendored files are still under `vendor/`, that the
+provider API cannot delete files, and that `go mod vendor` removes them. It goes last, but takes its
+room from the note before it rather than being cut (`withStandingNote`), because a compiler error
+can fill the 300 characters on its own. A repository whose CI checks that the vendor tree is in
+sync fails on the branch until that is run, which is the signal it should get.
+
+Only inert files are left (`deletionRefusal`): a deletion in a module's own vendor directory —
+`<module dir>/vendor/`, for a module `discoverLocalModuleDirs` finds — lying in no module the new
+`vendor/modules.txt` still lists. That manifest lists every module providing a package the module
+builds or tests, so a module it no longer lists is one nothing imports, and `./...` never matches
+inside `vendor/`. A module declaring `go 1.23` or later is guarded twice: the go command will not
+even read an unlisted vendored package when something does import it — it says it is `ignoring
+package … which exists in the vendor directory but is missing from vendor/modules.txt` and fails
+the import exactly as it would without the files. So the branch builds exactly when the worktree
+does, and `Compiles`, which vet decides in a worktree that no longer has those files, holds for
+the tree that is pushed. Checked with the real toolchain on `github.com/creack/pty` `v1.1.24` to
+`/v2` `v2.0.1`: the pushed tree, 52 stale files included, builds and vets clean, and `go mod vendor`
+on it removes exactly those 52. A file deleted from a module that is *still* vendored is the
+opposite case, and is refused: a shared dependency the new major moves to a newer version can lose
+a file between the two, and left in place it is compiled with the rest of its package — where the
+newer version merged it into another file, every declaration in it is redeclared. A vendor
+directory without a readable manifest leaves nothing in place either.
 
 A package the new major moved or dropped is the one failure tidy and vendor may carry on past
 (`runAllowingMissing`). go-git v6 moved `plumbing/protocol/packp/capability` to
@@ -746,13 +779,15 @@ build somewhere nobody asked for. A `replace` directive naming the module — re
 manifest's **syntax**, since `modfile.ParseLax` is by definition a dependency's parse and drops
 the main module's own statements — means the repository deliberately does not use the published
 module. A change set containing a deletion or a rename is refused, because the provider commit
-APIs express only added and edited files; re-vendoring replaces a tree wholesale, so this happens
-for real. A repository with no module requiring or importing the dependency has nothing to
-migrate. And a provider refusing the branch because it is already there marks the row prepared
-without claiming this run built it. GitHub and GitLab say so in as many words; Azure DevOps does
-not, because gitforge creates the branch there with a push expecting the ref not to exist yet, and
-it refuses that push with `TF401028` — the ref "has already been updated by another client" — so
-`migrationBranchExists` matches the code rather than a sentence.
+APIs express only added and edited files and the branch would keep the file. The vendored files
+of a module that is no longer vendored are the one exception, since nothing reads them (above);
+a file deleted from a module that is still vendored is refused with the rest. A repository with
+no module requiring or importing the dependency has nothing to migrate. And a provider refusing
+the branch because it is already there marks the row prepared without claiming this run built
+it. GitHub and GitLab say so in as many words; Azure DevOps does not, because gitforge creates
+the branch there with a push expecting the ref not to exist yet, and it refuses that push with
+`TF401028` — the ref "has already been updated by another client" — so `migrationBranchExists`
+matches the code rather than a sentence.
 
 The branch is created through the provider's commit API rather than pushed with go-git: those
 commits are signed by the host, and the rulesets these repositories run under require a verified
