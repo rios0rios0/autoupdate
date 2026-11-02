@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed the Go major migration never preparing a branch for a repository that vendors its dependencies: re-vendoring deletes the old module''s vendored files, which the provider API cannot push, so every run ended on the same refusal; the vendored files of modules the new `vendor/modules.txt` no longer lists now stay on the branch, where nothing in the build reads them, and the note says `go mod vendor` removes them, while a file deleted from a module that is still vendored is still refused'
-time: '2026-11-02T19:33:48.176038903Z'

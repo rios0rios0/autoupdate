@@ -22,6 +22,29 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-02
+
+### Changed
+
+- changed the Go module `go.yaml.in/yaml/v3` from `v3.0.5` to `v3.0.6`
+- changed the Go module `golang.org/x/net` from `v0.61.0` to `v0.62.0`
+- changed the Go modules `github.com/rios0rios0/cliforge` from `v0.5.1` to `v0.5.2`, `github.com/rios0rios0/langforge` from `v1.1.9` to `v1.1.10` and `github.com/rios0rios0/testkit` from `v0.3.6` to `v0.3.7`
+- moved the agent instructions from `CLAUDE.md` to `AGENTS.md`, keeping a `CLAUDE.md` that imports it, and corrected the updater recipe, the gitforge type aliases, the provider registration and the dry-run validation step in `AGENTS.md`, `CONTRIBUTING.md`, `.github/copilot-instructions.md` and the code-review skill
+
+### Fixed
+
+- fixed the Go major migration giving up without a branch when the new major moved or dropped a package the code imports (go-git `v6` moved `plumbing/protocol/packp/capability`): `go mod tidy` and `go mod vendor` now run again with `-e` when those packages are the only errors they report, and the branch is kept as not building yet, naming them
+- fixed the Go major migration never preparing a branch for a repository that vendors its dependencies: re-vendoring deletes the old module's vendored files, which the provider API cannot push, so every run ended on the same refusal; the vendored files of modules the new `vendor/modules.txt` no longer lists now stay on the branch, where nothing in the build reads them, and the note says `go mod vendor` removes them, while a file deleted from a module that is still vendored is still refused
+- fixed the Go major migration notes quoting a go command progress line (`go: downloading …`, `go: finding module for package …`) or a `# <package>` build header instead of the error that stopped the migration, and raised their limit from 160 to 300 characters so the package paths in that error fit
+- fixed the Go major probe never reporting a newer major for a module that vendors its dependencies: under the default `-mod=vendor` the go command refused to list versions, and the refusal was read as nothing newer being published
+- fixed the Go major probe offering migrations to a path the new major no longer answers to: charmbracelet tags its v2 releases under `github.com/charmbracelet/bubbletea/v2` while their `go.mod` declares `charm.land/bubbletea/v2`, so each of those migrations failed in `go get`; the probe now reads the module path every release declares and moves to it when the same repository publishes it, and no longer offers a version the go command refuses at its path, such as `github.com/docker/docker/v28`, which has no `go.mod` and was offered to every repository on `github.com/docker/docker` `v27`
+- fixed the Go major probe proposing majors published only as pre-releases (go-git `v6.0.0-beta.1` was offered as a migration) and stopping eight majors short of the newest release (go-github `v74` was offered while `v93` was current): it now reports the newest finished release and walks up to 100 majors
+- fixed the Go major-migration notice on Azure DevOps reporting every branch an earlier run had already prepared as a failed push (`TF401028`, HTTP 409) instead of linking it: Azure DevOps refuses the push that would recreate an existing branch rather than saying the branch exists, so the refusal went unrecognised and the "Create pull request" column was dropped from the table
+
+### Removed
+
+- removed the unused `BatchGitContext.StashChanges`, `PopStash` and `DropStash` and their tests: nothing has called them since batch mode began creating its aggregate branch on a fresh clone before any updater runs, and the reason they existed, carrying uncommitted changes across gitforge's forced branch switch, went away when gitforge `4.3` stopped forcing it
+
 ## [1.3.0] - 2026-10-21
 
 ### Added
