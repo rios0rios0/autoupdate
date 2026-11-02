@@ -120,6 +120,10 @@ type stubGoCall struct {
 type stubGoAnswer struct {
 	output string
 	fails  bool
+	// effect is what the command does to the module, run in its directory
+	// before the answer is given: `go get` writing the requirement, `-e`
+	// dropping one, `go mod vendor` replacing the vendored tree.
+	effect func(dir string)
 }
 
 func (r *stubGoRunner) Run(
@@ -128,6 +132,9 @@ func (r *stubGoRunner) Run(
 	r.calls = append(r.calls, stubGoCall{name: name, args: args, dir: opts.Dir})
 
 	if answer, scripted := r.answers[strings.Join(args, " ")]; scripted {
+		if answer.effect != nil {
+			answer.effect(opts.Dir)
+		}
 		if answer.fails {
 			return &cmdrunner.RunResult{Output: answer.output, ExitCode: 1},
 				fmt.Errorf("command %s exited with code 1", name)
@@ -517,12 +524,14 @@ func TestMigrationsForRunCarriesOnPastPackagesTheNewMajorDropped(t *testing.T) {
 		t.Parallel()
 
 		// given: tidy cannot resolve an import the rewrite produced, because
-		// the new major moved the package it names.
+		// the new major moved the package it names, and no module of its own
+		// provides it either.
 		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
 		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
 		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
-			"mod tidy":    {output: movedPackageTidyOutput, fails: true},
-			"mod tidy -e": {output: movedPackageTidyOutput},
+			"get github.com/example/lib/v3@v3.0.1": {effect: writeGoMod(t, newMajorGoMod)},
+			"mod tidy":                             {output: movedPackageTidyOutput, fails: true},
+			"mod tidy -e":                          {output: movedPackageTidyOutput},
 		}}
 
 		// when
@@ -537,6 +546,7 @@ func TestMigrationsForRunCarriesOnPastPackagesTheNewMajorDropped(t *testing.T) {
 		assert.Equal(t, []string{
 			"get github.com/example/lib/v3@v3.0.1",
 			"mod tidy",
+			"list -mod=readonly -m -versions github.com/example/lib/v3/pkg",
 			"mod tidy -e",
 		}, runner.commands(), "vet has nothing to add about a package known to be missing")
 		require.Len(t, provider.BranchInputs, 1)
@@ -544,19 +554,69 @@ func TestMigrationsForRunCarriesOnPastPackagesTheNewMajorDropped(t *testing.T) {
 		assert.Contains(t, provider.BranchInputs[0].CommitMessage, "has no package `pkg`")
 	})
 
-	t.Run("should vendor past the same packages", func(t *testing.T) {
+	t.Run("should not carry on past a package a module of its own provides", func(t *testing.T) {
+		t.Parallel()
+
+		// given: the new major split the package into a nested module, and
+		// the registry did not serve it. The go command reports that exactly
+		// like a package that is gone.
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"get github.com/example/lib/v3@v3.0.1": {effect: writeGoMod(t, newMajorGoMod)},
+			"mod tidy":                             {output: movedPackageTidyOutput, fails: true},
+			"list -mod=readonly -m -versions github.com/example/lib/v3/pkg": {
+				output: "github.com/example/lib/v3/pkg v1.0.0 v1.1.0\n",
+			},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "`github.com/example/lib/v3/pkg` is published as a module of its own")
+		assert.NotContains(t, runner.commands(), "mod tidy -e")
+		assert.Empty(t, provider.BranchInputs)
+	})
+
+	t.Run("should not carry on when the registry cannot say whether the package is gone", func(t *testing.T) {
 		t.Parallel()
 
 		// given
-		files := migrationCheckoutFixture()
-		files["vendor/modules.txt"] = "# github.com/example/lib v1.2.3\n"
-		repoDir := newMigrationCheckout(t, files)
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
 		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
 		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
-			"mod tidy":      {output: movedPackageTidyOutput, fails: true},
-			"mod tidy -e":   {output: movedPackageTidyOutput},
-			"mod vendor":    {output: movedPackageVendorOutput, fails: true},
-			"mod vendor -e": {output: movedPackageVendorOutput},
+			"get github.com/example/lib/v3@v3.0.1": {effect: writeGoMod(t, newMajorGoMod)},
+			"mod tidy":                             {output: movedPackageTidyOutput, fails: true},
+			"list -mod=readonly -m -versions github.com/example/lib/v3/pkg": {
+				output: unreachableRegistryOutput, fails: true,
+			},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "no such host")
+		assert.Empty(t, provider.BranchInputs)
+	})
+
+	t.Run("should trust the second run when it finds the packages after all", func(t *testing.T) {
+		t.Parallel()
+
+		// given: the first run's failure was the registry's, and it recovered.
+		// Reporting the packages as gone would bake a false note into a
+		// branch that is never rebuilt.
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"get github.com/example/lib/v3@v3.0.1": {effect: writeGoMod(t, newMajorGoMod)},
+			"mod tidy":                             {output: movedPackageTidyOutput, fails: true},
+			"mod tidy -e":                          {},
 		}}
 
 		// when
@@ -565,14 +625,71 @@ func TestMigrationsForRunCarriesOnPastPackagesTheNewMajorDropped(t *testing.T) {
 		// then
 		require.Len(t, migrations, 1)
 		assert.True(t, migrations[0].Prepared)
-		assert.False(t, migrations[0].Compiles)
-		assert.Equal(t, []string{
-			"get github.com/example/lib/v3@v3.0.1",
-			"mod tidy",
-			"mod tidy -e",
-			"mod vendor",
-			"mod vendor -e",
-		}, runner.commands())
+		assert.True(t, migrations[0].Compiles, "vet decides, as it does for every other migration")
+		assert.Empty(t, migrations[0].Note)
+		assert.Contains(t, runner.commands(), "vet ./...")
+	})
+
+	t.Run("should refuse a migration that leaves nothing requiring the new major", func(t *testing.T) {
+		t.Parallel()
+
+		// given: every package the module imports from the dependency is gone
+		// from the new major, so `-e` drops both requirements.
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"get github.com/example/lib/v3@v3.0.1": {effect: writeGoMod(t, newMajorGoMod)},
+			"mod tidy":                             {output: movedPackageTidyOutput, fails: true},
+			"mod tidy -e": {
+				output: movedPackageTidyOutput,
+				effect: writeGoMod(t, "module example.com/app\n\ngo 1.25\n"),
+			},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "has none of the packages this module imports from it")
+		assert.Empty(t, provider.BranchInputs)
+	})
+
+	t.Run("should vendor past the same packages, which the provider then refuses", func(t *testing.T) {
+		t.Parallel()
+
+		// given: re-vendoring replaces the old module's tree, and the provider
+		// commit APIs cannot delete a file. A vendored repository gets the
+		// notice and the reason, never a half-pushed branch.
+		files := migrationCheckoutFixture()
+		files["vendor/modules.txt"] = "# github.com/example/lib v1.2.3\n"
+		files["vendor/github.com/example/lib/lib.go"] = "package lib\n"
+		repoDir := newMigrationCheckout(t, files)
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"get github.com/example/lib/v3@v3.0.1": {effect: writeGoMod(t, newMajorGoMod)},
+			"mod tidy":                             {output: movedPackageTidyOutput, fails: true},
+			"mod tidy -e":                          {output: movedPackageTidyOutput},
+			"mod vendor":                           {output: movedPackageVendorOutput, fails: true},
+			"mod vendor -e": {
+				output: movedPackageVendorOutput,
+				effect: func(dir string) {
+					require.NoError(t, os.RemoveAll(filepath.Join(dir, "vendor", "github.com", "example", "lib")))
+					writeTestFile(t, dir, "vendor/github.com/example/lib/v3/lib.go", "package lib\n")
+				},
+			},
+		}}
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), libMigrationParams(repoDir, provider, runner), true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "is deleted or renamed by the migration")
+		assert.Contains(t, runner.commands(), "mod vendor -e")
+		assert.Empty(t, provider.BranchInputs)
 	})
 
 	t.Run("should not carry on past anything else", func(t *testing.T) {
@@ -645,6 +762,19 @@ func TestMigrationsForRunCarriesOnPastPackagesTheNewMajorDropped(t *testing.T) {
 		assert.Contains(t, migrations[0].Note, "no such host")
 		assert.Empty(t, provider.BranchInputs)
 	})
+}
+
+// newMajorGoMod is the fixture's manifest once `go get` has moved it onto the
+// new major, which is what a later step reads back.
+const newMajorGoMod = "module example.com/app\n\ngo 1.25\n\nrequire github.com/example/lib/v3 v3.0.1\n"
+
+// writeGoMod is a stub command's effect of rewriting the module's manifest.
+func writeGoMod(t *testing.T, content string) func(dir string) {
+	t.Helper()
+
+	return func(dir string) {
+		writeTestFile(t, dir, "go.mod", content)
+	}
 }
 
 // libMigrationParams is the run a flow test makes for the fixture's finding,

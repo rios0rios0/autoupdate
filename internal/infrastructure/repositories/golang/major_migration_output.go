@@ -1,6 +1,7 @@
 package golang
 
 import (
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -146,6 +147,33 @@ func missingNewMajorPackages(output, nextPath string) ([]string, string) {
 // a package below it.
 func underModulePath(packagePath, modulePath string) bool {
 	return packagePath == modulePath || strings.HasPrefix(packagePath, modulePath+"/")
+}
+
+// nestedModuleCandidates lists the module paths that could provide a package
+// below the new major's path other than the new major itself: the package path,
+// and every path between it and the module, longest first.
+func nestedModuleCandidates(packagePath, modulePath string) []string {
+	candidates := make([]string, 0)
+	for candidate := packagePath; candidate != modulePath && underModulePath(candidate, modulePath); {
+		candidates = append(candidates, candidate)
+		candidate = path.Dir(candidate)
+	}
+
+	return candidates
+}
+
+// moduleListsVersions reports whether `go list -m -versions` named any version
+// of the module, which is how it says the module exists. A module that does not
+// is answered with its path alone, and exit status zero.
+func moduleListsVersions(output, modulePath string) bool {
+	for line := range strings.SplitSeq(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 1 && fields[0] == modulePath {
+			return true
+		}
+	}
+
+	return false
 }
 
 // missingPackagesNote says which packages the new major no longer has: the

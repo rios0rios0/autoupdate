@@ -523,7 +523,7 @@ func bumpMigrationModules(
 			continue
 		}
 
-		unresolved, err := bumpMigrationModule(runner, filepath.Join(worktree, filepath.FromSlash(dir)), major)
+		unresolved, err := bumpMigrationModule(runner, worktree, dir, major)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -538,7 +538,10 @@ func bumpMigrationModules(
 
 // bumpMigrationModule moves one module onto the new path, and returns the
 // packages under it that the module imports and the new major does not have.
-func bumpMigrationModule(runner *migrationRunner, moduleDir string, major MajorAvailable) ([]string, error) {
+func bumpMigrationModule(
+	runner *migrationRunner, worktree, dir string, major MajorAvailable,
+) ([]string, error) {
+	moduleDir := filepath.Join(worktree, filepath.FromSlash(dir))
 	if err := runner.run(moduleDir, "get", major.NextPath+"@"+major.NextVersion); err != nil {
 		return nil, err
 	}
@@ -546,6 +549,19 @@ func bumpMigrationModule(runner *migrationRunner, moduleDir string, major MajorA
 	missing, err := runner.runAllowingMissing(moduleDir, major.NextPath, "mod", "tidy")
 	if err != nil {
 		return nil, err
+	}
+	if len(missing) > 0 {
+		// `-e` drops a requirement that provides none of the imported packages,
+		// so when the new major has none of the ones this module uses, the old
+		// requirement and the new one are both gone. That is a rewrite rather
+		// than a migration, and a branch claiming to have moved the module would
+		// have moved nothing.
+		if requires, readErr := moduleRequires(worktree, dir, major.NextPath); readErr != nil || !requires {
+			return nil, fmt.Errorf(
+				"`%s` has none of the packages this module imports from it, so it is more than a rename",
+				major.NextPath,
+			)
+		}
 	}
 	if !isDirectory(filepath.Join(moduleDir, "vendor")) {
 		return missing, nil
@@ -966,10 +982,13 @@ func (r *migrationRunner) output(dir string, args ...string) (string, error) {
 // command runs again with `-e`, which records what it can and carries on past
 // the packages it cannot find.
 //
-// It is never a blanket `-e`. Every error the first run reported has to be one
-// of those packages, and the second run is held to the same standard, because
-// a migration branch is never rebuilt once it exists: a registry that failed to
-// answer would otherwise stay baked into it for good.
+// It is never a blanket `-e`, because a migration branch is never rebuilt once
+// it exists, and a registry that failed to answer would stay baked into it for
+// good. Every error the first run reported has to be one of those packages;
+// none of them may be a module of its own the registry has heard of (see
+// confirmDropped); and the second run is held to the same standard. What it
+// reports, not what the first run did, is the answer: a package the first run
+// could not find and the second one did was never dropped.
 func (r *migrationRunner) runAllowingMissing(dir, nextPath string, args ...string) ([]string, error) {
 	output, err := r.output(dir, args...)
 	if err == nil {
@@ -983,17 +1002,51 @@ func (r *migrationRunner) runAllowingMissing(dir, nextPath string, args ...strin
 	if len(missing) == 0 {
 		return nil, err
 	}
+	if err = r.confirmDropped(dir, nextPath, missing); err != nil {
+		return nil, err
+	}
 
 	retryArgs := append(slices.Clone(args), "-e")
 	retryOutput, retryErr := r.output(dir, retryArgs...)
 	if retryErr != nil {
 		return nil, retryErr
 	}
-	if _, other = missingNewMajorPackages(retryOutput, nextPath); other != "" {
+	missing, other = missingNewMajorPackages(retryOutput, nextPath)
+	if other != "" {
 		return nil, migrationCommandError(retryArgs, withoutGoPrefix(other))
 	}
 
 	return missing, nil
+}
+
+// confirmDropped asks the registry whether a module of its own provides any of
+// the packages the go command could not find.
+//
+// "does not contain package" is what the go command says when the new major has
+// no such package -- and also when the package moved into a module of its own
+// below it and the registry did not serve that module: it tries the longest
+// module path first, and lets a module it found outrank one it was told does
+// not exist. So every path between the package and the new major is asked for
+// directly. One that lists versions is a module the run failed to fetch, and a
+// query that fails is a registry that is not answering; either way the
+// packages are not known to be gone.
+func (r *migrationRunner) confirmDropped(dir, nextPath string, missing []string) error {
+	for _, pkg := range missing {
+		for _, candidate := range nestedModuleCandidates(pkg, nextPath) {
+			output, err := r.output(dir, "list", "-mod=readonly", "-m", "-versions", candidate)
+			if err != nil {
+				return err
+			}
+			if moduleListsVersions(output, candidate) {
+				return fmt.Errorf(
+					"`%s` is published as a module of its own, which the go command could not fetch",
+					candidate,
+				)
+			}
+		}
+	}
+
+	return nil
 }
 
 // migrationCommandError is how a go command that failed is reported: which

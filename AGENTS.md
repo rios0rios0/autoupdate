@@ -648,14 +648,26 @@ under every path that leads to it, including one the module no longer answers to
 tags v2 in the same GitHub repositories as v1, so `github.com/charmbracelet/bubbletea/v2` lists
 `v2.1.1`, but its `go.mod` declares `charm.land/bubbletea/v2` and `go get` refuses the GitHub path
 (`module declares its path as … but was required as …`). Reporting the listed path offered aisync
-four migrations that could only fail. So every hit is also asked `go list -m -f '{{.GoMod}}'
-<path>@<version>` — which fetches the `go.mod` into the module cache without judging it — and its
-`module` line is read (`autoupdate_go_declared_path`). A different path on the same major moves the
-probe there: that path is asked for its own newest finished release, and the walk carries on from
-it, because the next major is published where this one moved to. A declared path on another major
-(a v2 tag whose `go.mod` forgot the `/v2`) is a miss, since nothing can require it as that major,
-and a `go.mod` that cannot be read keeps the probed path, so a registry hiccup never hides a notice
-the probe would have given before. A move counts as a probe, so the cap bounds it too.
+four migrations that could only fail. So every hit is also asked `go list -m -f
+'{{.GoMod}}|{{with .Origin}}{{.URL}}{{end}}' <path>@<version>` (`autoupdate_go_module_identity`),
+which fetches the `go.mod` without judging its path and names the repository the version came from;
+its `module` line is read the way the go command reads it, quotes and `\r` included.
+
+- A version the go command *refuses* at its path is a miss. It refuses a `go.mod` on the wrong
+  major — hashicorp/consul's `/v2` tags declare the unsuffixed path — and a `/vN` path with no
+  `go.mod` at all, which is docker/docker's `/v28`: the registry lists v28.5.2 there, and before
+  this check every repository on `github.com/docker/docker v27…+incompatible` was offered a
+  migration to a path nothing can fetch. The refusal is the go command's `invalid version`.
+- A different declared path on the same major (`/vN` and gopkg.in's `.vN` both count) moves the
+  probe there, and it is asked for its own newest finished release; the walk carries on from it,
+  because the next major is published where this one moved to. The move is taken only when the
+  registry names the repository on both sides and it is the same one: charm.land and
+  github.com/charmbracelet both come from charmbracelet's repositories, while a fork still
+  carrying the tags of the repository it was forked from would otherwise be pointed back at that
+  repository, off the fork it chose. A move with no repository to compare — old registry metadata
+  carries none — is a miss rather than a guess.
+- A `go.mod` that cannot be read at all keeps the probed path, so a registry hiccup never hides a
+  notice the probe would have given before. A move counts as a probe, so the cap bounds it too.
 
 **Both queries pass `-mod=readonly`.** In a module that vendors its dependencies the go command
 defaults to `-mod=vendor`, where it refuses to list versions or fetch a `go.mod` at all ("can't
@@ -701,12 +713,25 @@ is the one outcome worse than a branch that does not build yet. When every error
 reported is a package under the new path that the module "does not contain" (tidy) or that "no
 required module provides" (vendor), it runs again with `-e`, and the branch is kept as `it does
 not build yet`, naming the packages; vet is not asked, since it could only say the same thing less
-plainly. It is never a blanket `-e`. Any other error — a registry that did not answer, a checksum
-mismatch, a package outside the new major — fails the preparation as before, and the second run's
-output is held to the same standard, because `-e` exits zero whatever it carried on past and a
-branch is never rebuilt once it exists, so a transient failure would stay baked into it. "cannot
-find module providing package" is deliberately not accepted: it is also what an unanswered lookup
-looks like.
+plainly. It is never a blanket `-e`, because `-e` exits zero whatever it carried on past and a
+branch is never rebuilt once it exists, so a transient failure would stay baked into it:
+
+- Any other error — a registry that did not answer, a checksum mismatch, a package outside the new
+  major — fails the preparation as before. "cannot find module providing package" is deliberately
+  not accepted, since it is also what an unanswered lookup looks like.
+- "does not contain package" is also what the go command says when the package moved into a module
+  of its own below the new major and the registry did not serve that module: it tries the longest
+  module path first and lets a module it found outrank one it was told does not exist. So
+  `confirmDropped` asks for every path between the package and the new major directly
+  (`go list -m -versions`); one that lists versions, or a query that fails, means the package is
+  not known to be gone. A registry that consistently denies a module exists cannot be told apart
+  from one that does not have it, which is the residual risk.
+- The second run is held to the same standard, and what *it* reports is the answer: a package the
+  first run could not find and the second one did was never dropped, so the branch is judged by
+  vet like any other.
+- When `-e` leaves nothing requiring the new major — every package the module imported from it is
+  gone, so both requirements are dropped — the preparation fails: that is a rewrite, and a branch
+  saying it moved the module would have moved nothing.
 
 A note quotes the first *error* the go command printed (`migrationDetail`), not its first line.
 The progress lines (`go: downloading`, `go: finding module for package`, `go: found`, …) and the

@@ -39,9 +39,13 @@ require (
 type majorRegistry struct {
 	// versions holds "<path> <space-separated versions>" lines.
 	versions string
-	// declared holds "<path>@<version> <declared module path>" lines, for the
-	// releases whose go.mod names a path other than the one they were listed
-	// under; "-" makes the query fail. Anything absent declares its own path.
+	// declared holds "<path>@<version> <declared path> [<repository> [crlf]]"
+	// lines, for the releases whose go.mod or repository needs spelling out.
+	// The declared path "!" makes the go command refuse the version as invalid
+	// at that path, and "-" makes the query fail the way an unreachable
+	// registry does. The repository defaults to the probed path without its
+	// /vN, "none" leaves it unknown, and "crlf" writes the go.mod with Windows
+	// line endings. Anything absent declares its own path.
 	declared string
 	// vendored puts a vendor directory in the module, where the real command
 	// refuses both queries unless it is told not to read the vendor tree.
@@ -52,9 +56,9 @@ type majorRegistry struct {
 // from a registry, and logging every call:
 //
 //   - "list -m -versions <path>" from the versions table;
-//   - "list -m -f {{.GoMod}} <path>@<version>" by writing that version's go.mod
-//     and printing where it is, the way the real command points at its module
-//     cache.
+//   - "list -m -f {{.GoMod}}|{{...Origin.URL}} <path>@<version>" by writing that
+//     version's go.mod and printing where it is, the way the real command
+//     points at its module cache, beside the repository it came from.
 //
 // It reproduces the parts of the real command the probe turns on: a major that
 // was never published answers with the path and NO versions, and exits zero.
@@ -89,13 +93,27 @@ func stubVersionsGoBinary(t *testing.T, dir string, registry majorRegistry) (str
 		"    for arg in \"$@\"; do probe=\"$arg\"; done\n" +
 		"    case \" $* \" in\n" +
 		"        *\" -f \"*)\n" +
-		"            declared=$(awk -v p=\"$probe\" '$1 == p { print $2; exit }' " +
+		"            entry=$(awk -v p=\"$probe\" '$1 == p { print $2 \"|\" $3 \"|\" $4; exit }' " +
 		shellQuote(declaredPath) + ")\n" +
-		"            [ \"$declared\" != \"-\" ] || exit 1\n" +
+		"            declared=\"${entry%%|*}\"; rest=\"${entry#*|}\"\n" +
+		"            repository=\"${rest%%|*}\"; style=\"${rest#*|}\"\n" +
+		"            case \"$declared\" in\n" +
+		"                '!') echo \"go: $probe: invalid version: go.mod has non-.../v2 module path\" >&2\n" +
+		"                   exit 1 ;;\n" +
+		"                -) echo \"go: $probe: dial tcp: lookup proxy.golang.org: no such host\" >&2\n" +
+		"                   exit 1 ;;\n" +
+		"            esac\n" +
 		"            [ -n \"$declared\" ] || declared=\"${probe%@*}\"\n" +
+		"            [ -n \"$repository\" ] || " +
+		"repository=\"https://$(printf '%s' \"${probe%@*}\" | sed 's|/v[0-9][0-9]*$||')\"\n" +
+		"            [ \"$repository\" != none ] || repository=\"\"\n" +
 		"            mod=" + shellQuote(modsDir) + "/$(printf '%s' \"$probe\" | tr '/@' '__').mod\n" +
-		"            printf 'module %s\\n\\ngo 1.21\\n' \"$declared\" > \"$mod\"\n" +
-		"            echo \"$mod\"\n" +
+		"            if [ \"$style\" = crlf ]; then\n" +
+		"                printf 'module %s\\r\\n\\r\\ngo 1.21\\r\\n' \"$declared\" > \"$mod\"\n" +
+		"            else\n" +
+		"                printf 'module %s\\n\\ngo 1.21\\n' \"$declared\" > \"$mod\"\n" +
+		"            fi\n" +
+		"            echo \"$mod|$repository\"\n" +
 		"            exit 0 ;;\n" +
 		"    esac\n" +
 		"    versions=$(awk -v p=\"$probe\" '$1 == p { $1 = \"\"; print; exit }' " +
@@ -325,11 +343,13 @@ func TestGoMajorAvailableScriptReportsThePathAReleaseDeclares(t *testing.T) {
 			// charmbracelet's shape: v2 is tagged in the repository v1 lives
 			// in, so the registry lists it under the GitHub path, but its
 			// go.mod declares the vanity path and `go get` refuses the other.
+			// Both paths lead to the same repository.
 			name: "a release that moved is reported where it moved to",
 			registry: majorRegistry{
 				versions: "github.com/example/lib/v2 v2.0.0 v2.1.0\n" +
 					"example.land/lib/v2 v2.0.0 v2.1.0\n",
-				declared: "github.com/example/lib/v2@v2.1.0 example.land/lib/v2\n",
+				declared: "github.com/example/lib/v2@v2.1.0 example.land/lib/v2\n" +
+					"example.land/lib/v2@v2.1.0 example.land/lib/v2 https://github.com/example/lib\n",
 			},
 			want: []string{libMajorMarker + "example.land/lib/v2|v2.1.0"},
 		},
@@ -339,17 +359,19 @@ func TestGoMajorAvailableScriptReportsThePathAReleaseDeclares(t *testing.T) {
 				versions: "github.com/example/lib/v2 v2.1.0\n" +
 					"example.land/lib/v2 v2.1.0\n" +
 					"example.land/lib/v3 v3.0.0\n",
-				declared: "github.com/example/lib/v2@v2.1.0 example.land/lib/v2\n",
+				declared: "github.com/example/lib/v2@v2.1.0 example.land/lib/v2\n" +
+					"example.land/lib/v2@v2.1.0 example.land/lib/v2 https://github.com/example/lib\n",
 			},
 			want: []string{libMajorMarker + "example.land/lib/v3|v3.0.0"},
 		},
 		{
-			// A v2 tag whose go.mod forgot the /v2: nothing can require it as
-			// a v2, under either path.
-			name: "a release declaring another major is not a newer major",
+			// hashicorp/consul's /v2 tags, whose go.mod forgot the /v2, and
+			// docker/docker's /v28 ones, which have no go.mod at all: the
+			// registry lists them, and the go command refuses every one.
+			name: "a version the go command refuses at its path is not a newer major",
 			registry: majorRegistry{
 				versions: "github.com/example/lib/v2 v2.0.0\n",
-				declared: "github.com/example/lib/v2@v2.0.0 github.com/example/lib\n",
+				declared: "github.com/example/lib/v2@v2.0.0 !\n",
 			},
 			want: []string{},
 		},
@@ -360,6 +382,48 @@ func TestGoMajorAvailableScriptReportsThePathAReleaseDeclares(t *testing.T) {
 				declared: "github.com/example/lib/v2@v2.1.0 example.land/lib/v2\n",
 			},
 			want: []string{},
+		},
+		{
+			// A fork that still carries the tags of the repository it was
+			// forked from: following the go.mod would point the repository at
+			// that one, off the fork it chose.
+			name: "a fork is not pointed at the repository its tags came from",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.1.0\n" +
+					"example.org/upstream/v2 v2.1.0\n",
+				declared: "github.com/example/lib/v2@v2.1.0 example.org/upstream/v2\n" +
+					"example.org/upstream/v2@v2.1.0 example.org/upstream/v2 https://github.com/upstream/lib\n",
+			},
+			want: []string{},
+		},
+		{
+			name: "a move the registry cannot vouch for is a miss",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.1.0\n" +
+					"example.land/lib/v2 v2.1.0\n",
+				declared: "github.com/example/lib/v2@v2.1.0 example.land/lib/v2 none\n",
+			},
+			want: []string{},
+		},
+		{
+			name: "the gopkg.in spelling of the same major is the same major",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.0.0\n" +
+					"github.com/example/lib/v3 v3.0.1\n" +
+					"gopkg.in/example.v3 v3.0.1\n",
+				declared: "github.com/example/lib/v3@v3.0.1 gopkg.in/example.v3\n" +
+					"gopkg.in/example.v3@v3.0.1 gopkg.in/example.v3 https://github.com/example/lib\n",
+			},
+			want: []string{libMajorMarker + "gopkg.in/example.v3|v3.0.1"},
+		},
+		{
+			name: "a go.mod with Windows line endings reads the same",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.1.0\n",
+				declared: "github.com/example/lib/v2@v2.1.0 github.com/example/lib/v2 " +
+					"https://github.com/example/lib crlf\n",
+			},
+			want: []string{libMajorMarker + "github.com/example/lib/v2|v2.1.0"},
 		},
 		{
 			// The old probe would have reported it, and a registry hiccup on
@@ -393,12 +457,13 @@ func TestGoMajorAvailableScriptStopsFollowingModulesThatPointAtEachOther(t *test
 	t.Parallel()
 
 	// given
-	// Two paths each declaring the other: every hop is a probe, so the cap
-	// that bounds a registry that never stops answering bounds this too.
+	// Two paths of one repository, each declaring the other: every hop is a
+	// probe, so the cap that bounds a registry that never stops answering
+	// bounds this too.
 	registry := majorRegistry{
 		versions: "github.com/example/lib/v2 v2.0.0\nexample.land/lib/v2 v2.0.0\n",
 		declared: "github.com/example/lib/v2@v2.0.0 example.land/lib/v2\n" +
-			"example.land/lib/v2@v2.0.0 github.com/example/lib/v2\n",
+			"example.land/lib/v2@v2.0.0 github.com/example/lib/v2 https://github.com/example/lib\n",
 	}
 
 	// when
