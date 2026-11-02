@@ -325,39 +325,40 @@ func TestCollectMigrationChanges(t *testing.T) {
 		writeTestFile(t, dir, "ignored.txt", "not part of the change set\n")
 
 		// when
-		changes, skipReason, err := golang.CollectMigrationChanges(context.Background(), dir)
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
 
 		// then
 		require.NoError(t, err)
-		assert.Empty(t, skipReason)
-		require.Len(t, changes, 2, "the ignored file is not part of what would be pushed")
-
-		byPath := map[string]string{}
-		for _, change := range changes {
-			byPath[change.Path] = change.ChangeType
-		}
-		assert.Equal(t, map[string]string{"main.go": "edit", "added.go": "add"}, byPath)
+		assert.Empty(t, changes.Skip)
+		assert.Empty(t, changes.LeftInPlace)
+		require.Len(t, changes.Files, 2, "the ignored file is not part of what would be pushed")
+		assert.Equal(t, map[string]string{"main.go": "edit", "added.go": "add"}, changeTypesByPath(changes.Files))
 	})
 
 	t.Run("should refuse a deletion the provider API cannot push", func(t *testing.T) {
 		t.Parallel()
 
-		// given
+		// given: a repository that vendors, and a deletion beside the vendor
+		// directory rather than in it. A file whose name merely starts like
+		// the directory is not in it, and is refused as every deletion was.
 		dir := newMigrationCheckout(t, map[string]string{
-			"go.mod":    "module example.com/app\n\ngo 1.25\n",
-			"vendor.go": "package main\n\nfunc vendored() {}\n",
+			"go.mod":                               "module example.com/app\n\ngo 1.25\n",
+			"vendor.go":                            "package main\n\nfunc vendored() {}\n",
+			"vendor/modules.txt":                   newMajorVendorManifest,
+			"vendor/github.com/example/lib/lib.go": "package lib\n",
 		})
 		require.NoError(t, os.Remove(filepath.Join(dir, "vendor.go")))
 
 		// when
-		changes, skipReason, err := golang.CollectMigrationChanges(context.Background(), dir)
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
 
 		// then
 		require.NoError(t, err)
-		assert.Nil(t, changes)
-		assert.Contains(t, skipReason, "`vendor.go`",
+		assert.Nil(t, changes.Files)
+		assert.Equal(t,
+			"`vendor.go` is deleted or renamed by the migration, which the provider API cannot push",
+			changes.Skip,
 			"the reader is told which file, not that something went wrong")
-		assert.Contains(t, skipReason, "cannot push")
 	})
 
 	t.Run("should refuse a rename the provider API cannot express", func(t *testing.T) {
@@ -371,12 +372,147 @@ func TestCollectMigrationChanges(t *testing.T) {
 		runGit(t, dir, "mv", "lib.go", "vendor.go")
 
 		// when
-		changes, skipReason, err := golang.CollectMigrationChanges(context.Background(), dir)
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
 
 		// then
 		require.NoError(t, err)
-		assert.Nil(t, changes)
-		assert.Contains(t, skipReason, "is deleted or renamed")
+		assert.Nil(t, changes.Files)
+		assert.Contains(t, changes.Skip, "is deleted or renamed")
+	})
+
+	t.Run("should leave in place the vendored files of a module no longer vendored", func(t *testing.T) {
+		t.Parallel()
+
+		// given: re-vendoring after the migration, in the root module and in a
+		// nested one. The old major's files are gone from both trees, and
+		// neither manifest lists it any more.
+		dir := newMigrationCheckout(t, map[string]string{
+			"go.mod":                                     "module example.com/app\n\ngo 1.25\n",
+			"vendor/modules.txt":                         oldMajorVendorManifest,
+			"vendor/github.com/example/lib/lib.go":       "package lib\n",
+			"tools/go.mod":                               "module example.com/app/tools\n\ngo 1.25\n",
+			"tools/vendor/modules.txt":                   oldMajorVendorManifest,
+			"tools/vendor/github.com/example/lib/lib.go": "package lib\n",
+		})
+		for _, moduleDir := range []string{".", "tools"} {
+			revendorNewMajor(t)(filepath.Join(dir, moduleDir))
+		}
+
+		// when
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
+
+		// then
+		require.NoError(t, err)
+		assert.Empty(t, changes.Skip)
+		assert.Equal(t, []string{
+			"tools/vendor/github.com/example/lib/lib.go",
+			"vendor/github.com/example/lib/lib.go",
+		}, changes.LeftInPlace, "the branch keeps them, since it starts from the base that has them")
+		assert.Equal(t, map[string]string{
+			"tools/vendor/github.com/example/lib/v3/lib.go": "add",
+			"tools/vendor/modules.txt":                      "edit",
+			"vendor/github.com/example/lib/v3/lib.go":       "add",
+			"vendor/modules.txt":                            "edit",
+		}, changeTypesByPath(changes.Files), "only what the provider can express is pushed")
+	})
+
+	t.Run("should refuse a deletion from a module that is still vendored", func(t *testing.T) {
+		t.Parallel()
+
+		// given: the new major moved a shared dependency -- here a replaced
+		// one, vendored under its own path -- to a version that lost a file.
+		// Left in place, the file would be compiled with the rest of its
+		// package.
+		const manifest = "# github.com/example/shared v1.0.0 => github.com/example/fork v1.1.0\n" +
+			"## explicit\ngithub.com/example/shared\n"
+		dir := newMigrationCheckout(t, map[string]string{
+			"go.mod":                                "module example.com/app\n\ngo 1.25\n",
+			"vendor/modules.txt":                    manifest,
+			"vendor/github.com/example/shared/a.go": "package shared\n",
+			"vendor/github.com/example/shared/b.go": "package shared\n",
+		})
+		require.NoError(t, os.Remove(filepath.Join(dir, "vendor", "github.com", "example", "shared", "b.go")))
+		writeTestFile(t, dir, "vendor/github.com/example/shared/a.go", "package shared\n\nfunc B() {}\n")
+
+		// when
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
+
+		// then
+		require.NoError(t, err)
+		assert.Nil(t, changes.Files)
+		assert.Empty(t, changes.LeftInPlace)
+		assert.Equal(t,
+			"`vendor/github.com/example/shared/b.go` is deleted from a module that is still vendored, "+
+				"which the provider API cannot push",
+			changes.Skip)
+	})
+
+	t.Run("should refuse a deletion outside a vendor directory whatever else may stay", func(t *testing.T) {
+		t.Parallel()
+
+		// given: the old module's vendored files may stay, and a file that
+		// sorts after them is deleted outside the vendor directory.
+		dir := newMigrationCheckout(t, map[string]string{
+			"go.mod":                               "module example.com/app\n\ngo 1.25\n",
+			"vendor/modules.txt":                   oldMajorVendorManifest,
+			"vendor/github.com/example/lib/lib.go": "package lib\n",
+			"zz.go":                                "package main\n",
+		})
+		revendorNewMajor(t)(dir)
+		require.NoError(t, os.Remove(filepath.Join(dir, "zz.go")))
+
+		// when
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
+
+		// then
+		require.NoError(t, err)
+		assert.Nil(t, changes.Files)
+		assert.Empty(t, changes.LeftInPlace, "nothing is pushed, so nothing is left in place either")
+		assert.Equal(t,
+			"`zz.go` is deleted or renamed by the migration, which the provider API cannot push",
+			changes.Skip)
+	})
+
+	t.Run("should refuse a deletion in a vendor directory that is no module's", func(t *testing.T) {
+		t.Parallel()
+
+		// given: a directory called vendor beside no go.mod, whose manifest
+		// would let the deletion stay if it were read.
+		dir := newMigrationCheckout(t, map[string]string{
+			"go.mod":                  "module example.com/app\n\ngo 1.25\n",
+			"docs/vendor/modules.txt": "# github.com/example/other v1.0.0\n",
+			"docs/vendor/github.com/example/lib/lib.go": "package lib\n",
+		})
+		require.NoError(t, os.Remove(filepath.Join(dir, "docs", "vendor", "github.com", "example", "lib", "lib.go")))
+
+		// when
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
+
+		// then
+		require.NoError(t, err)
+		assert.Nil(t, changes.Files)
+		assert.Contains(t, changes.Skip, "is deleted or renamed by the migration")
+	})
+
+	t.Run("should refuse a deletion in a vendor directory without a manifest", func(t *testing.T) {
+		t.Parallel()
+
+		// given: a vendor tree from before modules, which no manifest
+		// describes, so nothing in it can be shown to be unread.
+		dir := newMigrationCheckout(t, map[string]string{
+			"go.mod":                               "module example.com/app\n\ngo 1.25\n",
+			"vendor/github.com/example/lib/lib.go": "package lib\n",
+			"vendor/github.com/example/lib/doc.go": "package lib\n",
+		})
+		require.NoError(t, os.Remove(filepath.Join(dir, "vendor", "github.com", "example", "lib", "doc.go")))
+
+		// when
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
+
+		// then
+		require.NoError(t, err)
+		assert.Nil(t, changes.Files)
+		assert.Contains(t, changes.Skip, "is deleted or renamed by the migration")
 	})
 
 	t.Run("should say so when the migration changed nothing", func(t *testing.T) {
@@ -389,12 +525,147 @@ func TestCollectMigrationChanges(t *testing.T) {
 		})
 
 		// when
-		changes, skipReason, err := golang.CollectMigrationChanges(context.Background(), dir)
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
 
 		// then
 		require.NoError(t, err)
-		assert.Nil(t, changes)
-		assert.Contains(t, skipReason, "changed nothing")
+		assert.Nil(t, changes.Files)
+		assert.Contains(t, changes.Skip, "changed nothing")
+	})
+}
+
+func TestLeftInPlaceNote(t *testing.T) {
+	t.Parallel()
+
+	const reason = ": the provider API cannot delete files, and `go mod vendor` removes them"
+
+	cases := []struct {
+		name        string
+		leftInPlace []string
+		want        string
+	}{
+		{
+			name: "should name the root module's vendor directory once",
+			leftInPlace: []string{
+				"vendor/github.com/example/lib/lib.go",
+				"vendor/github.com/example/lib/pkg/pkg.go",
+			},
+			want: "the old module's vendored files are still under `vendor/`" + reason,
+		},
+		{
+			name: "should name the vendor directory of each module",
+			leftInPlace: []string{
+				"tools/vendor/github.com/example/lib/lib.go",
+				"vendor/github.com/example/lib/lib.go",
+			},
+			want: "the old module's vendored files are still under `tools/vendor/` and `vendor/`" + reason,
+		},
+		{
+			name: "should name two and count the rest",
+			leftInPlace: []string{
+				"a/vendor/github.com/example/lib/lib.go", "b/vendor/github.com/example/lib/lib.go",
+				"c/vendor/github.com/example/lib/lib.go", "d/vendor/github.com/example/lib/lib.go",
+			},
+			want: "the old module's vendored files are still under `a/vendor/`, `b/vendor/` and 2 more" + reason,
+		},
+		{
+			name:        "should stop at the module's own vendor directory",
+			leftInPlace: []string{"tools/vendor/github.com/example/vendor/lib.go"},
+			want:        "the old module's vendored files are still under `tools/vendor/`" + reason,
+		},
+		{
+			name:        "should name the directory of a file in no vendor directory",
+			leftInPlace: []string{"lib/lib.go"},
+			want:        "the old module's vendored files are still under `lib/`" + reason,
+		},
+		{
+			name:        "should say nothing when nothing was left in place",
+			leftInPlace: nil,
+			want:        "",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			leftInPlace := testCase.leftInPlace
+
+			// when
+			note := golang.LeftInPlaceNote(leftInPlace)
+
+			// then
+			assert.Equal(t, testCase.want, note)
+		})
+	}
+}
+
+func TestWithStandingNote(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should append the standing note to a note that leaves room for it", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		const note = "it does not build yet: main.go:9:2: undefined: lib.NewName"
+
+		// when
+		joined := golang.WithStandingNote(note, leftInPlaceVendorNote)
+
+		// then
+		assert.Equal(t, note+"; "+leftInPlaceVendorNote, joined)
+	})
+
+	t.Run("should cut the note before the standing one rather than the standing one", func(t *testing.T) {
+		t.Parallel()
+
+		// given: a compiler error long enough to fill a note on its own.
+		note := "it does not build yet: " + strings.Repeat("github.com/example/lib/v3/internal/deep/pkg ", 10)
+
+		// when
+		joined := golang.WithStandingNote(note, leftInPlaceVendorNote)
+
+		// then
+		assert.True(t, strings.HasSuffix(joined, "...; "+leftInPlaceVendorNote),
+			"the cut is marked, and the standing note follows it whole")
+		assert.LessOrEqual(t, len(joined), 300)
+		assert.Equal(t, joined, golang.MigrationNote(joined, ""),
+			"so the cut the note gets when it is rendered takes nothing more")
+	})
+
+	t.Run("should not cut a note that fits beside the standing one exactly", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		note := strings.Repeat("x", 300-len("; ")-len(leftInPlaceVendorNote))
+
+		// when
+		joined := golang.WithStandingNote(note, leftInPlaceVendorNote)
+
+		// then
+		assert.Equal(t, note+"; "+leftInPlaceVendorNote, joined)
+		assert.Len(t, joined, 300)
+	})
+
+	t.Run("should be the standing note alone when nothing precedes it", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		joined := golang.WithStandingNote("", leftInPlaceVendorNote)
+
+		// then
+		assert.Equal(t, leftInPlaceVendorNote, joined)
+	})
+
+	t.Run("should leave the note alone when there is nothing to append", func(t *testing.T) {
+		t.Parallel()
+
+		// given / when
+		joined := golang.WithStandingNote("it does not build yet", "")
+
+		// then
+		assert.Equal(t, "it does not build yet", joined)
 	})
 }
 

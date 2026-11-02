@@ -279,16 +279,28 @@ func MigrateImportPathExcept(importPath, oldPath, newPath string, protected []st
 	return migrateImportPathExcept(importPath, oldPath, newPath, protected)
 }
 
+// MigrationChanges is exported for testing.
+type MigrationChanges = migrationChanges
+
 // CollectMigrationChanges is exported for testing.
-func CollectMigrationChanges(
-	ctx context.Context, worktree string,
-) ([]entities.FileChange, string, error) {
+func CollectMigrationChanges(ctx context.Context, worktree string) (MigrationChanges, error) {
 	return collectMigrationChanges(ctx, worktree)
+}
+
+// LeftInPlaceNote is exported for testing: what a prepared migration tells the
+// reader about the vendored files it could not delete.
+func LeftInPlaceNote(leftInPlace []string) string {
+	return leftInPlaceNote(leftInPlace)
 }
 
 // MigrationNote is exported for testing.
 func MigrationNote(message, token string) string {
 	return migrationNote(message, token)
+}
+
+// WithStandingNote is exported for testing.
+func WithStandingNote(note, standing string) string {
+	return withStandingNote(note, standing)
 }
 
 // MigrationDetail is exported for testing: the reason a go command's output
