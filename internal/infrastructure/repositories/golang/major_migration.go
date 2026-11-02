@@ -241,14 +241,18 @@ func prepareOneMigration(
 		prepared.Note = migrationNote(changes.Skip, params.AuthToken)
 		return prepared
 	}
+	// The note goes into the commit message, which is pushed into the
+	// repository, and the token sits in the git configuration the go commands
+	// ran with, as a credential URL a toolchain error can echo. So it is
+	// redacted here, on every path and before anything is built from it --
+	// migrationCommitMessage has no token to redact with -- and before
+	// withStandingNote can cut it, since a cut through the token would leave a
+	// piece of it the redaction no longer recognises.
+	build.Note = support.RedactTokens(build.Note, params.AuthToken)
 	if len(changes.LeftInPlace) > 0 {
 		// In the build's note rather than beside it, so that the commit message
-		// the provider prefills the pull request with says it as well. Redacted
-		// before it is cut, because a cut through the token would leave a
-		// piece of it the redaction after it no longer recognises.
-		build.Note = withStandingNote(
-			support.RedactTokens(build.Note, params.AuthToken), leftInPlaceNote(changes.LeftInPlace),
-		)
+		// the provider prefills the pull request with says it as well.
+		build.Note = withStandingNote(build.Note, leftInPlaceNote(changes.LeftInPlace))
 		logger.Infof(
 			"[golang] Leaving %d vendored file(s) the migration of %s deleted on branch %s: "+
 				"the provider API cannot delete files",
@@ -1111,7 +1115,7 @@ func collectMigrationChanges(ctx context.Context, worktree string) (migrationCha
 		return migrationChanges{}, fmt.Errorf("failed to read the changes of the migration: %w", err)
 	}
 
-	vendored := vendoredModules(worktree)
+	vendored := vendoredModules(ctx, worktree)
 
 	var collected migrationChanges
 	for record := range strings.SplitSeq(string(output), "\x00") {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -341,6 +342,50 @@ func TestMigrationsForRunReportsWhatItCouldNotDo(t *testing.T) {
 		assert.Contains(t, migrations[0].Note, "undefined: lib.NewName",
 			"the reader is told what the new major's API changed")
 		assert.Contains(t, provider.BranchInputs[0].CommitMessage, "It does not build yet.")
+	})
+
+	t.Run("should keep the token out of the commit message whatever the toolchain echoes", func(t *testing.T) {
+		t.Parallel()
+
+		// given: a build error that echoes the credential URL the go commands
+		// authenticate through. The commit message is pushed into the
+		// repository, where everybody who can read it would find the token.
+		// The URL is assembled rather than spelled out, so that no line of
+		// this file is shaped like a credential for a secret scanner to find.
+		const token = "fixture-token-placeholder"
+		echoedURL := (&url.URL{
+			Scheme: "https",
+			User:   url.UserPassword("x-access-token", token),
+			Host:   "github.com",
+			Path:   "/example/private/info/refs",
+		}).String()
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		provider := &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+		runner := &stubGoRunner{answers: map[string]stubGoAnswer{
+			"vet ./...": {
+				output: "main.go:4:2: github.com/example/private@v1.0.0: reading " + echoedURL + ": 403\n",
+				fails:  true,
+			},
+		}}
+		params := libMigrationParams(repoDir, provider, runner)
+		params.AuthToken = token
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), params, true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.True(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "it does not build yet")
+		assert.NotContains(t, migrations[0].Note, token)
+		require.Len(t, provider.BranchInputs, 1)
+		assert.Contains(
+			t,
+			provider.BranchInputs[0].CommitMessage,
+			"[REDACTED]",
+			"the error itself still reaches the reader",
+		)
+		assert.NotContains(t, provider.BranchInputs[0].CommitMessage, token)
 	})
 
 	t.Run("should name why go get failed rather than what it downloaded", func(t *testing.T) {
@@ -851,7 +896,8 @@ func TestMigrationsForRunInAVendoredRepository(t *testing.T) {
 		require.Len(t, migrations, 1)
 		assert.False(t, migrations[0].Prepared)
 		assert.Contains(t, migrations[0].Note,
-			"`vendor/github.com/example/shared/b.go` is deleted from a module that is still vendored")
+			"`vendor/github.com/example/shared/b.go` is deleted from `github.com/example/shared`, "+
+				"which is still vendored")
 		assert.Empty(t, provider.BranchInputs)
 	})
 }
@@ -892,6 +938,24 @@ func revendorNewMajor(t *testing.T) func(dir string) {
 		writeTestFile(t, dir, "vendor/github.com/example/lib/v3/lib.go", "package lib\n")
 		writeTestFile(t, dir, "vendor/modules.txt", newMajorVendorManifest)
 	}
+}
+
+// backoffV4VendorManifest is the vendor manifest of a module that vendors two
+// majors of one dependency, the older of whose paths is a prefix of the newer.
+const backoffV4VendorManifest = "# github.com/example/backoff v1.1.0\n## explicit\n" +
+	"github.com/example/backoff\n" +
+	"# github.com/example/backoff/v4 v4.3.0\n## explicit\ngithub.com/example/backoff/v4\n"
+
+// revendorBackoffV5 re-vendors that module the way `go mod vendor` does after
+// moving `/v4` to `/v5`: `/v4`'s tree goes, `/v5`'s arrives, and v1 stays.
+func revendorBackoffV5(t *testing.T, dir string) {
+	t.Helper()
+
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "vendor", "github.com", "example", "backoff", "v4")))
+	writeTestFile(t, dir, "vendor/github.com/example/backoff/v5/retry.go", "package backoff\n")
+	writeTestFile(t, dir, "vendor/modules.txt", "# github.com/example/backoff v1.1.0\n## explicit\n"+
+		"github.com/example/backoff\n"+
+		"# github.com/example/backoff/v5 v5.0.2\n## explicit\ngithub.com/example/backoff/v5\n")
 }
 
 // changeTypesByPath indexes a change set by the path each change is for.

@@ -442,8 +442,63 @@ func TestCollectMigrationChanges(t *testing.T) {
 		assert.Nil(t, changes.Files)
 		assert.Empty(t, changes.LeftInPlace)
 		assert.Equal(t,
-			"`vendor/github.com/example/shared/b.go` is deleted from a module that is still vendored, "+
-				"which the provider API cannot push",
+			"`vendor/github.com/example/shared/b.go` is deleted from `github.com/example/shared`, "+
+				"which is still vendored, and the provider API cannot push the deletion",
+			changes.Skip)
+	})
+
+	t.Run("should leave in place an old major's files while an older major of it stays vendored", func(t *testing.T) {
+		t.Parallel()
+
+		// given: backoff's shape -- the migration moves `/v4` to `/v5` while
+		// another dependency still vendors v1, whose path is a prefix of every
+		// path under `/v4`. The deleted files are `/v4`'s own, and nothing reads
+		// them any more.
+		dir := newMigrationCheckout(t, map[string]string{
+			"go.mod":             "module example.com/app\n\ngo 1.25\n",
+			"vendor/modules.txt": backoffV4VendorManifest,
+			"vendor/github.com/example/backoff/backoff.go":  "package backoff\n",
+			"vendor/github.com/example/backoff/v4/retry.go": "package backoff\n",
+		})
+		revendorBackoffV5(t, dir)
+
+		// when
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
+
+		// then
+		require.NoError(t, err)
+		assert.Empty(t, changes.Skip, "v1 stays vendored, but the deleted files were never v1's")
+		assert.Equal(t, []string{"vendor/github.com/example/backoff/v4/retry.go"}, changes.LeftInPlace)
+		assert.Equal(t, map[string]string{
+			"vendor/github.com/example/backoff/v5/retry.go": "add",
+			"vendor/modules.txt":                            "edit",
+		}, changeTypesByPath(changes.Files))
+	})
+
+	t.Run("should name the module that stays vendored when it refuses a deletion from it", func(t *testing.T) {
+		t.Parallel()
+
+		// given: the same migration, but re-vendoring also dropped a file of
+		// v1, which is still vendored and would compile it.
+		dir := newMigrationCheckout(t, map[string]string{
+			"go.mod":             "module example.com/app\n\ngo 1.25\n",
+			"vendor/modules.txt": backoffV4VendorManifest,
+			"vendor/github.com/example/backoff/backoff.go":  "package backoff\n",
+			"vendor/github.com/example/backoff/legacy.go":   "package backoff\n",
+			"vendor/github.com/example/backoff/v4/retry.go": "package backoff\n",
+		})
+		revendorBackoffV5(t, dir)
+		require.NoError(t, os.Remove(filepath.Join(dir, "vendor", "github.com", "example", "backoff", "legacy.go")))
+
+		// when
+		changes, err := golang.CollectMigrationChanges(context.Background(), dir)
+
+		// then
+		require.NoError(t, err)
+		assert.Nil(t, changes.Files)
+		assert.Equal(t,
+			"`vendor/github.com/example/backoff/legacy.go` is deleted from `github.com/example/backoff`, "+
+				"which is still vendored, and the provider API cannot push the deletion",
 			changes.Skip)
 	})
 
