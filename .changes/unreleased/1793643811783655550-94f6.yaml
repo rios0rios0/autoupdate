@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed the Go major probe never reporting a newer major for a module that vendors its dependencies: under the default `-mod=vendor` the go command refused to list versions, and the refusal was read as nothing newer being published'
-time: '2026-11-02T18:23:31.783527151Z'
