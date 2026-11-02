@@ -37,10 +37,13 @@ const (
 	// recognisable name is what lets the temp-directory sweep remove it.
 	migrationWorktreePattern = "autoupdate-migration-*"
 
-	// migrationNoteLimit is how long a note may get before it is cut. Notes are
-	// rendered into a table in a pull request description, and a compiler error
-	// pasted whole would wreck the table it sits in.
-	migrationNoteLimit = 160
+	// migrationNoteLimit is how long a note may get before it is cut. A note is
+	// rendered as a bullet under the table in a pull request description and in
+	// the commit message the provider prefills the pull request with, and a
+	// compiler log pasted whole would bury both. It is long enough for the
+	// package paths a go error names, because those are usually the reason
+	// itself: at 160 the cut fell in the middle of them.
+	migrationNoteLimit = 300
 
 	// replaceVerb is the directive that redirects a module somewhere other than
 	// where its path says it lives.
@@ -448,7 +451,7 @@ func prepareMigrationInWorktree(
 		return build, fmt.Errorf("go command runner is not configured")
 	}
 
-	touched, err := bumpMigrationModules(runner, worktree, major, rewritten)
+	touched, missing, err := bumpMigrationModules(runner, worktree, major, rewritten)
 	if err != nil {
 		return build, err
 	}
@@ -457,21 +460,36 @@ func prepareMigrationInWorktree(
 		return build, nil
 	}
 
-	build.Compiles = true
-	for _, dir := range touched {
-		if err = runner.run(filepath.Join(worktree, filepath.FromSlash(dir)), "vet", "./..."); err != nil {
-			// One module that does not build is the answer: the branch needs
-			// work before it can merge. Not an error -- a migration branch that
-			// still needs its API changes applied is the normal case.
-			build.Compiles = false
-			build.Note = joinNotes(build.Note, "it does not build yet: "+migrationDetail(err.Error()))
-			break
-		}
+	if len(missing) > 0 {
+		// Already known not to build, and why: an import names a package the
+		// new major does not have. That says more than the compiler would, so
+		// vet is not asked to say it again.
+		build.Note = joinNotes(build.Note, missingPackagesNote(major.NextPath, missing))
+	} else {
+		build.Compiles, build.Note = vetMigrationModules(runner, worktree, touched, build.Note)
 	}
 
 	support.LocalChangelogUpdate(worktree, []string{migrationChangelogEntry(major)})
 
 	return build, nil
+}
+
+// vetMigrationModules asks `go vet` whether every module the migration touched
+// builds, and returns the answer with the note extended by the reason when it
+// does not.
+func vetMigrationModules(
+	runner *migrationRunner, worktree string, touched []string, note string,
+) (bool, string) {
+	for _, dir := range touched {
+		if err := runner.run(filepath.Join(worktree, filepath.FromSlash(dir)), "vet", "./..."); err != nil {
+			// One module that does not build is the answer: the branch needs
+			// work before it can merge. Not an error -- a migration branch that
+			// still needs its API changes applied is the normal case.
+			return false, joinNotes(note, "it does not build yet: "+migrationDetail(err.Error()))
+		}
+	}
+
+	return true, note
 }
 
 // bumpMigrationModules moves every module that has something to do with the
@@ -481,18 +499,18 @@ func prepareMigrationInWorktree(
 //
 // It returns the directories it touched -- the modules that require the
 // dependency, and the modules whose imports it rewrote -- because those are
-// exactly the modules the build check has to cover afterwards.
+// exactly the modules the build check has to cover afterwards. It also returns
+// the packages under the new path that tidying had to leave unresolved, which
+// is the one failure it carries on past (see runAllowingMissing).
 func bumpMigrationModules(
 	runner *migrationRunner,
 	worktree string,
 	major MajorAvailable,
 	rewritten []string,
-) ([]string, error) {
-	var touched []string
+) ([]string, []string, error) {
+	var touched, missing []string
 
 	for _, dir := range discoverLocalModuleDirs(worktree) {
-		moduleDir := filepath.Join(worktree, filepath.FromSlash(dir))
-
 		requires, err := moduleRequires(worktree, dir, major.Path)
 		if err != nil {
 			// A go.mod this program cannot read is a warning rather than a
@@ -505,22 +523,58 @@ func bumpMigrationModules(
 			continue
 		}
 
-		if err = runner.run(moduleDir, "get", major.NextPath+"@"+major.NextVersion); err != nil {
-			return nil, err
-		}
-		if err = runner.run(moduleDir, "mod", "tidy"); err != nil {
-			return nil, err
-		}
-		if isDirectory(filepath.Join(moduleDir, "vendor")) {
-			if err = runner.run(moduleDir, "mod", "vendor"); err != nil {
-				return nil, err
-			}
+		unresolved, err := bumpMigrationModule(runner, worktree, dir, major)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		touched = append(touched, dir)
+		missing = append(missing, unresolved...)
 	}
 
-	return touched, nil
+	slices.Sort(missing)
+	return touched, slices.Compact(missing), nil
+}
+
+// bumpMigrationModule moves one module onto the new path, and returns the
+// packages under it that the module imports and the new major does not have.
+func bumpMigrationModule(
+	runner *migrationRunner, worktree, dir string, major MajorAvailable,
+) ([]string, error) {
+	moduleDir := filepath.Join(worktree, filepath.FromSlash(dir))
+	if err := runner.run(moduleDir, "get", major.NextPath+"@"+major.NextVersion); err != nil {
+		return nil, err
+	}
+
+	missing, err := runner.runAllowingMissing(moduleDir, major.NextPath, "mod", "tidy")
+	if err != nil {
+		return nil, err
+	}
+	if len(missing) > 0 {
+		// `-e` drops a requirement that provides none of the imported packages,
+		// so when the new major has none of the ones this module uses, the old
+		// requirement and the new one are both gone. That is a rewrite rather
+		// than a migration, and a branch claiming to have moved the module would
+		// have moved nothing.
+		if requires, readErr := moduleRequires(worktree, dir, major.NextPath); readErr != nil || !requires {
+			return nil, fmt.Errorf(
+				"`%s` has none of the packages this module imports from it, so it is more than a rename",
+				major.NextPath,
+			)
+		}
+	}
+	if !isDirectory(filepath.Join(moduleDir, "vendor")) {
+		return missing, nil
+	}
+
+	// Vendoring reads the graph tidy left behind, so it fails on exactly the
+	// packages tidy could not find, and is allowed exactly the same.
+	vendorMissing, err := runner.runAllowingMissing(moduleDir, major.NextPath, "mod", "vendor")
+	if err != nil {
+		return nil, err
+	}
+
+	return append(missing, vendorMissing...), nil
 }
 
 // moduleRequires reports whether the module in dir declares the given module
@@ -877,11 +931,20 @@ type migrationRunner struct {
 }
 
 // run executes one go command in dir.
+func (r *migrationRunner) run(dir string, args ...string) error {
+	_, err := r.output(dir, args...)
+	return err
+}
+
+// output executes one go command in dir and returns what it printed.
 //
 // When the repository has a config.sh, every command is a shell that sources
 // it first: that file is where a private module's GOPRIVATE and its proxies are
 // set, and `go get` on a private module does not authenticate without it.
-func (r *migrationRunner) run(dir string, args ...string) error {
+//
+// The output can end up in a note a reader sees, so the token is scrubbed out
+// of it before anything else reads it.
+func (r *migrationRunner) output(dir string, args ...string) (string, error) {
 	name, fullArgs := r.goBinary, args
 	if r.configSH != "" {
 		script := "source " + shellQuote(r.configSH) + " >/dev/null 2>&1; exec \"$@\""
@@ -893,20 +956,103 @@ func (r *migrationRunner) run(dir string, args ...string) error {
 
 	output := ""
 	if result != nil {
-		output = result.Output
+		output = support.RedactTokens(result.Output, r.token)
 	}
 	if err != nil {
-		// The first line of the output is the reason; the rest is usually the
-		// same error repeated per package. It goes into a note a reader sees,
-		// so the token is scrubbed out of it first.
-		detail := migrationDetail(support.RedactTokens(output, r.token))
+		// The first error is the reason; the rest is usually the same error
+		// repeated per package, behind the lines saying what was downloaded.
+		detail := migrationDetail(output)
 		if detail == "" {
-			detail = err.Error()
+			detail = support.RedactTokens(err.Error(), r.token)
 		}
-		return fmt.Errorf("go %s failed: %s", strings.Join(args, " "), detail)
+		return output, migrationCommandError(args, detail)
+	}
+
+	return output, nil
+}
+
+// runAllowingMissing executes a module command that may fail for one reason
+// only: the new major no longer has a package the code imports. It returns the
+// packages it had to leave unresolved.
+//
+// That failure is part of a migration rather than an obstacle to one -- go-git
+// moved `plumbing/protocol/packp/capability` to `plumbing/protocol/capability`
+// in v6 -- and stopping on it left the repository with no branch at all, which
+// is the one outcome worse than a branch that does not build yet. So the
+// command runs again with `-e`, which records what it can and carries on past
+// the packages it cannot find.
+//
+// It is never a blanket `-e`, because a migration branch is never rebuilt once
+// it exists, and a registry that failed to answer would stay baked into it for
+// good. Every error the first run reported has to be one of those packages;
+// none of them may be a module of its own the registry has heard of (see
+// confirmDropped); and the second run is held to the same standard. What it
+// reports, not what the first run did, is the answer: a package the first run
+// could not find and the second one did was never dropped.
+func (r *migrationRunner) runAllowingMissing(dir, nextPath string, args ...string) ([]string, error) {
+	output, err := r.output(dir, args...)
+	if err == nil {
+		return nil, nil
+	}
+
+	missing, other := missingNewMajorPackages(output, nextPath)
+	if other != "" {
+		return nil, migrationCommandError(args, withoutGoPrefix(other))
+	}
+	if len(missing) == 0 {
+		return nil, err
+	}
+	if err = r.confirmDropped(dir, nextPath, missing); err != nil {
+		return nil, err
+	}
+
+	retryArgs := append(slices.Clone(args), "-e")
+	retryOutput, retryErr := r.output(dir, retryArgs...)
+	if retryErr != nil {
+		return nil, retryErr
+	}
+	missing, other = missingNewMajorPackages(retryOutput, nextPath)
+	if other != "" {
+		return nil, migrationCommandError(retryArgs, withoutGoPrefix(other))
+	}
+
+	return missing, nil
+}
+
+// confirmDropped asks the registry whether a module of its own provides any of
+// the packages the go command could not find.
+//
+// "does not contain package" is what the go command says when the new major has
+// no such package -- and also when the package moved into a module of its own
+// below it and the registry did not serve that module: it tries the longest
+// module path first, and lets a module it found outrank one it was told does
+// not exist. So every path between the package and the new major is asked for
+// directly. One that lists versions is a module the run failed to fetch, and a
+// query that fails is a registry that is not answering; either way the
+// packages are not known to be gone.
+func (r *migrationRunner) confirmDropped(dir, nextPath string, missing []string) error {
+	for _, pkg := range missing {
+		for _, candidate := range nestedModuleCandidates(pkg, nextPath) {
+			output, err := r.output(dir, "list", "-mod=readonly", "-m", "-versions", candidate)
+			if err != nil {
+				return err
+			}
+			if moduleListsVersions(output, candidate) {
+				return fmt.Errorf(
+					"`%s` is published as a module of its own, which the go command could not fetch",
+					candidate,
+				)
+			}
+		}
 	}
 
 	return nil
+}
+
+// migrationCommandError is how a go command that failed is reported: which
+// command, and why.
+func migrationCommandError(args []string, detail string) error {
+	return fmt.Errorf("go %s failed: %s", strings.Join(args, " "), detail)
 }
 
 // --- collecting the result ---
@@ -1140,18 +1286,6 @@ func migrationNote(message, token string) string {
 	}
 
 	return truncateNote(support.RedactTokens(collapseWhitespace(message), token))
-}
-
-// migrationDetail reduces a command's output to the first meaningful line,
-// which is where a toolchain puts the reason it failed.
-func migrationDetail(output string) string {
-	for line := range strings.SplitSeq(output, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			return collapseWhitespace(trimmed)
-		}
-	}
-
-	return ""
 }
 
 // joinNotes appends a note to another, so a row that has several things to say

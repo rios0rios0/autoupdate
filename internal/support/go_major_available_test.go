@@ -3,6 +3,7 @@ package support_test
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,26 +35,87 @@ require (
 )
 `
 
-// stubVersionsGoBinary writes a fake `go` answering "list -m -versions" from a
-// table of "<path> <space-separated versions>" lines, and logging every call.
+// majorRegistry is what the stub `go` answers the probe from.
+type majorRegistry struct {
+	// versions holds "<path> <space-separated versions>" lines.
+	versions string
+	// declared holds "<path>@<version> <declared path> [<repository> [crlf]]"
+	// lines, for the releases whose go.mod or repository needs spelling out.
+	// The declared path "!" makes the go command refuse the version as invalid
+	// at that path, and "-" makes the query fail the way an unreachable
+	// registry does. The repository defaults to the probed path without its
+	// /vN, "none" leaves it unknown, and "crlf" writes the go.mod with Windows
+	// line endings. Anything absent declares its own path.
+	declared string
+	// vendored puts a vendor directory in the module, where the real command
+	// refuses both queries unless it is told not to read the vendor tree.
+	vendored bool
+}
+
+// stubVersionsGoBinary writes a fake `go` answering the probe's two queries
+// from a registry, and logging every call:
 //
-// It reproduces the part of the real command the probe turns on: a major that
+//   - "list -m -versions <path>" from the versions table;
+//   - "list -m -f {{.GoMod}}|{{...Origin.URL}} <path>@<version>" by writing that
+//     version's go.mod and printing where it is, the way the real command
+//     points at its module cache, beside the repository it came from.
+//
+// It reproduces the parts of the real command the probe turns on: a major that
 // was never published answers with the path and NO versions, and exits zero.
 // A stub that failed instead would let a probe keying on the exit status pass
 // this suite and still report every dependency as having a new major waiting.
-func stubVersionsGoBinary(t *testing.T, dir, table string) (string, string) {
+// And in a module with a vendor directory both queries fail unless "-mod" says
+// otherwise, which is the default the real command applies there.
+func stubVersionsGoBinary(t *testing.T, dir string, registry majorRegistry) (string, string) {
 	t.Helper()
 
 	logPath := filepath.Join(dir, "go-calls.log")
 	tablePath := filepath.Join(dir, "versions.txt")
+	declaredPath := filepath.Join(dir, "declared.txt")
+	modsDir := filepath.Join(dir, "mods")
 	binPath := filepath.Join(dir, "fake-go")
 
-	require.NoError(t, os.WriteFile(tablePath, []byte(table), 0o600))
+	require.NoError(t, os.WriteFile(tablePath, []byte(registry.versions), 0o600))
+	require.NoError(t, os.WriteFile(declaredPath, []byte(registry.declared), 0o600))
+	// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+	require.NoError(t, os.Mkdir(modsDir, 0o700))
 
 	script := "#!" + bashPath(t) + "\n" +
 		"echo \"$@\" >> " + shellQuote(logPath) + "\n" +
 		"if [ \"$1\" = \"list\" ]; then\n" +
+		"    if [ -d vendor ]; then\n" +
+		"        case \" $* \" in\n" +
+		"            *\" -mod=readonly \"*|*\" -mod=mod \"*) ;;\n" +
+		"            *) echo \"go: can't determine available versions using the vendor directory\" >&2\n" +
+		"               exit 1 ;;\n" +
+		"        esac\n" +
+		"    fi\n" +
 		"    for arg in \"$@\"; do probe=\"$arg\"; done\n" +
+		"    case \" $* \" in\n" +
+		"        *\" -f \"*)\n" +
+		"            entry=$(awk -v p=\"$probe\" '$1 == p { print $2 \"|\" $3 \"|\" $4; exit }' " +
+		shellQuote(declaredPath) + ")\n" +
+		"            declared=\"${entry%%|*}\"; rest=\"${entry#*|}\"\n" +
+		"            repository=\"${rest%%|*}\"; style=\"${rest#*|}\"\n" +
+		"            case \"$declared\" in\n" +
+		"                '!') echo \"go: $probe: invalid version: go.mod has non-.../v2 module path\" >&2\n" +
+		"                   exit 1 ;;\n" +
+		"                -) echo \"go: $probe: dial tcp: lookup proxy.golang.org: no such host\" >&2\n" +
+		"                   exit 1 ;;\n" +
+		"            esac\n" +
+		"            [ -n \"$declared\" ] || declared=\"${probe%@*}\"\n" +
+		"            [ -n \"$repository\" ] || " +
+		"repository=\"https://$(printf '%s' \"${probe%@*}\" | sed 's|/v[0-9][0-9]*$||')\"\n" +
+		"            [ \"$repository\" != none ] || repository=\"\"\n" +
+		"            mod=" + shellQuote(modsDir) + "/$(printf '%s' \"$probe\" | tr '/@' '__').mod\n" +
+		"            if [ \"$style\" = crlf ]; then\n" +
+		"                printf 'module %s\\r\\n\\r\\ngo 1.21\\r\\n' \"$declared\" > \"$mod\"\n" +
+		"            else\n" +
+		"                printf 'module %s\\n\\ngo 1.21\\n' \"$declared\" > \"$mod\"\n" +
+		"            fi\n" +
+		"            echo \"$mod|$repository\"\n" +
+		"            exit 0 ;;\n" +
+		"    esac\n" +
 		"    versions=$(awk -v p=\"$probe\" '$1 == p { $1 = \"\"; print; exit }' " +
 		shellQuote(tablePath) + ")\n" +
 		"    if [ -n \"${versions// /}\" ]; then\n" +
@@ -80,14 +142,27 @@ func stubVersionsGoBinary(t *testing.T, dir, table string) (string, string) {
 func runMajorProbe(t *testing.T, table string) (string, string) {
 	t.Helper()
 
+	return runMajorProbeAgainst(t, majorRegistry{versions: table})
+}
+
+// runMajorProbeAgainst is runMajorProbe with the whole registry spelled out.
+// The probe runs from the module directory, as it does in the upgrade script,
+// which is what lets a vendor directory there change how the stub answers.
+func runMajorProbeAgainst(t *testing.T, registry majorRegistry) (string, string) {
+	t.Helper()
+
 	dir := t.TempDir()
 	goMod := filepath.Join(dir, "go.mod")
 	require.NoError(t, os.WriteFile(goMod, []byte(majorGoModFixture), 0o600))
+	if registry.vendored {
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.Mkdir(filepath.Join(dir, "vendor"), 0o700))
+	}
 
-	goBin, goLog := stubVersionsGoBinary(t, dir, table)
+	goBin, goLog := stubVersionsGoBinary(t, dir, registry)
 
 	script := filepath.Join(dir, "harness.sh")
-	body := "#!" + bashPath(t) + "\nset -u\n" +
+	body := "#!" + bashPath(t) + "\nset -u\ncd " + shellQuote(dir) + "\n" +
 		support.GoMajorAvailableScript() +
 		"autoupdate_go_report_new_majors " + shellQuote(goBin) + " " +
 		shellQuote(goMod) + " tests/terratest\n"
@@ -252,8 +327,182 @@ func TestGoMajorAvailableScriptReportsNothingWhenNoMajorIsPublished(t *testing.T
 		"an unpublished major must not be reported as available")
 	calls, err := os.ReadFile(goLog)
 	require.NoError(t, err)
-	assert.Contains(t, string(calls), "list -m -versions",
+	assert.Contains(t, string(calls), " -m -versions ",
 		"the probe must actually have asked")
+}
+
+func TestGoMajorAvailableScriptReportsThePathAReleaseDeclares(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		registry majorRegistry
+		want     []string
+	}{
+		{
+			// charmbracelet's shape: v2 is tagged in the repository v1 lives
+			// in, so the registry lists it under the GitHub path, but its
+			// go.mod declares the vanity path and `go get` refuses the other.
+			// Both paths lead to the same repository.
+			name: "a release that moved is reported where it moved to",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.0.0 v2.1.0\n" +
+					"example.land/lib/v2 v2.0.0 v2.1.0\n",
+				declared: "github.com/example/lib/v2@v2.1.0 example.land/lib/v2\n" +
+					"example.land/lib/v2@v2.1.0 example.land/lib/v2 https://github.com/example/lib\n",
+			},
+			want: []string{libMajorMarker + "example.land/lib/v2|v2.1.0"},
+		},
+		{
+			name: "the walk carries on from the path the module moved to",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.1.0\n" +
+					"example.land/lib/v2 v2.1.0\n" +
+					"example.land/lib/v3 v3.0.0\n",
+				declared: "github.com/example/lib/v2@v2.1.0 example.land/lib/v2\n" +
+					"example.land/lib/v2@v2.1.0 example.land/lib/v2 https://github.com/example/lib\n",
+			},
+			want: []string{libMajorMarker + "example.land/lib/v3|v3.0.0"},
+		},
+		{
+			// hashicorp/consul's /v2 tags, whose go.mod forgot the /v2, and
+			// docker/docker's /v28 ones, which have no go.mod at all: the
+			// registry lists them, and the go command refuses every one.
+			name: "a version the go command refuses at its path is not a newer major",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.0.0\n",
+				declared: "github.com/example/lib/v2@v2.0.0 !\n",
+			},
+			want: []string{},
+		},
+		{
+			name: "a major that moved somewhere with no finished release is a miss",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.1.0\n",
+				declared: "github.com/example/lib/v2@v2.1.0 example.land/lib/v2\n",
+			},
+			want: []string{},
+		},
+		{
+			// A fork that still carries the tags of the repository it was
+			// forked from: following the go.mod would point the repository at
+			// that one, off the fork it chose.
+			name: "a fork is not pointed at the repository its tags came from",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.1.0\n" +
+					"example.org/upstream/v2 v2.1.0\n",
+				declared: "github.com/example/lib/v2@v2.1.0 example.org/upstream/v2\n" +
+					"example.org/upstream/v2@v2.1.0 example.org/upstream/v2 https://github.com/upstream/lib\n",
+			},
+			want: []string{},
+		},
+		{
+			name: "a move the registry cannot vouch for is a miss",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.1.0\n" +
+					"example.land/lib/v2 v2.1.0\n",
+				declared: "github.com/example/lib/v2@v2.1.0 example.land/lib/v2 none\n",
+			},
+			want: []string{},
+		},
+		{
+			name: "the gopkg.in spelling of the same major is the same major",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.0.0\n" +
+					"github.com/example/lib/v3 v3.0.1\n" +
+					"gopkg.in/example.v3 v3.0.1\n",
+				declared: "github.com/example/lib/v3@v3.0.1 gopkg.in/example.v3\n" +
+					"gopkg.in/example.v3@v3.0.1 gopkg.in/example.v3 https://github.com/example/lib\n",
+			},
+			want: []string{libMajorMarker + "gopkg.in/example.v3|v3.0.1"},
+		},
+		{
+			name: "a go.mod with Windows line endings reads the same",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.1.0\n",
+				declared: "github.com/example/lib/v2@v2.1.0 github.com/example/lib/v2 " +
+					"https://github.com/example/lib crlf\n",
+			},
+			want: []string{libMajorMarker + "github.com/example/lib/v2|v2.1.0"},
+		},
+		{
+			// The old probe would have reported it, and a registry hiccup on
+			// the second query must not take that notice away.
+			name: "a go.mod that cannot be read keeps the path that was probed",
+			registry: majorRegistry{
+				versions: "github.com/example/lib/v2 v2.1.0\n",
+				declared: "github.com/example/lib/v2@v2.1.0 -\n",
+			},
+			want: []string{libMajorMarker + "github.com/example/lib/v2|v2.1.0"},
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			registry := testCase.registry
+
+			// when
+			output, _ := runMajorProbeAgainst(t, registry)
+
+			// then
+			assert.Equal(t, testCase.want, majorMarkers(output))
+		})
+	}
+}
+
+func TestGoMajorAvailableScriptStopsFollowingModulesThatPointAtEachOther(t *testing.T) {
+	t.Parallel()
+
+	// given
+	// Two paths of one repository, each declaring the other: every hop is a
+	// probe, so the cap that bounds a registry that never stops answering
+	// bounds this too.
+	registry := majorRegistry{
+		versions: "github.com/example/lib/v2 v2.0.0\nexample.land/lib/v2 v2.0.0\n",
+		declared: "github.com/example/lib/v2@v2.0.0 example.land/lib/v2\n" +
+			"example.land/lib/v2@v2.0.0 github.com/example/lib/v2 https://github.com/example/lib\n",
+	}
+
+	// when
+	output, goLog := runMajorProbeAgainst(t, registry)
+
+	// then
+	assert.Empty(t, majorMarkers(output))
+	calls, err := os.ReadFile(goLog)
+	require.NoError(t, err)
+	hops := strings.Count(string(calls), "-m -versions github.com/example/lib/v2\n") +
+		strings.Count(string(calls), "-m -versions example.land/lib/v2\n")
+	assert.Equal(t, 100, hops, "the walk must end at the cap")
+}
+
+func TestGoMajorAvailableScriptProbesAModuleThatVendors(t *testing.T) {
+	t.Parallel()
+
+	// given
+	// In a module with a vendor directory the go command defaults to
+	// -mod=vendor, where it refuses to list versions at all. The probe threw
+	// that error away and read it as "nothing newer", for every such module.
+	registry := majorRegistry{
+		versions: "github.com/example/lib/v2 v2.1.0\n",
+		vendored: true,
+	}
+
+	// when
+	output, goLog := runMajorProbeAgainst(t, registry)
+
+	// then
+	assert.Equal(t, []string{libMajorMarker + "github.com/example/lib/v2|v2.1.0"},
+		majorMarkers(output))
+
+	// The stub has to refuse the query the way the real command does, or this
+	// passes whatever the probe asks.
+	stub := filepath.Join(filepath.Dir(goLog), "fake-go")
+	refused := exec.Command(stub, "list", "-m", "-versions", "github.com/example/lib/v2")
+	refused.Dir = filepath.Dir(goLog)
+	assert.Error(t, refused.Run(), "the stub must refuse a query that reads the vendor tree")
 }
 
 func TestGoMajorAvailableScriptProbesTheRightPaths(t *testing.T) {

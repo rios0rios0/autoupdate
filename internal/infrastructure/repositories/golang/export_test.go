@@ -291,6 +291,17 @@ func MigrationNote(message, token string) string {
 	return migrationNote(message, token)
 }
 
+// MigrationDetail is exported for testing: the reason a go command's output
+// gives for its failure.
+func MigrationDetail(output string) string {
+	return migrationDetail(output)
+}
+
+// MissingPackagesNote is exported for testing.
+func MissingPackagesNote(nextPath string, missing []string) string {
+	return missingPackagesNote(nextPath, missing)
+}
+
 // MigrationCommitMessage is exported for testing.
 func MigrationCommitMessage(major MajorAvailable, compiles bool, note string) string {
 	return migrationCommitMessage(major, migrationBuild{Compiles: compiles, Note: note})

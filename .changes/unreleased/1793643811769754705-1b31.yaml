@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed the Go major probe offering migrations to a path the new major no longer answers to: charmbracelet tags its v2 releases under `github.com/charmbracelet/bubbletea/v2` while their `go.mod` declares `charm.land/bubbletea/v2`, so each of those migrations failed in `go get`; the probe now reads the module path every release declares and moves to it when the same repository publishes it, and no longer offers a version the go command refuses at its path, such as `github.com/docker/docker/v28`, which has no `go.mod` and was offered to every repository on `github.com/docker/docker` `v27`'
+time: '2026-11-02T18:23:31.769699538Z'
