@@ -438,6 +438,15 @@ gigabyte per repository with Kotlin build logic. MSBuild's node reuse is turned 
 Gradle or Maven build runs at a time across the run, since each takes a few gigabytes of memory;
 repositories of other ecosystems keep being processed meanwhile.
 
+Go builds are limited the same way, to what the machine has room for: one per 4 GiB of the
+memory AutoUpdate may use, at most one per CPU and never fewer than one. Applying the Go updater
+type-checks every module it upgrades, and the Go command already compiles one package per CPU,
+so a second build beside the first gains little on a small machine and needs twice the memory,
+while one build after another finds the dependencies the earlier one compiled in the shared cache.
+On Linux the memory is read from the control group AutoUpdate runs in when that is lower than the
+machine's, which is how CI agents and containers size a job; where it cannot be read, one Go
+build runs at a time.
+
 Your configuration is still read from where you keep it: `~/.npmrc`, `~/.m2/settings.xml`,
 `pip.conf`, `NuGet.Config`, `~/.bundle/config`, `.netrc` and `go env -w` are untouched, and
 `~/.gradle/gradle.properties` and its init scripts are linked into each repository's Gradle

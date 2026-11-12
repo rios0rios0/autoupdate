@@ -514,6 +514,39 @@ func (it *RunCommand) processLocalUpdaters(
 	return []entities.PullRequest{*pr}, errorCount + pushErrs
 }
 
+// applyLocalUpdater runs one updater against the clone, holding the run's shared cache
+// so it is never emptied under a go command. An updater that limits its builds
+// (repositories.BuildLimiter) gets its build slot first and the cache second, and
+// gives them back in the reverse order.
+//
+// The order is what keeps a queue from stalling the run. Trim waits for every Use to
+// end, and every Use that starts while it waits waits for it; a repository that took
+// the cache and then queued for a slot would keep the cache from being emptied for as
+// long as the queue ahead of it, with the disk already low and every other repository
+// stopped at its next Use.
+func applyLocalUpdater(
+	ctx context.Context,
+	cache *support.SharedCache,
+	updater repositories.UpdaterRepository,
+	lu repositories.LocalUpdater,
+	repoDir string,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+	opts entities.UpdateOptions,
+) (*repositories.LocalUpdateResult, error) {
+	if limiter, ok := updater.(repositories.BuildLimiter); ok {
+		freeSlot, err := limiter.AcquireBuildSlot(ctx, repo)
+		if err != nil {
+			return nil, err
+		}
+		defer freeSlot()
+	}
+
+	release := cache.Use()
+	defer release()
+	return lu.ApplyUpdates(ctx, repoDir, provider, repo, opts)
+}
+
 // removeRepositoryWorkspace deletes the repository's workspace, and says so when
 // it cannot: a workspace left behind is exactly the growth the workspace exists to
 // prevent, and a deferred removal has no other way to report it.
@@ -536,7 +569,7 @@ func removeRepositoryWorkspace(workspace *support.RepositoryWorkspace, repo enti
 // Every updater's scripts keep their package managers' caches in toolingDir,
 // the repository's own, which is removed together with the clone -- except the
 // Go caches, which go into the run's shared cache, held while the updater runs so
-// it is never emptied under a go command.
+// it is never emptied under a go command (see applyLocalUpdater).
 func (it *RunCommand) runUpdatersOnBranch(
 	ctx context.Context,
 	batchCtx *gitlocal.BatchGitContext,
@@ -569,9 +602,7 @@ func (it *RunCommand) runUpdatersOnBranch(
 		opts := au.opts
 		opts.ToolingDir = toolingDir
 		opts.SharedToolingDir = cache.Dir()
-		release := cache.Use()
-		result, applyErr := lu.ApplyUpdates(ctx, batchCtx.RepoDir(), provider, repo, opts)
-		release()
+		result, applyErr := applyLocalUpdater(ctx, cache, au.updater, lu, batchCtx.RepoDir(), provider, repo, opts)
 		if applyErr != nil {
 			if errors.Is(applyErr, repositories.ErrNoUpdatesNeeded) {
 				logger.Infof("[%s] %s/%s: already up to date",

@@ -101,3 +101,6 @@ const DefaultRepoConcurrency = defaultRepoConcurrency
 
 // CleanupStaleAggregateBranches exports cleanupStaleAggregateBranches for testing.
 var CleanupStaleAggregateBranches = cleanupStaleAggregateBranches //nolint:gochecknoglobals // test export
+
+// ApplyLocalUpdater exports applyLocalUpdater for testing.
+var ApplyLocalUpdater = applyLocalUpdater //nolint:gochecknoglobals // test export

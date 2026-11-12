@@ -43,6 +43,12 @@ const (
 	goChangelogEntryDeps = "- changed the Go module dependencies to their latest versions"
 )
 
+// goBuildMemory is the memory a run sets aside for each Go build it lets run beside
+// another (see AcquireBuildSlot). One package of a large generated SDK client takes the
+// compiler into the gigabytes on its own, and the go command compiles one package per
+// CPU at a time.
+const goBuildMemory = 4 << 30
+
 // defaultRunner is the package-level command runner for remote-mode functions.
 var defaultRunner cmdrunner.Runner = cmdrunner.NewDefaultRunner() //nolint:gochecknoglobals // test override
 
@@ -52,22 +58,55 @@ var defaultRunner cmdrunner.Runner = cmdrunner.NewDefaultRunner() //nolint:goche
 type UpdaterRepository struct {
 	versionFetcher VersionFetcher
 	cmdRunner      cmdrunner.Runner
+	// builds limits the Go builds a batch run has going at once; see AcquireBuildSlot.
+	builds *support.BuildSlots
 }
+
+var _ repositories.BuildLimiter = (*UpdaterRepository)(nil)
 
 // NewUpdaterRepository creates a new Go updater with default dependencies.
 func NewUpdaterRepository() repositories.UpdaterRepository {
 	return &UpdaterRepository{
 		versionFetcher: NewHTTPGoVersionFetcher(&http.Client{Timeout: goVersionTimeout}),
 		cmdRunner:      cmdrunner.NewDefaultRunner(),
+		builds:         newGoBuildSlots(),
 	}
 }
 
 // NewUpdaterRepositoryWithDeps creates a Go updater with injected dependencies (for testing).
 func NewUpdaterRepositoryWithDeps(vf VersionFetcher) repositories.UpdaterRepository {
-	return &UpdaterRepository{versionFetcher: vf, cmdRunner: cmdrunner.NewDefaultRunner()}
+	return &UpdaterRepository{
+		versionFetcher: vf,
+		cmdRunner:      cmdrunner.NewDefaultRunner(),
+		builds:         newGoBuildSlots(),
+	}
+}
+
+// newGoBuildSlots sizes the pool of Go builds to the machine the run is on.
+func newGoBuildSlots() *support.BuildSlots {
+	return support.NewBuildSlots("Go", support.BuildSlotsForMachine(goBuildMemory))
 }
 
 func (u *UpdaterRepository) Name() string { return updaterName }
+
+// AcquireBuildSlot waits until the run may start one more Go build, and returns the
+// function that frees the slot again (see repositories.BuildLimiter).
+//
+// Applying this updater is a build. The compile guard type-checks every module it
+// upgrades (`go vet ./...`, up to three times a module), and so does every major
+// migration it prepares, which compiles every package the module and its tests import.
+// The go command already compiles one package per CPU, so on a small machine a second
+// build beside the first gains little and needs the memory of two. Worse, modules that
+// share a large dependency graph are all upgraded to the same versions: one after the
+// other, the later ones find the graph compiled in the shared build cache; side by
+// side, each compiles all of it. A batch run that reached several such modules at
+// once took a small CI agent past its memory, until the agent stopped answering.
+//
+// How many may run at once follows the machine: one per goBuildMemory of the memory
+// the process may use, at most one per CPU, and at least one.
+func (u *UpdaterRepository) AcquireBuildSlot(ctx context.Context, repo entities.Repository) (func(), error) {
+	return u.builds.Acquire(ctx, updaterName, repo)
+}
 
 // Detect returns true if the repository has Go marker files (e.g. go.mod).
 // The langforge detector only inspects the repository root, so a repository

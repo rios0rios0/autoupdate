@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed a repository waiting for its turn at a Gradle or Maven build holding the shared Go cache of the run, which kept a disk running low from being emptied for as long as the queue ahead of it: a run now takes the build slot before the cache, for the Go builds it limits as well'
+time: '2026-11-12T23:34:58.328653037Z'

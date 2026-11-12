@@ -60,16 +60,18 @@ var defaultRunner cmdrunner.Runner = cmdrunner.NewDefaultRunner() //nolint:goche
 type UpdaterRepository struct {
 	versionFetcher VersionFetcher
 	cmdRunner      cmdrunner.Runner
-	// builds holds one token per Gradle or Maven build running; see jvmBuildSlots.
-	builds chan struct{}
+	// builds limits the Gradle or Maven builds running at once; see jvmBuildSlots.
+	builds *support.BuildSlots
 }
+
+var _ repositories.BuildLimiter = (*UpdaterRepository)(nil)
 
 // NewUpdaterRepository creates a new Java updater with default dependencies.
 func NewUpdaterRepository() repositories.UpdaterRepository {
 	return &UpdaterRepository{
 		versionFetcher: NewHTTPJavaVersionFetcher(&http.Client{Timeout: javaVersionTimeout}),
 		cmdRunner:      cmdrunner.NewDefaultRunner(),
-		builds:         make(chan struct{}, jvmBuildSlots),
+		builds:         newJVMBuildSlots(),
 	}
 }
 
@@ -78,8 +80,13 @@ func NewUpdaterRepositoryWithDeps(vf VersionFetcher) repositories.UpdaterReposit
 	return &UpdaterRepository{
 		versionFetcher: vf,
 		cmdRunner:      cmdrunner.NewDefaultRunner(),
-		builds:         make(chan struct{}, jvmBuildSlots),
+		builds:         newJVMBuildSlots(),
 	}
+}
+
+// newJVMBuildSlots returns the pool of Gradle and Maven builds a run allows at once.
+func newJVMBuildSlots() *support.BuildSlots {
+	return support.NewBuildSlots("Gradle or Maven", jvmBuildSlots)
 }
 
 func (u *UpdaterRepository) Name() string { return updaterName }
@@ -206,10 +213,6 @@ func (u *UpdaterRepository) ApplyUpdates(
 		env = append(env, "JAVA_VERSION="+vCtx.LatestVersion)
 	}
 
-	release, slotErr := u.acquireBuildSlot(ctx, repo)
-	if slotErr != nil {
-		return nil, slotErr
-	}
 	outputStr, runErr := cmdrunner.RunScript(ctx, u.cmdRunner, cmdrunner.ScriptRun{
 		Body:        buildBatchJavaScript(buildSys, opts.AllowMajorUpdates),
 		TempPattern: "autoupdate-java-local-*",
@@ -218,7 +221,6 @@ func (u *UpdaterRepository) ApplyUpdates(
 		LogPrefix:   updaterName,
 		Verbose:     true,
 	})
-	release()
 	if runErr != nil {
 		return nil, runErr
 	}
@@ -248,8 +250,8 @@ func (u *UpdaterRepository) ApplyUpdates(
 	}, nil
 }
 
-// acquireBuildSlot waits until the run may start one more Gradle or Maven build, and
-// returns the function that frees the slot again.
+// AcquireBuildSlot waits until the run may start one more Gradle or Maven build, and
+// returns the function that frees the slot again (see repositories.BuildLimiter).
 //
 // Those builds are the memory-hungry part of a run. Each starts a client JVM and a
 // build JVM, often a Kotlin compile daemon besides, with heaps a large build sized for
@@ -257,27 +259,8 @@ func (u *UpdaterRepository) ApplyUpdates(
 // such builds side by side took a hosted CI agent to 95% of its memory. Repositories of
 // every other ecosystem carry on while a JVM build waits for its turn, and Java
 // repositories are few, so the wait costs a run little.
-func (u *UpdaterRepository) acquireBuildSlot(
-	ctx context.Context, repo entities.Repository,
-) (func(), error) {
-	if u.builds == nil {
-		return func() {
-			// Without a slot pool no slot was taken, so there is none to free.
-		}, nil
-	}
-
-	select {
-	case u.builds <- struct{}{}:
-	default:
-		logger.Infof("[java] %s/%s is waiting for another repository's Gradle or Maven build to finish",
-			repo.Organization, repo.Name)
-		select {
-		case u.builds <- struct{}{}:
-		case <-ctx.Done():
-			return nil, fmt.Errorf("stopped waiting for a Gradle or Maven build slot: %w", ctx.Err())
-		}
-	}
-	return func() { <-u.builds }, nil
+func (u *UpdaterRepository) AcquireBuildSlot(ctx context.Context, repo entities.Repository) (func(), error) {
+	return u.builds.Acquire(ctx, updaterName, repo)
 }
 
 // buildBatchJavaScript generates a bash script with only language-specific
