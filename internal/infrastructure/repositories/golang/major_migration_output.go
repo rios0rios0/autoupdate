@@ -40,7 +40,8 @@ var toolchainProgressPrefixes = []string{
 // Both are an answer rather than a failure to get one. "cannot find module
 // providing package" is deliberately absent: it is also what a lookup the
 // registry did not answer looks like, and a transient error read as a moved
-// package would be baked into a branch that is never rebuilt.
+// package would be baked into a branch that is not rebuilt until its base
+// moves on.
 var missingPackagePattern = regexp.MustCompile(
 	`(?:does not contain package|no required module provides package) ([^\s;]+)`,
 )

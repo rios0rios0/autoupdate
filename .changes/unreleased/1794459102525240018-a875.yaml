@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed prepared Go major migration branches staying behind their base for good, so a pull request opened from one weeks later dragged along everything merged since: a branch that fell behind and holds only the migration commit is now deleted and prepared again on top of the base, one already up to date is left alone without being rebuilt, and one somebody added commits to, or opened a pull request from, is never touched; the migration is also built from a freshly fetched base, so its files no longer revert what was merged after the checkout was taken'
+time: '2026-11-12T04:51:42.525195076Z'
