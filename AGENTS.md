@@ -765,7 +765,8 @@ reported is a package under the new path that the module "does not contain" (tid
 required module provides" (vendor), it runs again with `-e`, and the branch is kept as `it does
 not build yet`, naming the packages; vet is not asked, since it could only say the same thing less
 plainly. It is never a blanket `-e`, because `-e` exits zero whatever it carried on past and a
-branch is never rebuilt once it exists, so a transient failure would stay baked into it:
+branch is not rebuilt while it is up to date with its base (below), so a transient failure would
+stay baked into it until the base moved on — and for good, once somebody added a commit to it:
 
 - Any other error — a registry that did not answer, a checksum mismatch, a package outside the new
   major — fails the preparation as before. "cannot find module providing package" is deliberately
@@ -813,7 +814,54 @@ signature that a go-git push does not carry. Its name is derived from the depend
 (`chore/migrate-<module>-v<N>`) so that a second run finds the first one's work instead of
 proposing a duplicate — an open pull request short-circuits the preparation before any checkout,
 and every failure is reported on its own row as a note rather than failing the upgrade that earned
-it. `prepare_major_migrations` (`entities.PrepareMajorMigrationsEnabled`, unset means **true**)
+it.
+
+**A migration branch is kept ahead of its base**, the way the upgrade's own dated branch is
+recreated on top of the base on every run. The provider commits the branch on top of the base's
+tip, which makes it ahead of the base only on the day it is created; every merge after that leaves
+it further behind, and a pull request opened from a branch prepared weeks earlier drags along
+everything the base changed since. So, once the worktree exists and before anything is built,
+`inspectMigrationBranch` (`major_migration_branch.go`) asks the remote what is already there —
+`git ls-remote`, then a fetch into the worktree's own `FETCH_HEAD` and into no ref, so the
+checkout's references (the operator's own, in standalone mode) are left exactly as they were — and
+the branch is one of:
+
+- **absent** — prepared and created as before;
+- **current**, already containing the base's tip — left as it is and not built at all, with a note
+  saying so; it is rebuilt once the base moves on, which is also when a newer release of the same
+  major is picked up;
+- **stale**, behind the base and carrying nothing but the commit this tool had the provider make
+  (one commit, under `migrationCommitSubjectPrefix`), or carrying no commit beyond the base at all
+  (merged and never deleted, or pointing at the base itself) — prepared again, then deleted and
+  created anew on top of the base. The deletion comes only once the replacement is built, so a
+  migration that no longer prepares never costs the branch it had; only once the provider has said
+  that no pull request is open from the branch (`pullRequestOpenFrom` keeps the error that
+  `support.PullRequestOpen` swallows, because deleting the source of an open pull request closes it
+  on GitHub); and it is a `git push` leased on the commit the inspection read
+  (`--force-with-lease`), so a branch somebody pushed to in the meantime is refused by the remote
+  rather than deleted. The provider APIs create a branch and never move one, which is why it is a
+  deletion and a creation rather than an update;
+- **claimed**, behind the base with commits this tool did not make — left exactly as it is, with a
+  note, because somebody is finishing the migration on it and it is theirs to rebase. The test is
+  deliberately narrow (`holdsOnlyMigrationCommit`): a second commit, a merge, or one commit under
+  another subject all count as somebody's work, and so does output it cannot read. The one case it
+  cannot tell apart is the migration commit amended in place and pushed back under its own subject;
+- **unknown**, when the remote could not be asked — prepared as though absent, so the provider's
+  refusal (above) reports a branch that is there, which is all a run did before it looked.
+
+An open pull request is never rebuilt, however far behind it falls: somebody opened it, so the
+migration is theirs. The base itself is fetched first (`refreshMigrationBase`) into the checkout's
+`origin/<base>`, which the worktrees are checked out from: the provider commits on top of the base
+as the remote has it, but every file it commits is read from the worktree, and contents prepared
+from an older copy of the base would quietly revert whatever was merged in between. A batch run's
+clone is minutes old; a standalone run's checkout can be weeks old. A failed fetch keeps the
+checkout's own copy, which is what every run used before. Every command that talks to the remote is
+bounded by `migrationRemoteTimeout`, authenticates through the same `GIT_CONFIG_GLOBAL` file the go
+commands use, and has the token scrubbed from anything it prints. A git command cut short is
+interrupted, and killed only after `gitInterruptGrace`, because git removes its lock files when it
+is interrupted and leaves them when it is killed — in standalone mode, in the operator's checkout.
+
+`prepare_major_migrations` (`entities.PrepareMajorMigrationsEnabled`, unset means **true**)
 turns the preparation off, in either direction from any layer, like `allow_major_updates` and for
 the same reason: it starts nothing destructive.
 

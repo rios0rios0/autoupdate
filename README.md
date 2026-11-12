@@ -206,7 +206,9 @@ updaters:
     enabled: false
 
 # Go major migrations are prepared by default. The notice contains a link to
-# open a pull request for the mechanical migration branch.
+# open a pull request for the mechanical migration branch. A branch that falls
+# behind its base is rebuilt on top of it, unless its pull request is open or
+# somebody has added commits to it.
 #prepare_major_migrations: false
 ```
 

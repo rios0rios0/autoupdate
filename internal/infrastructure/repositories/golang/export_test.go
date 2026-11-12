@@ -394,6 +394,20 @@ func PathMajorSuffix(modulePath string) string { return pathMajorSuffix(modulePa
 // RefsHeads is exported for testing branch ref normalization.
 func RefsHeads(branch string) string { return refsHeads(branch) }
 
+// DeleteStaleMigrationBranch is exported for testing: the deletion that makes
+// way for a rebuilt migration branch, leased on the commit that was inspected.
+func DeleteStaleMigrationBranch(ctx context.Context, dir, branch, tip string) error {
+	return deleteStaleMigrationBranch(ctx, dir, branch, tip, nil, "")
+}
+
+// RemoteRefTip is exported for testing: the commit `git ls-remote` reports for
+// exactly one ref.
+func RemoteRefTip(listing, ref string) string { return remoteRefTip(listing, ref) }
+
+// RevListSubjects is exported for testing: the commits `git rev-list --format`
+// lists, one subject each.
+func RevListSubjects(listing string) []string { return revListSubjects(listing) }
+
 // ShellQuote is exported for testing shell argument quoting.
 func ShellQuote(value string) string { return shellQuote(value) }
 

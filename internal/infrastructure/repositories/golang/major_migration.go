@@ -32,6 +32,12 @@ const (
 	// the first one created instead of proposing another.
 	migrationBranchPrefix = "chore/migrate-"
 
+	// migrationCommitSubjectPrefix opens the subject of every commit a
+	// migration branch is created with. It is also how a later run recognises
+	// a branch that holds nothing but that commit, and may therefore be
+	// rebuilt without losing anybody's work (see holdsOnlyMigrationCommit).
+	migrationCommitSubjectPrefix = "chore(deps): prepare the migration of "
+
 	// migrationWorktreePattern is the prefix of the directory the preparation
 	// checks the base branch out into. A killed run leaves it behind, and the
 	// recognisable name is what lets the temp-directory sweep remove it.
@@ -181,6 +187,7 @@ func prepareMajorMigrations(ctx context.Context, params migrationParams) []Migra
 		support.ScriptEnv(params.ToolingDir, params.SharedToolingDir),
 		support.GitAuthEnv(configPath, params.AuthToken)...,
 	)
+	refreshMigrationBase(ctx, params, env)
 	webURL := support.RepositoryWebURL(params.Repo, params.ProviderName)
 
 	results := make([]MigrationPrepared, 0, len(params.Majors))
@@ -208,8 +215,11 @@ func prepareOneMigration(
 	)
 
 	// Checked before anything is prepared, so a run that repeats an earlier
-	// one costs a lookup instead of a clone, a rewrite and a push.
-	if support.PullRequestOpen(ctx, params.Provider, params.Repo, updaterName, prepared.Branch) {
+	// one costs a lookup instead of a clone, a rewrite and a push. An open pull
+	// request also means somebody has taken the migration on, which makes the
+	// branch under it theirs: it is never rebuilt, however far behind it falls.
+	open, openErr := pullRequestOpenFrom(ctx, params, prepared.Branch)
+	if open {
 		prepared.Prepared = true
 		prepared.Note = "a pull request is already open for the prepared branch"
 		return prepared
@@ -222,6 +232,34 @@ func prepareOneMigration(
 	}
 	defer removeWorktree()
 
+	// Looked at before anything is built, because two of the answers leave the
+	// branch exactly as it is, and building the migration would be wasted.
+	existing := inspectMigrationBranch(ctx, worktree, prepared.Branch, env, params.AuthToken)
+	if existing.state == migrationBranchStale && openErr != nil {
+		existing = unknownMigrationBranch(prepared.Branch, "check for an open pull request", openErr)
+	}
+	if note := keptBranchNote(existing.state, params.BaseBranch); note != "" {
+		logger.Infof("[golang] Leaving the migration branch %s as it is: %s", prepared.Branch, note)
+		prepared.Prepared = true
+		prepared.Note = note
+		return prepared
+	}
+
+	return buildAndPublishMigration(ctx, params, major, prepared, worktree, existing, env)
+}
+
+// buildAndPublishMigration builds the migration in the worktree and has the
+// provider publish it, replacing the stale branch the inspection found, if it
+// found one.
+func buildAndPublishMigration(
+	ctx context.Context,
+	params migrationParams,
+	major MajorAvailable,
+	prepared MigrationPrepared,
+	worktree string,
+	existing existingMigrationBranch,
+	env []string,
+) MigrationPrepared {
 	build, err := prepareMigrationInWorktree(ctx, params, major, worktree, env)
 	if err != nil {
 		prepared.Note = migrationNote(err.Error(), params.AuthToken)
@@ -260,10 +298,44 @@ func prepareOneMigration(
 		)
 	}
 
-	err = params.Provider.CreateBranchWithChanges(ctx, params.Repo, entities.BranchInput{
+	// Only now, with the replacement built: a stale branch is never deleted for
+	// a migration that then turns out not to prepare.
+	if existing.state == migrationBranchStale {
+		err = deleteStaleMigrationBranch(ctx, worktree, prepared.Branch, existing.tip, env, params.AuthToken)
+		if err != nil {
+			// The stale branch is still there and still carries the migration,
+			// so it is reported as prepared, behind its base, and why.
+			prepared.Prepared = true
+			prepared.Note = migrationNote(staleBranchNote(params.BaseBranch, err), params.AuthToken)
+			logger.Warnf(
+				"[golang] Could not delete the migration branch %s to prepare it again on top of %s: %v",
+				prepared.Branch, params.BaseBranch, err,
+			)
+			return prepared
+		}
+		logger.Infof(
+			"[golang] Deleted the migration branch %s, which had fallen behind %s, to prepare it again on top of it",
+			prepared.Branch, params.BaseBranch,
+		)
+	}
+
+	return publishMigrationBranch(ctx, params, major, prepared, build, changes.Files)
+}
+
+// publishMigrationBranch has the provider commit the migration on a new branch
+// on top of the base, and reports what came of it.
+func publishMigrationBranch(
+	ctx context.Context,
+	params migrationParams,
+	major MajorAvailable,
+	prepared MigrationPrepared,
+	build migrationBuild,
+	files []entities.FileChange,
+) MigrationPrepared {
+	err := params.Provider.CreateBranchWithChanges(ctx, params.Repo, entities.BranchInput{
 		BranchName:    prepared.Branch,
 		BaseBranch:    refsHeads(params.BaseBranch),
-		Changes:       changes.Files,
+		Changes:       files,
 		CommitMessage: migrationCommitMessage(major, build),
 	})
 	switch {
@@ -279,9 +351,10 @@ func prepareOneMigration(
 			major.Path, major.NextPath, major.NextVersion, prepared.Branch,
 		)
 	case migrationBranchExists(err):
-		// The provider refused to create a branch that is already there. The
-		// migration exists; this run just did not make it, and saying it
-		// compiles would be claiming a build it never ran.
+		// The provider refused to create a branch that is already there: one
+		// the remote could not be asked about beforehand, or one another run
+		// created in the meantime. The migration exists; this run just did not
+		// make it, and saying it compiles would be claiming a build it never ran.
 		prepared.Prepared = true
 		prepared.Note = "the branch already existed, so this run did not verify it"
 		logger.Infof(
@@ -1009,13 +1082,14 @@ func (r *migrationRunner) output(dir string, args ...string) (string, error) {
 // command runs again with `-e`, which records what it can and carries on past
 // the packages it cannot find.
 //
-// It is never a blanket `-e`, because a migration branch is never rebuilt once
-// it exists, and a registry that failed to answer would stay baked into it for
-// good. Every error the first run reported has to be one of those packages;
-// none of them may be a module of its own the registry has heard of (see
-// confirmDropped); and the second run is held to the same standard. What it
-// reports, not what the first run did, is the answer: a package the first run
-// could not find and the second one did was never dropped.
+// It is never a blanket `-e`, because a migration branch is not rebuilt while
+// it is up to date with its base, and a registry that failed to answer would
+// stay baked into it until the base moved on -- for good, once somebody adds a
+// commit to it. Every error the first run reported has to be one of those
+// packages; none of them may be a module of its own the registry has heard of
+// (see confirmDropped); and the second run is held to the same standard. What
+// it reports, not what the first run did, is the answer: a package the first
+// run could not find and the second one did was never dropped.
 func (r *migrationRunner) runAllowingMissing(dir, nextPath string, args ...string) ([]string, error) {
 	output, err := r.output(dir, args...)
 	if err == nil {
@@ -1281,7 +1355,7 @@ func migrationBranchExists(err error) bool {
 func migrationCommitMessage(major MajorAvailable, build migrationBuild) string {
 	var sb strings.Builder
 
-	sb.WriteString("chore(deps): prepare the migration of " + major.Path + " to " + major.NextPath + "\n\n")
+	sb.WriteString(migrationCommitSubjectPrefix + major.Path + " to " + major.NextPath + "\n\n")
 	sb.WriteString(
 		"This dependency was left at " + major.Path + " " + major.CurrentVersion +
 			" by the upgrade: Go publishes " + major.NextVersion +
