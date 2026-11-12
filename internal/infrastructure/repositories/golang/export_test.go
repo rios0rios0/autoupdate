@@ -419,3 +419,11 @@ func ReplacedModuleDir(worktree, modulePath string) string {
 
 // GoChangelogSummary is exported for testing.
 const GoChangelogSummary = goChangelogSummary
+
+// GoBuildMemory exports goBuildMemory for testing.
+const GoBuildMemory = goBuildMemory
+
+// BuildSlotCount reports how many Go builds the updater lets a run have going at once.
+func BuildSlotCount(updater repositories.UpdaterRepository) int {
+	return updater.(*UpdaterRepository).builds.Size() //nolint:forcetypeassert // test helper over this package's own type
+}

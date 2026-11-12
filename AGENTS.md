@@ -51,7 +51,7 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - **Entry point**: `cmd/autoupdate/main.go` builds Cobra commands, `cmd/autoupdate/dig.go` wires the DI container
 - **DI registration**: `internal/container.go` registers all layers bottom-up (repos -> entities -> commands -> controllers)
 - **Domain commands**: `internal/domain/commands/` — `LocalCommand` (single repo), `RunCommand` (batch mode), `SelfUpdateCommand`, and `VersionCommand`
-- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `ProviderRepository`, and `SelfUpdateRepository` interfaces
+- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `BuildLimiter`, `ProviderRepository`, and `SelfUpdateRepository` interfaces
 - **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations for local and batch modes), and `selfupdate`
 - **Support utilities**: `internal/support/` — filesystem helpers (including the shared repository walkers, see below), remote file checker bridging `langforge` with `gitforge`, repo config loader for per-repo opt-out, and the shared changelog writer (see below)
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
@@ -964,13 +964,35 @@ modification time; so a heartbeat (`keepAlive`, every `heartbeatInterval`) renew
 until `Remove` stops it, and the sweep of another run on the same machine never deletes a live
 cache.
 
-The Java updater also runs **one Gradle or Maven build at a time across the whole run**
-(`jvmBuildSlots`, `acquireBuildSlot`): each build starts a client JVM and a build JVM, often a
-Kotlin compile daemon besides, sized for a developer's machine, and two of them side by side took
-a hosted CI agent to 95% of its memory. The slot is held only around the script, so every other
-ecosystem keeps running while a JVM build waits, and the registry holds one updater instance per
-run, which is what makes the slot run-wide. `ApplyUpdates` reads the Java version through the
-injected `versionFetcher`, like the remote path, rather than building its own HTTP fetcher.
+**Heavy builds are limited across the whole run** (`repositories.BuildLimiter`,
+`support.BuildSlots`). An updater whose `ApplyUpdates` is a build a machine holds only a few of
+owns a pool of slots, and `applyLocalUpdater` takes one through `AcquireBuildSlot` before it
+takes the shared cache, giving both back once `ApplyUpdates` returns. The registry holds one
+updater instance per run, which is what makes a pool run-wide, and every other ecosystem keeps
+running while a build waits. The order is load-bearing: `Trim` waits for every `Use` to end and
+blocks every `Use` that starts after it, so a repository that took the cache and then queued for a
+slot would keep a low disk from being emptied for as long as the queue ahead of it.
+`TestApplyLocalUpdater` pins it.
+
+- The Java updater runs **one Gradle or Maven build at a time** (`jvmBuildSlots`): each starts a
+  client JVM and a build JVM, often a Kotlin compile daemon besides, sized for a developer's
+  machine, and two of them side by side took a hosted CI agent to 95% of its memory.
+  `ApplyUpdates` reads the Java version through the injected `versionFetcher`, like the remote
+  path, rather than building its own HTTP fetcher.
+- The Go updater sizes its pool to the machine (`goBuildMemory`, `support.BuildSlotsForMachine`):
+  one build per 4 GiB of the memory the process may use, at most one per CPU, at least one.
+  Applying it is a build -- the compile guard type-checks each upgraded module up to three times,
+  each prepared major migration once more -- and the go command already compiles one package per
+  CPU, so a second build beside the first gains little on a small machine and needs the memory of
+  two. Modules that share a large dependency graph are all upgraded to the same versions: one
+  after the other, the later ones find it compiled in the shared build cache; side by side, each
+  compiles all of it. Several at once took a small CI agent past its memory.
+- `support.MemoryLimit` is the memory the process may use: the physical memory, and on Linux every
+  control group limit from the process's own group up to the root of its hierarchy, the smallest
+  winning (`memory_limit.go`, read through an `fs.FS` so the tests lay out `/proc` and
+  `/sys/fs/cgroup` themselves). CI agents and container runtimes size a job that way, and
+  `/proc/meminfo` knows nothing of it. Where the memory cannot be read (Windows), a pool sized from
+  it has one slot.
 
 No process may outlive its repository either. The Java script runs Gradle with
 `--no-daemon`: a Gradle daemon and the Kotlin compile daemon it starts for Kotlin build logic
@@ -981,7 +1003,7 @@ operator's own caches; `ScriptEnv("")` returns the process environment unchanged
 
 ### Batch Mode Concurrency
 
-`autoupdate run` processes repositories within an org in parallel via `errgroup` (default 4), set by the `concurrency` config field or `--concurrency` flag; values `< 1` are clamped to 1 (sequential). `RunCommand` guards its shared accumulators with a `sync.Mutex` — keep new shared state goroutine-safe when editing the per-repo loop.
+`autoupdate run` processes repositories within an org in parallel via `errgroup` (default 4), set by the `concurrency` config field or `--concurrency` flag; values `< 1` are clamped to 1 (sequential). `RunCommand` guards its shared accumulators with a `sync.Mutex` — keep new shared state goroutine-safe when editing the per-repo loop. Within that fan-out, the builds of an updater that implements `BuildLimiter` are limited by its own pool (see "Per-Repository Workspace" above), so `concurrency` bounds the repositories in flight, not how many Go or JVM builds run.
 
 ## Testing Conventions
 
@@ -991,6 +1013,7 @@ operator's own caches; `ScriptEnv("")` returns the process environment unchanged
 - Parallel execution via `t.Parallel()` and `t.Run()` subtests
 - Test doubles in `test/domain/commanddoubles/` (stubs), `test/domain/entitybuilders/` (builders), and `test/infrastructure/repositorydoubles/` (stubs, spies, builders, and `FakeUpgradeRunner`, which writes manifests the way a package manager would so `ApplyUpdates` can be driven end to end)
 - `test/infrastructure/gitrepo` lays out throwaway git repositories for code that compares the working tree with `HEAD`; it disables signing and hooks so a developer's global git configuration cannot break a test
+- `test/infrastructure/overlap` measures how many of the calls a test drives run at once (`Recorder`), for code that must keep work from running side by side, such as the build slots
 - Uses `stretchr/testify` for assertions — prefer stubs over mocks
 
 <!-- chlog:start -->
