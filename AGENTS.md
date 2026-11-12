@@ -692,7 +692,10 @@ the table gains a fourth column linking the provider's own "open a pull request"
 GitHub's `compare`, GitLab's `merge_requests/new`, Azure DevOps' `pullrequestcreate`
 (`support.PullRequestCreationURL`); a provider with no such page renders a dash rather than a
 guessed link, and the column is absent entirely when nothing was prepared, because a column of
-dashes is the line readers stop seeing.
+dashes is the line readers stop seeing. Every one of those pages selects a branch by its short
+name, so the link carries `main` and `chore/migrate-…`, never `refs/heads/…`: Azure DevOps reads
+`sourceRef=refs/heads/main` as a branch called that, finds none, and opens the form with both
+branches unselected.
 
 The work happens in a `git worktree` of the pull request's **base** branch rather than in the
 run's own checkout, so the upgrade branch being assembled is not touched. Imports of the module

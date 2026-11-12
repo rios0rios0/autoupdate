@@ -123,7 +123,7 @@ func TestPullRequestCreationURL(t *testing.T) {
 				"merge_request%5Btarget_branch%5D=main", got)
 	})
 
-	t.Run("should point Azure DevOps at the create-pull-request page", func(t *testing.T) {
+	t.Run("should point Azure DevOps at the create-pull-request page by branch name", func(t *testing.T) {
 		t.Parallel()
 
 		// given / when
@@ -132,11 +132,51 @@ func TestPullRequestCreationURL(t *testing.T) {
 			"main", "chore/migrate-lib-v3",
 		)
 
-		// then
+		// then: the page selects its branches by their short names; handed
+		// `refs/heads/...` it selects neither, and the reader picks both by hand.
 		assert.Equal(t,
 			"https://dev.azure.com/example/proj/_git/lib/pullrequestcreate?"+
-				"sourceRef=refs%2Fheads%2Fchore%2Fmigrate-lib-v3&"+
-				"targetRef=refs%2Fheads%2Fmain", got)
+				"sourceRef=chore%2Fmigrate-lib-v3&"+
+				"targetRef=main", got)
+	})
+
+	t.Run("should reduce full branch refs to the names every provider's page selects by", func(t *testing.T) {
+		t.Parallel()
+
+		testCases := map[string]struct {
+			webURL string
+			want   string
+		}{
+			support.ProviderGitHub: {
+				webURL: "https://github.com/example/lib",
+				want:   "https://github.com/example/lib/compare/main...chore/migrate-lib-v3?expand=1",
+			},
+			support.ProviderGitLab: {
+				webURL: "https://gitlab.com/example/lib",
+				want: "https://gitlab.com/example/lib/-/merge_requests/new?" +
+					"merge_request%5Bsource_branch%5D=chore%2Fmigrate-lib-v3&" +
+					"merge_request%5Btarget_branch%5D=main",
+			},
+			support.ProviderAzureDevOps: {
+				webURL: "https://dev.azure.com/example/proj/_git/lib",
+				want: "https://dev.azure.com/example/proj/_git/lib/pullrequestcreate?" +
+					"sourceRef=chore%2Fmigrate-lib-v3&targetRef=main",
+			},
+		}
+
+		for provider, testCase := range testCases {
+			t.Run(provider, func(t *testing.T) {
+				t.Parallel()
+
+				// given / when
+				got := support.PullRequestCreationURL(
+					provider, testCase.webURL, "refs/heads/main", "refs/heads/chore/migrate-lib-v3",
+				)
+
+				// then
+				assert.Equal(t, testCase.want, got)
+			})
+		}
 	})
 
 	t.Run("should escape a branch name that needs it and leave its slashes", func(t *testing.T) {
@@ -161,5 +201,8 @@ func TestPullRequestCreationURL(t *testing.T) {
 		assert.Empty(t, support.PullRequestCreationURL(support.ProviderGitHub, "", "main", "b"))
 		assert.Empty(t, support.PullRequestCreationURL(support.ProviderGitHub, "https://example.com", "", "b"))
 		assert.Empty(t, support.PullRequestCreationURL(support.ProviderGitHub, "https://example.com", "main", ""))
+		assert.Empty(t, support.PullRequestCreationURL(
+			support.ProviderAzureDevOps, "https://example.com", "refs/heads/", "b",
+		), "a ref with no branch in it names nothing to select")
 	})
 }

@@ -90,9 +90,17 @@ func webURLFromRemote(remoteURL string) string {
 // rather than an operation that needs an API call and a token. That is what
 // lets the link sit in a pull request description, which is static text.
 //
+// Every one of those pages names a branch by its short name, so base and
+// branch are reduced to one whichever form the caller holds them in. A full
+// ref is not merely redundant there: Azure DevOps looks `refs/heads/main` up as
+// a branch called that, finds none, and opens the form with both branches
+// unselected -- a link that leaves the reader to pick them by hand.
+//
 // A provider with no such page yields nothing, and the caller renders a dash
 // rather than a link that would have to be guessed.
 func PullRequestCreationURL(providerName, webURL, base, branch string) string {
+	base = strings.TrimPrefix(base, refsHeadsPrefix)
+	branch = strings.TrimPrefix(branch, refsHeadsPrefix)
 	if webURL == "" || base == "" || branch == "" {
 		return ""
 	}
@@ -107,8 +115,8 @@ func PullRequestCreationURL(providerName, webURL, base, branch string) string {
 		return webURL + "/-/merge_requests/new?" + query.Encode()
 	case ProviderAzureDevOps:
 		query := url.Values{}
-		query.Set("sourceRef", "refs/heads/"+branch)
-		query.Set("targetRef", "refs/heads/"+base)
+		query.Set("sourceRef", branch)
+		query.Set("targetRef", base)
 		return webURL + "/pullrequestcreate?" + query.Encode()
 	default:
 		return ""

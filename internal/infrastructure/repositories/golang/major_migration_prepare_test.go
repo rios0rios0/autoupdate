@@ -280,7 +280,7 @@ func TestMigrationsForRunReportsWhatItCouldNotDo(t *testing.T) {
 					`"message":"TF401028: The reference 'refs/heads/chore/migrate-example-lib-v3' has ` +
 					`already been updated by another client, so you cannot update it. Please try again."}`,
 				expectedURL: "https://dev.azure.com/example/platform/_git/app/pullrequestcreate?" +
-					"sourceRef=refs%2Fheads%2Fchore%2Fmigrate-example-lib-v3&targetRef=refs%2Fheads%2Fmain",
+					"sourceRef=chore%2Fmigrate-example-lib-v3&targetRef=main",
 			},
 		}
 
