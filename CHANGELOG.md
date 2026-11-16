@@ -22,6 +22,25 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-11-16
+
+### Changed
+
+- changed the Go module `github.com/spf13/pflag` from `v1.0.10` to `v1.1.0`
+- changed the Go module `golang.org/x/crypto` from `v0.58.0` to `v0.59.0`
+- changed the Go module `golang.org/x/text` from `v0.43.0` to `v0.44.0`
+- changed the Go modules `github.com/rios0rios0/gitforge/v4` from `v4.3.1` to `v4.3.2`, `github.com/rios0rios0/langforge` from `v1.1.10` to `v1.1.11` and `github.com/rios0rios0/testkit` from `v0.3.7` to `v0.3.8`
+- changed the Go modules `github.com/zclconf/go-cty` from `v1.19.0` to `v1.20.0` and `gitlab.com/gitlab-org/api/client-go/v3` from `v3.43.0` to `v3.51.0`
+- changed the Go modules `golang.org/x/mod` from `v0.42.0` to `v0.43.0`, `golang.org/x/oauth2` from `v0.37.0` to `v0.38.0`, `golang.org/x/sync` from `v0.24.0` to `v0.25.0`, `golang.org/x/sys` from `v0.49.0` to `v0.50.0` and `golang.org/x/term` from `v0.47.0` to `v0.48.0`
+- changed the Go version from `1.27.3` to `1.27.4`
+
+### Fixed
+
+- fixed `autoupdate run` taking a small machine past its memory when it processed several Go repositories at once: applying the Go updater is a build, since the compile guard and every prepared major migration type-check the module, and the go command already compiles one package per CPU, so builds side by side gained little and needed the memory of all of them, while modules sharing a large dependency graph each compiled all of it instead of finding it in the shared build cache; a run now starts only as many Go builds at once as the machine has room for, one per 4 GiB of the memory the process may use (on Linux the limit of its control group, which is how CI agents and containers size a job), at most one per CPU and never fewer than one
+- fixed a repository waiting for its turn at a Gradle or Maven build holding the shared Go cache of the run, which kept a disk running low from being emptied for as long as the queue ahead of it: a run now takes the build slot before the cache, for the Go builds it limits as well
+- fixed prepared Go major migration branches staying behind their base for good, so a pull request opened from one weeks later dragged along everything merged since: a branch that fell behind and holds only the migration commit is now deleted and prepared again on top of the base, one already up to date is left alone without being rebuilt, and one somebody added commits to, or opened a pull request from, is never touched; the migration is also built from a freshly fetched base, so its files no longer revert what was merged after the checkout was taken
+- fixed the Azure DevOps link that opens the pull request for a prepared Go major migration selecting neither branch: it named both as full `refs/heads/` refs, which the `pullrequestcreate` page reads as branches of that name, so the source and the target had to be picked by hand; every provider's link now names them by their short names
+
 ## [1.3.1] - 2026-11-02
 
 ### Changed
