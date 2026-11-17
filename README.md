@@ -378,6 +378,12 @@ Auth tokens are read automatically from standard environment variables:
 | Azure DevOps| `AZURE_DEVOPS_EXT_PAT` or `SYSTEM_ACCESSTOKEN` |
 | GitLab      | `GITLAB_TOKEN` or `GL_TOKEN`                   |
 
+When `origin` is an SSH remote (`git@...`), the push authenticates with the SSH agent (`SSH_AUTH_SOCK`) and honours your SSH client configuration, although autoupdate never runs the `ssh` binary:
+
+- **Host aliases.** The `HostName`, `Port`, `IdentityFile` and `IdentitiesOnly` of a host alias in `~/.ssh/config` or `/etc/ssh/ssh_config` apply, so a remote such as `git@github.com-work:org/repo.git` pushes with that alias's key.
+- **Host keys.** Hosts are verified against `SSH_KNOWN_HOSTS`, or `~/.ssh/known_hosts` and `/etc/ssh/ssh_known_hosts`, and the server is asked only for the host key types those files record.
+- **WSL.** The Windows profiles' `known_hosts` are read too and, when git runs Windows' `ssh.exe` (for example through `core.sshCommand = ssh.exe`), so is the Windows profile's `.ssh/config`. Keys held by a Windows agent still have to be bridged to a Unix socket, as [AutoBump's guide](https://github.com/rios0rios0/autobump#ssh-authentication-on-wsl) shows.
+
 ### Batch Mode (Config-Driven)
 
 Discover and update all repositories across providers using a config file:

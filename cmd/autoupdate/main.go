@@ -9,6 +9,7 @@ import (
 	"github.com/rios0rios0/autoupdate/internal"
 	"github.com/rios0rios0/autoupdate/internal/domain/commands"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/controllers"
+	gitInfra "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
 )
 
 var version = "dev"
@@ -114,6 +115,14 @@ func main() {
 
 	// Bridge build-time version to domain package
 	commands.AutoupdateVersion = version //nolint:reassign // intentional cross-package assignment of build-time version
+
+	// go-git never runs the ssh binary, so an SSH push would otherwise ignore the operator's
+	// SSH client configuration. gitforge's transport makes every SSH connection dial the
+	// HostName and Port a host alias names in ssh_config (under WSL, the Windows profile's
+	// too when git runs ssh.exe), offer the keys its IdentityFile names, and verify hosts
+	// against the known_hosts discovery, Windows profiles included, asking only for the host
+	// key types it records.
+	gitInfra.InstallSSHTransport()
 
 	// Inject controllers via DIG
 	appContext, localController := injectApp()
