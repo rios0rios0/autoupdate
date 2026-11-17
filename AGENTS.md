@@ -125,7 +125,7 @@ When `commit.gpgsign=true` is set in git config, commits are automatically signe
 ### Push Transport (Local Mode)
 
 Push transport is auto-detected from the origin remote URL:
-- **SSH** (`git@...`): Uses system SSH keys via gitforge's `PushChangesSSH`
+- **SSH** (`git@...`): Pushes through gitforge's `PushChangesSSH` with the SSH agent (`SSH_AUTH_SOCK`). go-git never runs the `ssh` binary, so `main.go` calls gitforge's `InstallSSHTransport()`, which makes every SSH connection honour the operator's ssh_config — the `HostName` and `Port` a host alias names, and the keys its `IdentityFile` names, honouring `IdentitiesOnly`; under WSL the Windows profile's `.ssh/config` too when git runs `ssh.exe` — and verify hosts against the known_hosts discovery (Windows profiles under WSL included), asking only for the host key types it records. Change that behaviour in gitforge, not here
 - **HTTPS** (`https://...`): Uses gitforge's adapter pattern — resolves the provider from the URL, creates a token-enabled instance, and pushes with auth method retry
 
 The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` to avoid import cycles. The auth token (from `--token` flag or env vars) is only needed for HTTPS push and API calls.
