@@ -6,7 +6,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/rios0rios0/cliforge v0.5.3
-	github.com/rios0rios0/gitforge/v4 v4.5.0
+	github.com/rios0rios0/gitforge/v4 v4.6.0
 	github.com/rios0rios0/langforge v1.1.12
 	github.com/rios0rios0/testkit v0.3.9
 	github.com/sirupsen/logrus v1.10.2
@@ -50,11 +50,11 @@ require (
 	gitlab.com/gitlab-org/api/client-go/v3 v3.52.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/crypto v0.59.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/net v0.63.0 // indirect
 	golang.org/x/oauth2 v0.38.0 // indirect
 	golang.org/x/term v0.48.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
-	golang.org/x/tools v0.52.0 // indirect
+	golang.org/x/tools v0.53.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
