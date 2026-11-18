@@ -22,6 +22,18 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-11-18
+
+### Changed
+
+- changed the Go module `github.com/rios0rios0/gitforge/v4` from `v4.4.0` to `v4.5.0`
+- changed the Go module `gitlab.com/gitlab-org/api/client-go/v3` from `v3.51.0` to `v3.52.0`
+- changed the Go modules `github.com/rios0rios0/cliforge` from `v0.5.2` to `v0.5.3`, `github.com/rios0rios0/gitforge/v4` from `v4.3.2` to `v4.4.0`, `github.com/rios0rios0/langforge` from `v1.1.11` to `v1.1.12`, `github.com/rios0rios0/testkit` from `v0.3.8` to `v0.3.9` and `github.com/sergi/go-diff` from `v1.4.0` to `v1.4.5`
+
+### Fixed
+
+- fixed SSH pushes ignoring the operator's SSH client configuration: autoupdate now installs `gitforge`'s SSH transport, so a host alias's `HostName`, `Port`, `IdentityFile` and `IdentitiesOnly` apply, hosts are verified against `known_hosts` (the Windows profiles' too under WSL) with only the host key types it records, and a host recorded with its Ed25519 key no longer fails with `knownhosts: key mismatch`
+
 ## [1.3.2] - 2026-11-16
 
 ### Changed

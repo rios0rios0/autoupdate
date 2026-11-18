@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed SSH pushes ignoring the operator''s SSH client configuration: autoupdate now installs `gitforge`''s SSH transport, so a host alias''s `HostName`, `Port`, `IdentityFile` and `IdentitiesOnly` apply, hosts are verified against `known_hosts` (the Windows profiles'' too under WSL) with only the host key types it records, and a host recorded with its Ed25519 key no longer fails with `knownhosts: key mismatch`'
-time: '2026-11-17T18:51:57.530164879Z'
