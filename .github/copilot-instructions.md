@@ -71,7 +71,7 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - **Entry point**: `cmd/autoupdate/main.go` builds Cobra commands, `cmd/autoupdate/dig.go` wires the DI container
 - **DI registration**: `internal/container.go` registers all layers bottom-up (repos -> entities -> commands -> controllers)
 - **Domain commands**: `internal/domain/commands/` — `LocalCommand`, `RunCommand`, `SelfUpdateCommand`, `VersionCommand`
-- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `ProviderRepository`, `SelfUpdateRepository`
+- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `ProviderRepository`, `CredentialResolver` (an alias of gitforge's), `SelfUpdateRepository`
 - **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem (terraform, golang, python, javascript, dart, ruby, java, csharp, dockerfile, pipeline), plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations), and `selfupdate`
 - **Support utilities**: `internal/support/` — filesystem helpers, remote file checker bridging `langforge` with `gitforge`, and the shared changelog writer (`changelog.go`, `chlog.go`) every updater goes through
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
@@ -166,6 +166,12 @@ Push transport is auto-detected from the origin remote URL:
 - **SSH** (`git@...`): Uses system SSH keys via gitforge's `PushChangesSSH`
 - **HTTPS** (`https://...`): Uses gitforge's adapter pattern with auth method retry
 - The `PushAuthResolver` interface in `gitlocal/` abstracts the `ProviderRegistry` to avoid import cycles
+
+### Credentials (Local Mode)
+- `LocalCommand` takes a `repositories.CredentialResolver`, bound in `internal/infrastructure/repositories/container.go` to gitforge's `NewDefaultCredentialResolver()`: the forge's environment variables, then its CLI (`gh`, `az`; none for GitLab). `autoupdate run` never uses it — `providers[].token` stays required
+- `resolveLocalTokens` (`internal/domain/commands/local_credentials.go`) returns `localTokens{API, Git}`: `--token` fills both; otherwise `API` is the resolver's credential and `Git` is `configHelpers.ResolveTokenFromEnv` alone. `API` only reaches gitforge's provider calls (pull request, migration provider); `Git` reaches the HTTPS push, the scripts' `AUTH_TOKEN` and `FileGitAuthConfig`. Never cross them: the push picks its adapter by URL **substring**, so a CLI-issued token in `Git` could reach a lookalike host
+- An HTTPS origin with no `Git` token fails with `ErrNoPushToken` before the upgrade, without asking the CLI; an SSH origin needs none. Azure DevOps requests carry `Organization` (the org's Entra tenant for `az`). One INFO line names `Credential.Source`, never the token; a dry run only warns on a failure
+- Tests use gitforge's `test/doubles.CredentialResolverStub`, never the bound chain (it would run the real `gh`/`az`)
 
 ### Changelog Writing
 - Every updater records entries through `internal/support` — never write `CHANGELOG.md` or a fragment from an updater. The helpers detect the target repo's format and pick the destination so the formats cannot drift. Every production path writes on disk: `autoupdate run` reaches each updater through `ApplyUpdates` on a go-git clone.

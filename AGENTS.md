@@ -51,7 +51,7 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - **Entry point**: `cmd/autoupdate/main.go` builds Cobra commands, `cmd/autoupdate/dig.go` wires the DI container
 - **DI registration**: `internal/container.go` registers all layers bottom-up (repos -> entities -> commands -> controllers)
 - **Domain commands**: `internal/domain/commands/` — `LocalCommand` (single repo), `RunCommand` (batch mode), `SelfUpdateCommand`, and `VersionCommand`
-- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `BuildLimiter`, `ProviderRepository`, and `SelfUpdateRepository` interfaces
+- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `BuildLimiter`, `ProviderRepository`, `CredentialResolver` (an alias of gitforge's), and `SelfUpdateRepository` interfaces
 - **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations for local and batch modes), and `selfupdate`
 - **Support utilities**: `internal/support/` — filesystem helpers (including the shared repository walkers, see below), remote file checker bridging `langforge` with `gitforge`, repo config loader for per-repo opt-out, and the shared changelog writer (see below)
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
@@ -128,7 +128,46 @@ Push transport is auto-detected from the origin remote URL:
 - **SSH** (`git@...`): Pushes through gitforge's `PushChangesSSH` with the SSH agent (`SSH_AUTH_SOCK`). go-git never runs the `ssh` binary, so `main.go` calls gitforge's `InstallSSHTransport()`, which makes every SSH connection honour the operator's ssh_config — the `HostName` and `Port` a host alias names, and the keys its `IdentityFile` names, honouring `IdentitiesOnly`; under WSL the Windows profile's `.ssh/config` too when git runs `ssh.exe` — and verify hosts against the known_hosts discovery (Windows profiles under WSL included), asking only for the host key types it records. Change that behaviour in gitforge, not here
 - **HTTPS** (`https://...`): Uses gitforge's adapter pattern — resolves the provider from the URL, creates a token-enabled instance, and pushes with auth method retry
 
-The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` to avoid import cycles. The auth token (from `--token` flag or env vars) is only needed for HTTPS push and API calls.
+The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` to avoid import cycles. Which token git and the provider API each get is decided once, before the upgrade runs (below).
+
+### Credentials (Local Mode)
+
+`LocalCommand` takes a `repositories.CredentialResolver`, an alias of gitforge's
+`pkg/credentials` contract, which `internal/infrastructure/repositories/container.go` binds to
+`NewDefaultCredentialResolver()`: the forge's environment variables (`GITHUB_TOKEN` before
+`GH_TOKEN`, `AZURE_DEVOPS_EXT_PAT`, `SYSTEM_ACCESSTOKEN`, `GITLAB_TOKEN`, `GL_TOKEN`; a GitLab
+token is declined while `GITLAB_HOST` or `GL_HOST` names a server other than gitlab.com), then
+its CLI (`gh auth token --hostname github.com`, `az account get-access-token` for the Azure
+DevOps resource; GitLab has none). `resolveLocalTokens` (`internal/domain/commands/local_credentials.go`)
+runs right after the updater check and splits the result into `localTokens`:
+
+- `--token` is the operator's explicit choice and fills both fields.
+- Otherwise `API` is the resolver's credential, and `Git` is `configHelpers.ResolveTokenFromEnv`
+  -- the environment alone, exactly what git received before the CLI fallback existed.
+- `API` goes to gitforge's provider calls only (`createLocalPRForProject`, `localMigrationProvider`),
+  which talk to fixed API hosts. `Git` goes to everything git does: the HTTPS push
+  (`gitlocal.collectAuthMethods`), the scripts' `AUTH_TOKEN` rewrites, and the migration's
+  `FileGitAuthConfig`. Never hand `API` to any of those: the push picks its adapter with
+  `GetAdapterByURL`, a **substring** match (`MatchesURL` is `strings.Contains(url, "github.com")`),
+  so a remote whose URL merely contains `github.com` receives whatever token git holds. The
+  environment's token has always been exposed that way; a token the operator never exported
+  must not be.
+- An HTTPS origin with an empty `Git` cannot be pushed to, so it fails with `ErrNoPushToken`
+  before the upgrade rather than at the push after it -- and before the resolver runs, since a
+  token the CLI issued could not be used. An SSH origin needs no `Git` token: the push uses the
+  SSH agent.
+- The request names `Organization` (from origin) only on Azure DevOps, so `az` issues the token in
+  that organization's Entra tenant.
+- One INFO line names `Credential.Source` ("gh CLI", "GITHUB_TOKEN environment variable",
+  "--token flag"); the token is never logged. A failure names the forge and wraps the chain's
+  error, which lists every source tried and matches `credentialEntities.ErrNoCredential`. A dry
+  run logs the failure as a warning and goes on.
+
+`autoupdate run` never consults the resolver: `providers[].token` stays required. Tests use
+gitforge's `test/doubles.CredentialResolverStub` (or the real chain over `CLIRunnerStub`), never
+the bound chain, which would run the real `gh` and `az`. `initRepoWithoutCommits` in
+`local_credentials_test.go` gives `Execute` a Go repository with no commit, so a test stops at
+`detectDefaultBranch`, right after the credentials and before any upgrade reaches the network.
 
 ### Config System
 
@@ -1042,7 +1081,7 @@ repositories) is valid and still logs `Run complete`, whose counts are the shard
 - External test packages (e.g., `commands_test` for package `commands`)
 - BDD structure with `// given`, `// when`, `// then` comments
 - Parallel execution via `t.Parallel()` and `t.Run()` subtests
-- Test doubles in `test/domain/commanddoubles/` (stubs), `test/domain/entitybuilders/` (builders), and `test/infrastructure/repositorydoubles/` (stubs, spies, builders, and `FakeUpgradeRunner`, which writes manifests the way a package manager would so `ApplyUpdates` can be driven end to end)
+- Test doubles in `test/domain/commanddoubles/` (stubs), `test/domain/entitybuilders/` (builders), and `test/infrastructure/repositorydoubles/` (stubs, spies, builders, and `FakeUpgradeRunner`, which writes manifests the way a package manager would so `ApplyUpdates` can be driven end to end); the credential chain's doubles (`CredentialResolverStub`, `CLIRunnerStub`) come from gitforge's `test/doubles`
 - `test/infrastructure/gitrepo` lays out throwaway git repositories for code that compares the working tree with `HEAD`; it disables signing and hooks so a developer's global git configuration cannot break a test
 - `test/infrastructure/overlap` measures how many of the calls a test drives run at once (`Recorder`), for code that must keep work from running side by side, such as the build slots
 - Uses `stretchr/testify` for assertions — prefer stubs over mocks

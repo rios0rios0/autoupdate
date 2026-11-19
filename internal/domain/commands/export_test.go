@@ -46,6 +46,12 @@ var DetectDefaultBranch = detectDefaultBranch //nolint:gochecknoglobals // test 
 // ParseGitRemote exports parseGitRemote for testing.
 var ParseGitRemote = parseGitRemote //nolint:gochecknoglobals // test export
 
+// LocalTokens exports localTokens for testing.
+type LocalTokens = localTokens
+
+// ResolveLocalTokens exports resolveLocalTokens for testing.
+var ResolveLocalTokens = (*LocalCommand).resolveLocalTokens //nolint:gochecknoglobals // test export
+
 // AppliedUpdaterResult exports appliedUpdaterResult for testing.
 type AppliedUpdaterResult = appliedUpdaterResult
 

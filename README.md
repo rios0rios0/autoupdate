@@ -346,6 +346,10 @@ Tokens support three formats:
 - **Environment variable**: `token: "${GITHUB_TOKEN}"` (expanded at runtime)
 - **File path**: `token: "/run/secrets/github_token"` (read from file if path exists)
 
+`autoupdate run` authenticates with the tokens its configuration names -- every provider needs
+`providers[].token` -- and never asks the `gh` or `az` CLI for one. That fallback belongs to
+`autoupdate .`, which needs no configuration; see [Authentication](#authentication).
+
 ## Usage
 
 ### Standalone Local Mode
@@ -362,7 +366,7 @@ autoupdate /path/to/repo
 # Dry run -- preview what would happen
 autoupdate --dry-run .
 
-# Use an explicit token (overrides env var detection)
+# Use an explicit token (overrides the environment variables and the gh/az CLI)
 autoupdate --token ghp_abc123 .
 ```
 
@@ -370,13 +374,40 @@ autoupdate --token ghp_abc123 .
 > deprecated, so that the word is not silently read as a path -- but it warns and will go.
 > `autoupdate` with no arguments prints help.
 
-Auth tokens are read automatically from standard environment variables:
+#### Authentication
 
-| Provider    | Environment Variables                          |
-|-------------|------------------------------------------------|
-| GitHub      | `GITHUB_TOKEN` or `GH_TOKEN`                  |
-| Azure DevOps| `AZURE_DEVOPS_EXT_PAT` or `SYSTEM_ACCESSTOKEN` |
-| GitLab      | `GITLAB_TOKEN` or `GL_TOKEN`                   |
+`autoupdate .` authenticates with the first token it finds, in this order:
+
+1. `--token`.
+2. The forge's environment variables, in the order the table lists them.
+3. The forge's own CLI, when you are signed in to it: `gh auth token --hostname github.com` for
+   GitHub, and `az account get-access-token` for Azure DevOps, issued in the Microsoft Entra
+   tenant of the organization `origin` names. GitLab has none, because `glab` cannot print a
+   token.
+
+| Provider     | Environment variables                             | CLI fallback          |
+|--------------|---------------------------------------------------|-----------------------|
+| GitHub       | `GITHUB_TOKEN`, then `GH_TOKEN`                   | `gh` (`gh auth login`) |
+| Azure DevOps | `AZURE_DEVOPS_EXT_PAT`, then `SYSTEM_ACCESSTOKEN` | `az` (`az login`)     |
+| GitLab       | `GITLAB_TOKEN`, then `GL_TOKEN`                   | none                  |
+
+A `GITLAB_TOKEN` or `GL_TOKEN` is not used while `GITLAB_HOST` or `GL_HOST` names a server other
+than gitlab.com: it belongs to that server, so pass `--token` for a gitlab.com repository.
+
+The run logs which source it used, never the token. When no source has one, it stops before it
+touches the repository and lists every source it tried; a dry run only warns.
+
+A token the CLI issued is only sent to the forge's API, to open the pull request. git itself --
+the HTTPS push to `origin`, and the credentials the upgrade scripts fetch private dependencies
+with -- only ever receives `--token` or the environment variable: `origin` is matched to a forge
+by its URL, so a remote whose URL merely contains `github.com` would otherwise receive your
+token. With nothing but a CLI sign-in, `origin` therefore has to be an SSH remote (below). An
+HTTPS `origin` needs `--token` or the environment variable, and the run says so before it
+changes anything. To hand it the CLI's token yourself:
+
+```bash
+GH_TOKEN="$(gh auth token)" autoupdate .
+```
 
 When `origin` is an SSH remote (`git@...`), the push authenticates with the SSH agent (`SSH_AUTH_SOCK`) and honours your SSH client configuration, although autoupdate never runs the `ssh` binary:
 
@@ -574,7 +605,7 @@ update:
 | Flag        | Short | Description                                              |
 |-------------|-------|----------------------------------------------------------|
 | `--config`  | `-c`  | Path to config file (auto-detected)                      |
-| `--token`   |       | Auth token for the Git provider (overrides env var)      |
+| `--token`   |       | Auth token for the Git provider (overrides the environment variables and the `gh`/`az` CLI) |
 | `--dry-run` |       | Preview changes without applying                         |
 | `--verbose` | `-v`  | Enable verbose output                                    |
 | `--skip-cleanup` |  | Keep the dated branches from previous runs instead of deleting them and closing their PRs |

@@ -14,6 +14,7 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	infraRepos "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	globalEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
+	gitforgeDoubles "github.com/rios0rios0/gitforge/v4/test/doubles"
 	langEntities "github.com/rios0rios0/langforge/pkg/domain/entities"
 )
 
@@ -649,7 +650,8 @@ func TestLocalCommandExecute(t *testing.T) {
 		))
 
 		registry := infraRepos.NewProviderRegistry()
-		cmd := commands.NewLocalCommand(registry)
+		credentials := &gitforgeDoubles.CredentialResolverStub{}
+		cmd := commands.NewLocalCommand(registry, credentials)
 
 		// when
 		err := cmd.Execute(context.Background(), commands.LocalOptions{
@@ -662,6 +664,7 @@ func TestLocalCommandExecute(t *testing.T) {
 		// only way Execute returns nil here is by short-circuiting via
 		// the .autoupdate.yaml skip check before any of those steps run.
 		require.NoError(t, err)
+		assert.Empty(t, credentials.Requests(), "a skipped project must not ask for a token")
 	})
 
 	t.Run("should short-circuit when global exclude_repos matches", func(t *testing.T) {
@@ -672,7 +675,8 @@ func TestLocalCommandExecute(t *testing.T) {
 		runGit(t, repoDir, "remote", "add", "origin", "git@github.com:rios0rios0/autoupdate.git")
 
 		registry := infraRepos.NewProviderRegistry()
-		cmd := commands.NewLocalCommand(registry)
+		credentials := &gitforgeDoubles.CredentialResolverStub{}
+		cmd := commands.NewLocalCommand(registry, credentials)
 
 		settings := &entities.Settings{ExcludeRepos: []string{"rios0rios0/autoupdate"}}
 
@@ -688,6 +692,7 @@ func TestLocalCommandExecute(t *testing.T) {
 		// returning nil proves the exclude_repos check fired before
 		// language detection.
 		require.NoError(t, err)
+		assert.Empty(t, credentials.Requests(), "an excluded repository must not ask for a token")
 	})
 
 	t.Run("should propagate parse errors from .autoupdate.yaml", func(t *testing.T) {
@@ -702,7 +707,8 @@ func TestLocalCommandExecute(t *testing.T) {
 		))
 
 		registry := infraRepos.NewProviderRegistry()
-		cmd := commands.NewLocalCommand(registry)
+		credentials := &gitforgeDoubles.CredentialResolverStub{}
+		cmd := commands.NewLocalCommand(registry, credentials)
 
 		// when
 		err := cmd.Execute(context.Background(), commands.LocalOptions{
@@ -712,6 +718,7 @@ func TestLocalCommandExecute(t *testing.T) {
 
 		// then
 		require.Error(t, err)
+		assert.Empty(t, credentials.Requests())
 	})
 }
 
