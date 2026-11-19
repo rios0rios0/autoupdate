@@ -22,6 +22,21 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-19
+
+### Added
+
+- added the `gh` and `az` CLI as a credential fallback for `autoupdate .`: with no `--token` and no token in the forge's environment variables, it asks `gh auth token` or `az account get-access-token` (in the Azure DevOps organization's Entra tenant), logs which source it used, and lists every source it tried when none has a token; a CLI-issued token only reaches the provider API, so an HTTPS `origin` still needs `--token` or the environment variable and is refused before the upgrade runs
+
+### Changed
+
+- changed `autoupdate .` to stop for a missing credential instead of sending a `GITLAB_TOKEN` or `GL_TOKEN` to gitlab.com while `GITLAB_HOST` or `GL_HOST` names another GitLab server
+- changed the Go module `github.com/rios0rios0/gitforge/v4` from `v4.6.0` to `v4.7.0`
+
+### Fixed
+
+- fixed `autoupdate .` letting an HTTPS `origin` through its credential check when a global `insteadOf` rule shows it to git as SSH: the push reads `origin` without the global rules and dials HTTPS, so a run whose token came from the `gh` or `az` CLI failed at the push after the upgrade instead of stopping before it
+
 ## [1.4.0] - 2026-11-19
 
 ### Added
