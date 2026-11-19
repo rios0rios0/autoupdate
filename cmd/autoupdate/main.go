@@ -44,7 +44,7 @@ Usage modes:
 	cmd.PersistentFlags().StringP("config", "c", "",
 		"Path to config file (default: auto-detect)")
 	cmd.PersistentFlags().String("token", "",
-		"Auth token for the Git provider (overrides env var detection)")
+		"Auth token for the Git provider (overrides the environment variables and the gh/az CLI)")
 	cmd.PersistentFlags().Bool("dry-run", false,
 		"Show what would be done without making changes")
 	cmd.PersistentFlags().BoolP("verbose", "v", false,

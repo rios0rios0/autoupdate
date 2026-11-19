@@ -6,7 +6,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/rios0rios0/cliforge v0.5.4
-	github.com/rios0rios0/gitforge/v4 v4.6.0
+	github.com/rios0rios0/gitforge/v4 v4.7.0
 	github.com/rios0rios0/langforge v1.1.13
 	github.com/rios0rios0/testkit v0.3.9
 	github.com/sirupsen/logrus v1.10.2

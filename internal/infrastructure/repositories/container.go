@@ -13,6 +13,7 @@ import (
 	rbRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/ruby"
 	suRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/selfupdate"
 	tfRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/terraform"
+	credentialInfra "github.com/rios0rios0/gitforge/v4/pkg/credentials/infrastructure"
 	"github.com/rios0rios0/gitforge/v4/pkg/providers/infrastructure/azuredevops"
 	"github.com/rios0rios0/gitforge/v4/pkg/providers/infrastructure/github"
 	"github.com/rios0rios0/gitforge/v4/pkg/providers/infrastructure/gitlab"
@@ -33,6 +34,15 @@ func RegisterProviders(container *dig.Container) error {
 		reg.RegisterFactory("gitlab", gitlab.NewProvider)
 		reg.RegisterFactory("azuredevops", azuredevops.NewProvider)
 		return reg
+	}); err != nil {
+		return err
+	}
+
+	// Register the credential resolver `autoupdate .` falls back to when --token is empty:
+	// gitforge's default chain, the forge's environment variables and then its CLI. Building
+	// it runs nothing; gh or az only run when a local run asks for a token.
+	if err := container.Provide(func() repositories.CredentialResolver {
+		return credentialInfra.NewDefaultCredentialResolver()
 	}); err != nil {
 		return err
 	}

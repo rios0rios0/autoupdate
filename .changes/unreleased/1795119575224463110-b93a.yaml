@@ -1,0 +1,3 @@
+kind: 'Added'
+body: 'added the `gh` and `az` CLI as a credential fallback for `autoupdate .`: with no `--token` and no token in the forge''s environment variables, it asks `gh auth token` or `az account get-access-token` (in the Azure DevOps organization''s Entra tenant), logs which source it used, and lists every source it tried when none has a token; a CLI-issued token only reaches the provider API, so an HTTPS `origin` still needs `--token` or the environment variable and is refused before the upgrade runs'
+time: '2026-11-19T20:19:35.224381527Z'

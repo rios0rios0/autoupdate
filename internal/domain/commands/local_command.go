@@ -16,7 +16,6 @@ import (
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
 	"github.com/rios0rios0/autoupdate/internal/support"
-	configHelpers "github.com/rios0rios0/gitforge/v4/pkg/config/domain/helpers"
 	gitInfra "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
 	globalEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
 	langEntities "github.com/rios0rios0/langforge/pkg/domain/entities"
@@ -89,12 +88,21 @@ type localPRInfo struct {
 // a given directory, pushes a branch, and creates a PR.
 type LocalCommand struct {
 	providerRegistry *infraRepos.ProviderRegistry
+	// credentials supplies the provider API's token when --token is empty. The
+	// container binds gitforge's default chain: the forge's environment variables,
+	// then its CLI.
+	credentials repositories.CredentialResolver
 }
 
-// NewLocalCommand creates a new LocalCommand with the given provider registry.
-func NewLocalCommand(providerRegistry *infraRepos.ProviderRegistry) *LocalCommand {
+// NewLocalCommand creates a new LocalCommand with the given provider registry and
+// the credential resolver it falls back to when no --token is given.
+func NewLocalCommand(
+	providerRegistry *infraRepos.ProviderRegistry,
+	credentials repositories.CredentialResolver,
+) *LocalCommand {
 	return &LocalCommand{
 		providerRegistry: providerRegistry,
+		credentials:      credentials,
 	}
 }
 
@@ -147,17 +155,16 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 		return nil
 	}
 
-	// Resolve auth token
-	token := opts.Token
-	if token == "" {
-		token = configHelpers.ResolveTokenFromEnv(remote.ServiceType)
-	}
-
-	if !opts.DryRun && token == "" {
-		return fmt.Errorf(
-			"no auth token found for %s; set --token or the appropriate env var (%s)",
-			remote.ProviderType, configHelpers.TokenEnvHint(remote.ServiceType),
-		)
+	// Resolved before anything touches the checkout, so a run with no token to push
+	// or to open its pull request with stops before it creates a branch.
+	tokens, credentialErr := it.resolveLocalTokens(ctx, opts, remote)
+	if credentialErr != nil {
+		if !opts.DryRun {
+			return credentialErr
+		}
+		// A rehearsal pushes nothing and opens nothing, so a missing token does not
+		// stop it; it still says what would have stopped the real run.
+		logger.Warnf("[DRY RUN] A real run would stop here: %v", credentialErr)
 	}
 
 	// Detect current branch (used as the PR target / default branch)
@@ -181,7 +188,7 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 
 	// Run the appropriate upgrade
 	prInfo, upgradeErr := runLocalUpgrade(
-		ctx, repoDir, projType, remote.ProviderType, token, repo, opts, it.providerRegistry,
+		ctx, repoDir, projType, remote.ProviderType, tokens, repo, opts, it.providerRegistry,
 	)
 	if upgradeErr != nil {
 		return upgradeErr
@@ -196,13 +203,15 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 		return nil
 	}
 
-	return it.createLocalPRForProject(ctx, remote.ProviderType, token, repo, prInfo)
+	return it.createLocalPRForProject(ctx, remote.ProviderType, tokens.API, repo, prInfo)
 }
 
 // localUpgradeHandler runs the local upgrade for a specific language and returns PR info.
+// It hands tokens.Git to git and tokens.API to the provider API, never the other way round.
 type localUpgradeHandler func(
 	ctx context.Context,
-	repoDir, providerType, token string,
+	repoDir, providerType string,
+	tokens localTokens,
 	repo entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
@@ -285,7 +294,8 @@ func runLocalUpgrade(
 	ctx context.Context,
 	repoDir string,
 	projType langEntities.Language,
-	providerType, token string,
+	providerType string,
+	tokens localTokens,
 	repo entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
@@ -294,12 +304,13 @@ func runLocalUpgrade(
 	if !ok || handler == nil {
 		return nil, fmt.Errorf("unsupported project type: %s", projType)
 	}
-	return handler(ctx, repoDir, providerType, token, repo, opts, registry)
+	return handler(ctx, repoDir, providerType, tokens, repo, opts, registry)
 }
 
 func runGoLocalUpgrade(
 	ctx context.Context,
-	repoDir, providerType, token string,
+	repoDir, providerType string,
+	tokens localTokens,
 	repo entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
@@ -307,14 +318,14 @@ func runGoLocalUpgrade(
 	result, err := goRepo.RunLocalUpgrade(ctx, repoDir, goRepo.LocalUpgradeOptions{
 		DryRun:       opts.DryRun,
 		Verbose:      opts.Verbose,
-		AuthToken:    token,
+		AuthToken:    tokens.Git,
 		ProviderName: providerType,
 		PushAuth:     registry,
 
 		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 
 		Repository:             repo,
-		Provider:               localMigrationProvider(registry, providerType, token, opts),
+		Provider:               localMigrationProvider(registry, providerType, tokens.API, opts),
 		PrepareMajorMigrations: entities.PrepareMajorMigrationsEnabled(opts.Settings),
 	})
 	if err != nil {
@@ -363,7 +374,8 @@ func localMigrationProvider(
 
 func runPythonLocalUpgrade(
 	ctx context.Context,
-	repoDir, providerType, token string,
+	repoDir, providerType string,
+	tokens localTokens,
 	_ entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
@@ -371,7 +383,7 @@ func runPythonLocalUpgrade(
 	result, err := pyRepo.RunLocalUpgrade(ctx, repoDir, pyRepo.LocalUpgradeOptions{
 		DryRun:       opts.DryRun,
 		Verbose:      opts.Verbose,
-		AuthToken:    token,
+		AuthToken:    tokens.Git,
 		ProviderName: providerType,
 		PushAuth:     registry,
 
@@ -392,7 +404,8 @@ func runPythonLocalUpgrade(
 
 func runJSLocalUpgrade(
 	ctx context.Context,
-	repoDir, providerType, token string,
+	repoDir, providerType string,
+	tokens localTokens,
 	_ entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
@@ -400,7 +413,7 @@ func runJSLocalUpgrade(
 	result, err := jsRepo.RunLocalUpgrade(ctx, repoDir, jsRepo.LocalUpgradeOptions{
 		DryRun:       opts.DryRun,
 		Verbose:      opts.Verbose,
-		AuthToken:    token,
+		AuthToken:    tokens.Git,
 		ProviderName: providerType,
 		PushAuth:     registry,
 
@@ -421,7 +434,8 @@ func runJSLocalUpgrade(
 
 func runDartLocalUpgrade(
 	ctx context.Context,
-	repoDir, providerType, token string,
+	repoDir, providerType string,
+	tokens localTokens,
 	_ entities.Repository,
 	opts LocalOptions,
 	registry *infraRepos.ProviderRegistry,
@@ -429,7 +443,7 @@ func runDartLocalUpgrade(
 	result, err := dartRepo.RunLocalUpgrade(ctx, repoDir, dartRepo.LocalUpgradeOptions{
 		DryRun:       opts.DryRun,
 		Verbose:      opts.Verbose,
-		AuthToken:    token,
+		AuthToken:    tokens.Git,
 		ProviderName: providerType,
 		PushAuth:     registry,
 

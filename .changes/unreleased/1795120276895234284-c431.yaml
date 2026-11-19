@@ -1,0 +1,3 @@
+kind: 'Changed'
+body: 'changed `autoupdate .` to stop for a missing credential instead of sending a `GITLAB_TOKEN` or `GL_TOKEN` to gitlab.com while `GITLAB_HOST` or `GL_HOST` names another GitLab server'
+time: '2026-11-19T20:31:16.895166124Z'
