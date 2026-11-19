@@ -1,3 +1,0 @@
-kind: 'Added'
-body: 'added the `--shard <index>/<total>` flag to `autoupdate run`, which deals the repositories of each organization round-robin across parallel CI jobs so that a large run can be spread over several machines'
-time: '2026-11-19T18:49:01.914862192Z'

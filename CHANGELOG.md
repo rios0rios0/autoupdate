@@ -22,6 +22,17 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-19
+
+### Added
+
+- added the `--shard <index>/<total>` flag to `autoupdate run`, which deals the repositories of each organization round-robin across parallel CI jobs so that a large run can be spread over several machines
+
+### Changed
+
+- changed the Go module `golang.org/x/tools` from `v0.52.0` to `v0.53.0`
+- changed the Go modules `github.com/rios0rios0/cliforge` from `v0.5.3` to `v0.5.4`, `github.com/rios0rios0/gitforge/v4` from `v4.5.0` to `v4.6.0`, `github.com/rios0rios0/langforge` from `v1.1.12` to `v1.1.13`, `gitlab.com/gitlab-org/api/client-go/v3` from `v3.52.0` to `v3.53.0` and `golang.org/x/net` from `v0.62.0` to `v0.63.0`
+
 ## [1.3.3] - 2026-11-18
 
 ### Changed
