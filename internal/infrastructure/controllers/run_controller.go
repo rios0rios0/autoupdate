@@ -63,6 +63,7 @@ func (it *RunController) Execute(cmd *cobra.Command, _ []string) {
 		OrgOverride:  orgOverride,
 		UpdaterName:  updaterFilter,
 		Concurrency:  concurrency,
+		Shard:        shardFromFlags(cmd),
 	}); runErr != nil {
 		logger.Errorf("Run failed: %v", runErr)
 	}
@@ -78,4 +79,47 @@ func (it *RunController) AddFlags(cmd *cobra.Command) {
 	cmd.Flags().Int("concurrency", 0,
 		"Number of repositories to process in parallel (default 4; 1 = sequential)",
 	)
+	cmd.Flags().Var(&shardFlag{}, "shard",
+		"Only process this shard of each organization's repositories, counted from 1 (e.g. 2/4), "+
+			"to split a run across parallel CI jobs",
+	)
+}
+
+// shardFromFlags returns the shard `--shard` named, or the whole run when it named none.
+func shardFromFlags(cmd *cobra.Command) entities.Shard {
+	if flag := cmd.Flags().Lookup("shard"); flag != nil {
+		if value, ok := flag.Value.(*shardFlag); ok {
+			return value.shard
+		}
+	}
+	return entities.Shard{}
+}
+
+// shardFlag is the value behind `--shard`. Cobra sets it while it parses the command line,
+// before Execute runs, so a value that names no shard fails the command -- and the process,
+// with a non-zero status -- before the configuration is read or any provider is asked for a
+// repository. Logging the mistake and carrying on would run the whole organization in every
+// job that made it.
+type shardFlag struct {
+	shard entities.Shard
+}
+
+// String implements pflag.Value.
+func (f *shardFlag) String() string {
+	return f.shard.String()
+}
+
+// Set implements pflag.Value, accepting exactly what entities.ParseShard accepts.
+func (f *shardFlag) Set(value string) error {
+	shard, err := entities.ParseShard(value)
+	if err != nil {
+		return err
+	}
+	f.shard = shard
+	return nil
+}
+
+// Type implements pflag.Value. It is what the help prints as the flag's argument.
+func (f *shardFlag) Type() string {
+	return "index/total"
 }

@@ -1005,6 +1005,37 @@ operator's own caches; `ScriptEnv("")` returns the process environment unchanged
 
 `autoupdate run` processes repositories within an org in parallel via `errgroup` (default 4), set by the `concurrency` config field or `--concurrency` flag; values `< 1` are clamped to 1 (sequential). `RunCommand` guards its shared accumulators with a `sync.Mutex` — keep new shared state goroutine-safe when editing the per-repo loop. Within that fan-out, the builds of an updater that implements `BuildLimiter` are limited by its own pool (see "Per-Repository Workspace" above), so `concurrency` bounds the repositories in flight, not how many Go or JVM builds run.
 
+### Splitting a Run Across Jobs (`--shard`)
+
+`autoupdate run --shard <index>/<total>` keeps one slice of each organization's repositories, so
+a run over a large organization can be spread across parallel CI jobs, one machine each. The
+index counts from 1, as Azure Pipelines' `System.JobPositionInPhase` and GitLab's `CI_NODE_INDEX`
+do. It is a flag of `run` alone -- not a configuration key, and not a flag of the root command or
+of `local` -- and leaving it out keeps today's run, processing order included. It exists because
+the Go updater sizes its build slots to the machine's memory (see "Per-Repository Workspace"
+above), so on a small agent Go builds run one at a time whatever `concurrency` says, and only more
+machines add build capacity.
+
+`entities.Shard` (`internal/domain/entities/shard.go`) is the value object. `ParseShard` accepts
+two runs of ASCII digits with `1 <= index <= total` and refuses everything else (a sign, a space,
+an empty side, a third part) with `ErrInvalidShard`. `Select` is called in `processOrganization`
+right after `filterRepositories`, so every job deals out the same list: sorted by `RepoKey`, ties
+broken by the provider's ID, and dealt round-robin, the repository at sorted position p going to
+shard `p mod total + 1`. Dealing rather than cutting the list into contiguous runs is the point:
+providers list repositories project by project and the cost concentrates in some projects, so
+contiguous runs would hand a whole expensive project to one or two jobs. The shards are disjoint,
+their union is the filtered set, their sizes differ by at most one, and each job computes its own
+without talking to the others, whatever order its provider listed the repositories in. The zero
+`Shard` is the whole run and returns its input untouched.
+
+The controller parses the flag through a `pflag.Value` (`shardFlag` in `run_controller.go`), so
+cobra rejects a malformed value while it parses the command line and `main` exits non-zero before
+the configuration is read or any provider is touched. Do not move the check into `Execute`: a
+configuration error there is logged and the process exits 0, and a shard that slipped through that
+way would run the whole organization in every job. A shard left with nothing (more shards than
+repositories) is valid and still logs `Run complete`, whose counts are the shard's own; the
+`Found ... repositories` line names the shard and how many repositories it took.
+
 ## Testing Conventions
 
 - No build tag on unit tests; `//go:build integration` is reserved for tests needing real infrastructure

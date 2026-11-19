@@ -2378,56 +2378,56 @@ func TestResolveConcurrency(t *testing.T) {
 	})
 }
 
+// setupRun wires a run command to a provider serving repoCount repositories, named repo-0
+// onwards, and to a single detect-everything updater. It returns the command, the updater spy
+// (for assertions), and the settings, keeping each test focused on the one thing that differs:
+// how the run is configured.
+func setupRun(repoCount int) (
+	*commands.RunCommand, *doubles.SpyUpdaterRepository, *entities.Settings,
+) {
+	repos := make([]entities.Repository, 0, repoCount)
+	for i := range repoCount {
+		repos = append(repos, entitybuilders.NewRepositoryBuilder().
+			WithID(fmt.Sprintf("repo-%d", i)).
+			WithName(fmt.Sprintf("repo-%d", i)).
+			WithOrganization("test-org").
+			WithDefaultBranch("refs/heads/main").
+			BuildRepository())
+	}
+
+	providerSpy := doubles.NewSpyProviderRepositoryBuilder().
+		WithProviderName("github").
+		WithToken("test-token").
+		WithRepositories(repos).
+		BuildSpy()
+	updaterSpy := doubles.NewSpyUpdaterRepositoryBuilder().
+		WithUpdaterName("terraform").
+		WithDetectResult(true).
+		WithPRs([]entities.PullRequest{{ID: 1, Title: "Update", URL: "https://example.com/pr/1"}}).
+		BuildSpy()
+
+	providerRegistry := infraRepos.NewProviderRegistry()
+	providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
+		return providerSpy
+	})
+	updaterRegistry := infraRepos.NewUpdaterRegistry()
+	updaterRegistry.Register(updaterSpy)
+
+	settings := entitybuilders.NewSettingsBuilder().
+		WithProviders([]entities.ProviderConfig{
+			entitybuilders.NewProviderConfigBuilder().
+				WithType("github").
+				WithToken("test-token").
+				WithOrganizations([]string{"test-org"}).
+				BuildProviderConfig(),
+		}).
+		BuildSettings()
+
+	return commands.NewRunCommand(providerRegistry, updaterRegistry), updaterSpy, settings
+}
+
 func TestRunCommandConcurrency(t *testing.T) {
 	t.Parallel()
-
-	// setupRun wires a run command to a provider serving repoCount repositories
-	// and a single detect-everything updater. It returns the command, the
-	// updater spy (for assertions), and the settings, keeping each subtest
-	// focused on the one thing that differs: how concurrency is configured.
-	setupRun := func(repoCount int) (
-		*commands.RunCommand, *doubles.SpyUpdaterRepository, *entities.Settings,
-	) {
-		repos := make([]entities.Repository, 0, repoCount)
-		for i := range repoCount {
-			repos = append(repos, entitybuilders.NewRepositoryBuilder().
-				WithID(fmt.Sprintf("repo-%d", i)).
-				WithName(fmt.Sprintf("repo-%d", i)).
-				WithOrganization("test-org").
-				WithDefaultBranch("refs/heads/main").
-				BuildRepository())
-		}
-
-		providerSpy := doubles.NewSpyProviderRepositoryBuilder().
-			WithProviderName("github").
-			WithToken("test-token").
-			WithRepositories(repos).
-			BuildSpy()
-		updaterSpy := doubles.NewSpyUpdaterRepositoryBuilder().
-			WithUpdaterName("terraform").
-			WithDetectResult(true).
-			WithPRs([]entities.PullRequest{{ID: 1, Title: "Update", URL: "https://example.com/pr/1"}}).
-			BuildSpy()
-
-		providerRegistry := infraRepos.NewProviderRegistry()
-		providerRegistry.Register("github", func(_ string) repositories.ProviderRepository {
-			return providerSpy
-		})
-		updaterRegistry := infraRepos.NewUpdaterRegistry()
-		updaterRegistry.Register(updaterSpy)
-
-		settings := entitybuilders.NewSettingsBuilder().
-			WithProviders([]entities.ProviderConfig{
-				entitybuilders.NewProviderConfigBuilder().
-					WithType("github").
-					WithToken("test-token").
-					WithOrganizations([]string{"test-org"}).
-					BuildProviderConfig(),
-			}).
-			BuildSettings()
-
-		return commands.NewRunCommand(providerRegistry, updaterRegistry), updaterSpy, settings
-	}
 
 	// assertAllProcessed checks that every repository was detected and turned
 	// into a CreateUpdatePRs call, regardless of the (non-deterministic)

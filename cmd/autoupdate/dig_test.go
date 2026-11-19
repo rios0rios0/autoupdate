@@ -1,10 +1,14 @@
 package main
 
 import (
+	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 )
 
 func TestInjectApp(t *testing.T) {
@@ -88,5 +92,46 @@ func TestAddSubcommands(t *testing.T) {
 		require.NotNil(t, localCmd)
 		assert.Equal(t, "local", localCmd.Name())
 		assert.True(t, localCmd.Hidden, "it must not appear in --help")
+	})
+
+	t.Run("should give --shard to run and to no other command", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		appContext, localController := injectApp()
+		rootCmd := buildRootCommand(localController)
+
+		// when
+		addSubcommands(rootCmd, appContext, localController)
+
+		// then
+		runCmd, _, err := rootCmd.Find([]string{"run"})
+		require.NoError(t, err)
+		assert.NotNil(t, runCmd.Flags().Lookup("shard"))
+		localCmd, _, err := rootCmd.Find([]string{"local"})
+		require.NoError(t, err)
+		assert.Nil(t, localCmd.Flags().Lookup("shard"), "a local run has no organization to split")
+		assert.Nil(t, rootCmd.Flags().Lookup("shard"))
+		assert.Nil(t, rootCmd.PersistentFlags().Lookup("shard"), "no subcommand may inherit it")
+	})
+
+	t.Run("should fail run on a malformed --shard before it starts", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- the missing configuration is a guard: had the value been accepted, the run
+		// would stop at reading it rather than go on to the operator's providers
+		appContext, localController := injectApp()
+		rootCmd := buildRootCommand(localController)
+		addSubcommands(rootCmd, appContext, localController)
+		missingConfig := filepath.Join(t.TempDir(), "missing.yaml")
+		rootCmd.SetArgs([]string{"run", "--shard", "0/4", "--config", missingConfig})
+		rootCmd.SetOut(io.Discard)
+		rootCmd.SetErr(io.Discard)
+
+		// when
+		err := rootCmd.Execute()
+
+		// then
+		require.ErrorIs(t, err, entities.ErrInvalidShard, "main exits non-zero on this error")
 	})
 }

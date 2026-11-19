@@ -40,6 +40,10 @@ type RunOptions struct {
 	OrgOverride  string // If set, only process this org (CLI override)
 	UpdaterName  string // If set, only run this updater (CLI override)
 	Concurrency  int    // If > 0, process this many repos in parallel (CLI override)
+	// Shard, when set, keeps only this shard of each organization's repositories, so a run can
+	// be split across parallel CI jobs. Set only from the command line; the zero value is the
+	// whole run.
+	Shard entities.Shard
 }
 
 // RunCommand orchestrates the full dependency update flow:
@@ -168,9 +172,12 @@ func (it *RunCommand) processOrganization(
 	}
 
 	repos = filterRepositories(repos, settings)
+	found := len(repos)
+	// A split run keeps its own slice of what the exclusions left, so every job deals out the
+	// same list; the counts this returns, and the run's summary with them, are the shard's own.
+	repos = runOpts.Shard.Select(repos)
 	concurrency := resolveConcurrency(settings, runOpts)
-	logger.Infof("Found %d repositories in %q (processing up to %d in parallel)",
-		len(repos), org, concurrency)
+	logRepositoriesFound(org, found, len(repos), runOpts.Shard, concurrency)
 
 	// Repository processing is independent and I/O-bound (clone + remote API
 	// calls), so repos are processed concurrently with a bounded worker pool.
@@ -200,6 +207,20 @@ func (it *RunCommand) processOrganization(
 	_ = group.Wait()
 
 	return totalPRs, len(repos), totalErrors
+}
+
+// logRepositoriesFound reports how many repositories the run found in an organization and,
+// when the run is split, how many of them this shard takes. The line an unsplit run logs is
+// left exactly as it was.
+func logRepositoriesFound(org string, found, selected int, shard entities.Shard, concurrency int) {
+	if !shard.IsSet() {
+		logger.Infof("Found %d repositories in %q (processing up to %d in parallel)",
+			found, org, concurrency)
+		return
+	}
+
+	logger.Infof("Found %d repositories in %q; shard %s takes %d of them (processing up to %d in parallel)",
+		found, org, shard, selected, concurrency)
 }
 
 // resolveConcurrency determines how many repositories to process in parallel.
