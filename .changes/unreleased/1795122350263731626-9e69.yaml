@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed `autoupdate .` letting an HTTPS `origin` through its credential check when a global `insteadOf` rule shows it to git as SSH: the push reads `origin` without the global rules and dials HTTPS, so a run whose token came from the `gh` or `az` CLI failed at the push after the upgrade instead of stopping before it'
-time: '2026-11-19T21:05:50.263633927Z'
