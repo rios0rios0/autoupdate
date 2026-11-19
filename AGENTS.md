@@ -155,7 +155,11 @@ runs right after the updater check and splits the result into `localTokens`:
 - An HTTPS origin with an empty `Git` cannot be pushed to, so it fails with `ErrNoPushToken`
   before the upgrade rather than at the push after it -- and before the resolver runs, since a
   token the CLI issued could not be used. An SSH origin needs no `Git` token: the push uses the
-  SSH agent.
+  SSH agent. The check reads `remoteInfo.PushURL`, the URL the push dials
+  (`gitlocal.OriginPushURL`: origin as go-git reads it, with only the repository's own
+  `insteadOf` rules), not what `git remote get-url` printed, which applies the global rules too:
+  `url."git@github.com:".insteadOf https://github.com/` shows an HTTPS origin to git as SSH,
+  and never to the push.
 - The request names `Organization` (from origin) only on Azure DevOps, so `az` issues the token in
   that organization's Entra tenant.
 - One INFO line names `Credential.Source` ("gh CLI", "GITHUB_TOKEN environment variable",

@@ -217,6 +217,41 @@ func TestResolveLocalTokensForGit(t *testing.T) {
 	})
 }
 
+// TestLocalCommandUnderAGlobalInsteadOfRule is not parallel: every subtest hands git a global
+// configuration with t.Setenv, and clears the token variables git's token is read from.
+func TestLocalCommandUnderAGlobalInsteadOfRule(t *testing.T) {
+	t.Run("should keep the URL the push dials apart from the one git prints", func(t *testing.T) {
+		// given -- the rule people use to fetch private Go modules over SSH
+		t.Setenv("GIT_CONFIG_GLOBAL", writeGlobalGitConfig(t, sshInsteadOfHTTPSRule))
+		repoDir := initRepoWithoutCommits(t, githubHTTPSRemote)
+
+		// when
+		remote, err := commands.ParseGitRemote(t.Context(), repoDir)
+
+		// then -- git applies the global rule, while the push reads origin without it
+		require.NoError(t, err)
+		assert.Equal(t, "git@github.com:rios0rios0/autoupdate.git", remote.RemoteURL)
+		assert.Equal(t, githubHTTPSRemote, remote.PushURL)
+	})
+
+	t.Run("should refuse an HTTPS origin that only a global insteadOf rule shows as SSH", func(t *testing.T) {
+		// given
+		t.Setenv("GIT_CONFIG_GLOBAL", writeGlobalGitConfig(t, sshInsteadOfHTTPSRule))
+		t.Setenv("GITHUB_TOKEN", "")
+		t.Setenv("GH_TOKEN", "")
+		repoDir := initRepoWithoutCommits(t, githubHTTPSRemote)
+		credentials := cliCredentials()
+		cmd := commands.NewLocalCommand(infraRepos.NewProviderRegistry(), credentials)
+
+		// when
+		err := cmd.Execute(t.Context(), commands.LocalOptions{RepoDir: repoDir})
+
+		// then -- refused up front, rather than failing at the push after the upgrade
+		require.ErrorIs(t, err, commands.ErrNoPushToken)
+		assert.Empty(t, credentials.Requests())
+	})
+}
+
 func TestLocalCommandExecuteCredentials(t *testing.T) {
 	t.Parallel()
 
@@ -306,6 +341,19 @@ func initRepoWithoutCommits(t *testing.T, remoteURL string) string {
 	))
 
 	return repoDir
+}
+
+// sshInsteadOfHTTPSRule makes git reach GitHub over SSH wherever an HTTPS URL is written.
+const sshInsteadOfHTTPSRule = "[url \"git@github.com:\"]\n\tinsteadOf = https://github.com/\n"
+
+// writeGlobalGitConfig writes a gitconfig for GIT_CONFIG_GLOBAL to point at.
+func writeGlobalGitConfig(t *testing.T, content string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "gitconfig")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	return path
 }
 
 // captureLogs records every entry the standard logger takes until the test ends. Only a test

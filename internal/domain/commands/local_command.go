@@ -12,6 +12,7 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	infraRepos "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	dartRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dart"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
@@ -53,6 +54,10 @@ type remoteInfo struct {
 	Project      string // Azure DevOps only
 	RepoName     string
 	RemoteURL    string
+	// PushURL is the URL the push dials (gitlocal.OriginPushURL), which is what decides
+	// whether it needs a token. It differs from RemoteURL when a global insteadOf rule
+	// rewrites what git prints but not what go-git pushes to.
+	PushURL string
 }
 
 // serviceTypeToProvider returns a map from gitforge ServiceType to the provider name strings used by autoupdate.
@@ -591,7 +596,22 @@ func parseGitRemote(ctx context.Context, repoDir string) (*remoteInfo, error) {
 		return nil, fmt.Errorf("git remote get-url origin: %w", err)
 	}
 
-	return parseRemoteURL(strings.TrimSpace(string(output)))
+	remote, err := parseRemoteURL(strings.TrimSpace(string(output)))
+	if err != nil {
+		return nil, err
+	}
+
+	// git printed origin with every insteadOf rule applied, the global ones included, and
+	// the push reads it without those: `url."git@github.com:".insteadOf https://github.com/`,
+	// a common way to fetch private Go modules over SSH, leaves the push on HTTPS.
+	pushURL, pushErr := gitlocal.OriginPushURL(repoDir)
+	if pushErr != nil {
+		logger.Debugf("Could not read the URL the push dials, so the one git printed is used: %v", pushErr)
+		return remote, nil
+	}
+	remote.PushURL = pushURL
+
+	return remote, nil
 }
 
 // parseRemoteURL extracts provider, org, project, and repo name from a Git remote URL.
@@ -614,6 +634,7 @@ func parseRemoteURL(rawURL string) (*remoteInfo, error) {
 		Project:      parsed.Project,
 		RepoName:     parsed.RepoName,
 		RemoteURL:    rawURL,
+		PushURL:      rawURL,
 	}, nil
 }
 

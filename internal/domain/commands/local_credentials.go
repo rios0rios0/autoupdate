@@ -52,7 +52,7 @@ func (it *LocalCommand) resolveLocalTokens(
 	}
 
 	gitToken := configHelpers.ResolveTokenFromEnv(remote.ServiceType)
-	if gitToken == "" && pushesWithToken(remote.RemoteURL) {
+	if gitToken == "" && pushesWithToken(remote.PushURL) {
 		return localTokens{}, fmt.Errorf(
 			"%w: pass --token or set %s, or switch origin to SSH; a token the forge's CLI issues "+
 				"is only sent to the %s API, never to a git remote",
