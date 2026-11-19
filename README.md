@@ -404,6 +404,9 @@ autoupdate run --provider github --org my-org
 # Only run the Terraform updater
 autoupdate run --updater terraform
 
+# Only process the second of four shards of each organization (one per parallel CI job)
+autoupdate run --shard 2/4
+
 # Verbose logging
 autoupdate run -v
 ```
@@ -502,6 +505,68 @@ steps:
       AZURE_DEVOPS_PAT: $(System.AccessToken)
 ```
 
+### Splitting a Run Across Parallel CI Jobs
+
+A run over a large organization can outgrow a CI job's time limit, and more `concurrency` on the
+same machine shortens it little: Go builds are sized to the machine's memory (see
+[Disk and Memory Footprint](#disk-and-memory-footprint)), so a small agent runs them one at a
+time however many repositories are in flight. What scales is more machines. With
+`--shard <index>/<total>`, every job runs the same command and configuration with its own index,
+counted from 1, and processes only its slice of each organization.
+
+Each job lists the organization's repositories, drops the excluded ones, sorts the rest by
+`<org>/<repo>` (`<org>/<project>/<repo>` on Azure DevOps) and deals them out round-robin: the
+first to shard 1, the second to shard 2, and so on. So the jobs agree on the split without
+talking to each other, every repository is processed by exactly one of them, and every shard
+gets an even slice of each project rather than whole projects. A shard left with nothing (more
+shards than repositories) succeeds without processing anything, and each job's `Run complete`
+line counts its own shard. A value that names no shard, such as `0/4` or `2`, stops the command
+with an error before anything runs; leave the flag out to process everything.
+
+A shard only helps on a job and a machine of its own: shards sharing one machine compete for
+its memory and CPUs, and each one sizes its builds as though it had the machine to itself.
+
+```yaml
+# Azure Pipelines: four parallel jobs, one shard each
+jobs:
+  - job: update
+    strategy:
+      parallel: 4
+    steps:
+      - script: curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --install-dir .
+        displayName: 'Download Autoupdate'
+      - script: ./autoupdate run --shard "$(System.JobPositionInPhase)/$(System.TotalJobsInPhase)"
+        env:
+          AZURE_DEVOPS_PAT: $(System.AccessToken)
+```
+
+```yaml
+# GitHub Actions: a matrix of four shards
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # one shard failing must not cancel the others
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Download Autoupdate'
+        run: curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --install-dir .
+      - run: ./autoupdate run --shard "${{ matrix.shard }}/4"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+```yaml
+# GitLab CI: four parallel jobs, one shard each
+update:
+  parallel: 4
+  script:
+    - curl -fsSL https://raw.githubusercontent.com/rios0rios0/autoupdate/main/install.sh | sh -s -- --install-dir .
+    - ./autoupdate run --shard "${CI_NODE_INDEX}/${CI_NODE_TOTAL}"
+```
+
 ## Command Reference
 
 ### Global Flags
@@ -528,6 +593,7 @@ Batch mode -- discover and update repositories using a config file.
 | `--org`         | Only process this organization/group                             |
 | `--updater`     | Only run this updater (terraform, golang, python, javascript, dart, ruby, java, csharp, pipeline, dockerfile) |
 | `--concurrency` | Repositories processed in parallel (default 4; 1 = sequential)   |
+| `--shard`       | Only process shard `<index>/<total>` of each organization's repositories, counted from 1 (e.g. `2/4`), to split a run across parallel CI jobs -- see [Splitting a Run Across Parallel CI Jobs](#splitting-a-run-across-parallel-ci-jobs) |
 
 ## Contributing
 

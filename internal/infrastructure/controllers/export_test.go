@@ -5,6 +5,9 @@ import "github.com/rios0rios0/autoupdate/internal/domain/entities"
 // ResolveOperatorConfigPath exports resolveOperatorConfigPath for testing.
 var ResolveOperatorConfigPath = resolveOperatorConfigPath //nolint:gochecknoglobals // test export
 
+// ShardFromFlags exports shardFromFlags for testing.
+var ShardFromFlags = shardFromFlags //nolint:gochecknoglobals // test export
+
 // ResolveWithFetch folds the configuration layers using the supplied fetch for the
 // published-defaults layer, so a test can exercise the assembly -- including an unreachable
 // network -- without one.
