@@ -146,8 +146,11 @@ The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` 
   `az account get-access-token` for the Azure DevOps resource; GitLab has none).
 - Batch mode's git auth (`gitlocal.CollectBatchAuthMethods`) adds a GitLab CI job's
   `CI_JOB_TOKEN` only for a clone URL on the server that issued it (`jobTokenAccepted`):
-  `Settings.GitLabCIServerHost` (`CI_SERVER_HOST`, else `CI_SERVER_URL`'s host); outside GitLab
-  CI, with no server to say, it is not sent at all. gitforge matches GitLab by a substring of the URL (`gitlab.company.com` is
+  `Settings.GitLabCIServerHost`, which `FinalizeSettings` reads through the reader `main.go`
+  installs (`entities.SetGitLabCIServerHostReader`, gitforge's `GitLabCIServerHost`: only the job's
+  own `CI_SERVER_*` variables, failing when they are missing, unreadable or disagree, as when a job
+  variable overrides `CI_SERVER_HOST`); with no server known, or no reader installed, it is not sent
+  at all. gitforge matches GitLab by a substring of the URL (`gitlab.company.com` is
   GitLab too), so without that check a self-managed runner's job token reached gitlab.com, or a
   gitlab.com job's token another server.
 - `repositories.GitCredentialResolver` -> `NewEnvCredentialResolver()`, for git's token: the same

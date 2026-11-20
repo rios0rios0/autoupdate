@@ -81,8 +81,9 @@ type Settings struct {
 	AzureDevOpsAccessToken string `yaml:"azure_devops_access_token"`
 	GitLabCIJobToken       string `yaml:"-"`
 	// GitLabCIServerHost is the host of the GitLab server a CI job runs on, the
-	// server that issued GitLabCIJobToken and the only one that accepts it:
-	// CI_SERVER_HOST, else CI_SERVER_URL's host, and "" outside GitLab CI.
+	// server that issued GitLabCIJobToken and the only one that accepts it, as
+	// FinalizeSettings read it through SetGitLabCIServerHostReader; "" when there
+	// is no job token or no server could be read.
 	GitLabCIServerHost string `yaml:"-"`
 }
 

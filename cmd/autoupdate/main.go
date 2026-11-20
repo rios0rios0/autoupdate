@@ -8,7 +8,9 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal"
 	"github.com/rios0rios0/autoupdate/internal/domain/commands"
+	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/controllers"
+	credentialsInfra "github.com/rios0rios0/gitforge/v4/pkg/credentials/infrastructure"
 	gitInfra "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
 )
 
@@ -123,6 +125,7 @@ func main() {
 	// against the known_hosts discovery, Windows profiles included, asking only for the host
 	// key types it records.
 	gitInfra.InstallSSHTransport()
+	installGitLabCIServerHostReader()
 
 	// Inject controllers via DIG
 	appContext, localController := injectApp()
@@ -134,4 +137,13 @@ func main() {
 	if err := cobraRoot.Execute(); err != nil {
 		logger.Fatalf("Error executing 'autoupdate': %s", err)
 	}
+}
+
+// installGitLabCIServerHostReader tells the settings how to learn the GitLab server
+// a CI job runs on, which decides where batch mode may send CI_JOB_TOKEN: gitforge's
+// GitLabCIServerHost, which reads only the job's own CI_SERVER_* variables.
+func installGitLabCIServerHostReader() {
+	entities.SetGitLabCIServerHostReader(func() (string, error) {
+		return credentialsInfra.GitLabCIServerHost(nil)
+	})
 }

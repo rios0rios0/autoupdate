@@ -396,7 +396,8 @@ gitlab.com: glab's `GITLAB_HOST`, `GITLAB_URI`, `GL_HOST`, `GITLAB_API_HOST` and
 semantic-release's `GL_URL` and `GITLAB_URL`, Lerna's `GL_API_URL`, Terraform's `GITLAB_BASE_URL`,
 or a GitLab CI job's `CI_SERVER_URL`, `CI_SERVER_HOST`, `CI_SERVER_FQDN` and `CI_API_V4_URL`. The
 token belongs to that server, so pass `--token` for a gitlab.com repository. In batch mode, a GitLab
-CI job's `CI_JOB_TOKEN` is only sent to the server the job runs on, and not at all outside GitLab CI. An
+CI job's `CI_JOB_TOKEN` is only sent to the server the job's own `CI_SERVER_*` variables name, and
+not at all when they are missing or disagree. An
 `origin` on a self-managed GitLab server is refused, even with `--token`: autoupdate's GitLab
 provider only talks to gitlab.com, so it could open no merge request there and would send your
 token to gitlab.com. An SSH alias counts as gitlab.com when your SSH client configuration gives

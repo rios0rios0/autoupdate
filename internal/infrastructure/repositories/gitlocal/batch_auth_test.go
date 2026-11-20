@@ -173,6 +173,35 @@ func TestCollectBatchAuthMethods(t *testing.T) {
 			assert.Len(t, methods, 1) // the provider token only
 		})
 
+	for _, scenario := range []struct {
+		name, server, cloneURL string
+		expected               int
+	}{
+		{"a lookalike host ends with the job's server", "gitlab.com", "https://evilgitlab.com/group/project.git", 1},
+		{"the clone URL carries batch mode's user name", "gitlab.com", "https://oauth2@gitlab.com/group/project.git", 2},
+		{"the hosts differ only in case", "GitLab.com", "https://gitlab.COM/group/project.git", 2},
+	} {
+		t.Run("should judge the CI job token by the whole host when "+scenario.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			resolver := &stubPushAuthResolver{
+				authMethods: []transport.AuthMethod{
+					&http.BasicAuth{Username: "oauth2", Password: "some-token"},
+				},
+			}
+			settings := &entities.Settings{GitLabCIJobToken: "ci-job-token", GitLabCIServerHost: scenario.server}
+
+			// when
+			methods := gitlocal.CollectBatchAuthMethods(
+				resolver, globalEntities.GITLAB, "provider-token", settings, scenario.cloneURL,
+			)
+
+			// then
+			assert.Len(t, methods, scenario.expected)
+		})
+	}
+
 	t.Run("should deduplicate tokens", func(t *testing.T) {
 		t.Parallel()
 
