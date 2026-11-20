@@ -137,7 +137,7 @@ The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` 
 
 - `repositories.CredentialResolver` (an alias of gitforge's `pkg/credentials` contract) ->
   `NewDefaultCredentialResolver()`, for the provider API's token: the forge's environment
-  variables (`GITHUB_TOKEN` before `GH_TOKEN`, `AZURE_DEVOPS_EXT_PAT`, `SYSTEM_ACCESSTOKEN`,
+  variables (`GH_TOKEN` before `GITHUB_TOKEN`, declined while `GITHUB_SERVER_URL`, `GITHUB_API_URL` or a `*.ghe.com` `GH_HOST` names another GitHub server; `AZURE_DEVOPS_EXT_PAT`, `SYSTEM_ACCESSTOKEN`,
   `GITLAB_TOKEN`, `GL_TOKEN`; a GitLab token is declined while a variable names a GitLab server
   other than gitlab.com: glab's `GITLAB_HOST`, `GITLAB_URI`, `GL_HOST`, `GITLAB_API_HOST` and
   `GITLAB_REPO`, semantic-release's `GL_URL`/`GITLAB_URL`, Lerna's `GL_API_URL`, Terraform's

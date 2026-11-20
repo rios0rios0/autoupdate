@@ -387,10 +387,11 @@ autoupdate --token ghp_abc123 .
 
 | Provider     | Environment variables                             | CLI fallback          |
 |--------------|---------------------------------------------------|-----------------------|
-| GitHub       | `GITHUB_TOKEN`, then `GH_TOKEN`                   | `gh` (`gh auth login`) |
+| GitHub       | `GH_TOKEN`, then `GITHUB_TOKEN`                   | `gh` (`gh auth login`) |
 | Azure DevOps | `AZURE_DEVOPS_EXT_PAT`, then `SYSTEM_ACCESSTOKEN` | `az` (`az login`)     |
 | GitLab       | `GITLAB_TOKEN`, then `GL_TOKEN`                   | none                  |
 
+A `GH_TOKEN` or `GITHUB_TOKEN` is not used while `GITHUB_SERVER_URL`, `GITHUB_API_URL` or a `*.ghe.com` `GH_HOST` names another GitHub server.
 A `GITLAB_TOKEN` or `GL_TOKEN` is not used while a variable names a GitLab server other than
 gitlab.com: glab's `GITLAB_HOST`, `GITLAB_URI`, `GL_HOST`, `GITLAB_API_HOST` and `GITLAB_REPO`,
 semantic-release's `GL_URL` and `GITLAB_URL`, Lerna's `GL_API_URL`, Terraform's `GITLAB_BASE_URL`,
