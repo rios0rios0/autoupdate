@@ -22,6 +22,20 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-19
+
+### Fixed
+
+- fixed `autoupdate .` asking `gh` or `az` for a token for a project type it has no upgrade for, and carrying on when go-git cannot read `origin` (a subdirectory or a linked worktree, where the push fails too): both now stop the run before anything is asked or changed
+- fixed `autoupdate .` letting an `origin` with an HTTPS `pushurl`, or a second HTTPS `url`, behind an SSH one through its credential check: go-git pushes to that last URL, so with only a `gh` or `az` sign-in the upgrade was committed and the push then failed with `authentication required`, leaving the checkout on the upgrade branch; an `origin` with any HTTPS URL now needs `--token` or the environment variable before anything changes
+- fixed `autoupdate .` opening its pull request, and preparing a Go migration branch, with the API token it resolved before the upgrade, which an `az` sign-in can let expire during a long upgrade: the token is now asked for again right before each use
+- fixed `autoupdate .` taking a token variable that holds only whitespace for git's token, which passed the HTTPS check and then failed at the push: git's token is now read the way gitforge's credential chain reads the variables, trimmed and skipping an empty one
+
+### Security
+
+- redacted the provider API's token, not only git's, from the Go major-migration notes `autoupdate .` writes into the pull request description and the migration commit, since a token the `gh` or `az` CLI issued differs from git's and a provider error can carry it
+- stopped `autoupdate .` from sending a token to gitlab.com for an `origin` on a self-managed GitLab server: gitforge reads any SSH host containing `gitlab` as GitLab and its provider only talks to gitlab.com, so the `GITLAB_TOKEN` meant for that server became the API token there; such an `origin` is now refused, even with `--token`, unless its SSH alias resolves to gitlab.com, or to altssh.gitlab.com, where GitLab serves SSH on port 443
+
 ## [1.5.0] - 2026-11-19
 
 ### Added

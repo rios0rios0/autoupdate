@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed `autoupdate .` letting an `origin` with an HTTPS `pushurl`, or a second HTTPS `url`, behind an SSH one through its credential check: go-git pushes to that last URL, so with only a `gh` or `az` sign-in the upgrade was committed and the push then failed with `authentication required`, leaving the checkout on the upgrade branch; an `origin` with any HTTPS URL now needs `--token` or the environment variable before anything changes'
-time: '2026-11-20T03:30:58.129301918Z'
