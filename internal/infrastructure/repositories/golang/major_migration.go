@@ -141,6 +141,19 @@ type migrationParams struct {
 	Runner cmdrunner.Runner
 }
 
+// secrets returns every token the preparation may have handed to a command or a
+// provider call, which is what a note is redacted with: git's, and the provider
+// API's. They differ in standalone mode, where the API's may be one the forge's CLI
+// issued, and a provider error can carry it into a note -- and from there into the
+// pull request description and the migration's commit message.
+func (p migrationParams) secrets() []string {
+	tokens := []string{p.AuthToken}
+	if p.Provider != nil {
+		tokens = append(tokens, p.Provider.AuthToken())
+	}
+	return tokens
+}
+
 // prepareMigrationsForRun is the decision the preparation hangs off: a run that
 // declined it, or that is only rehearsing, reports the findings without acting
 // on them.
@@ -227,7 +240,7 @@ func prepareOneMigration(
 
 	worktree, removeWorktree, err := addMigrationWorktree(ctx, params)
 	if err != nil {
-		prepared.Note = migrationNote(err.Error(), params.AuthToken)
+		prepared.Note = migrationNote(err.Error(), params.secrets()...)
 		return prepared
 	}
 	defer removeWorktree()
@@ -262,21 +275,21 @@ func buildAndPublishMigration(
 ) MigrationPrepared {
 	build, err := prepareMigrationInWorktree(ctx, params, major, worktree, env)
 	if err != nil {
-		prepared.Note = migrationNote(err.Error(), params.AuthToken)
+		prepared.Note = migrationNote(err.Error(), params.secrets()...)
 		return prepared
 	}
 	if build.Skip != "" {
-		prepared.Note = migrationNote(build.Skip, params.AuthToken)
+		prepared.Note = migrationNote(build.Skip, params.secrets()...)
 		return prepared
 	}
 
 	changes, err := collectMigrationChanges(ctx, worktree)
 	if err != nil {
-		prepared.Note = migrationNote(err.Error(), params.AuthToken)
+		prepared.Note = migrationNote(err.Error(), params.secrets()...)
 		return prepared
 	}
 	if changes.Skip != "" {
-		prepared.Note = migrationNote(changes.Skip, params.AuthToken)
+		prepared.Note = migrationNote(changes.Skip, params.secrets()...)
 		return prepared
 	}
 	// The note goes into the commit message, which is pushed into the
@@ -286,7 +299,7 @@ func buildAndPublishMigration(
 	// migrationCommitMessage has no token to redact with -- and before
 	// withStandingNote can cut it, since a cut through the token would leave a
 	// piece of it the redaction no longer recognises.
-	build.Note = support.RedactTokens(build.Note, params.AuthToken)
+	build.Note = support.RedactTokens(build.Note, params.secrets()...)
 	if len(changes.LeftInPlace) > 0 {
 		// In the build's note rather than beside it, so that the commit message
 		// the provider prefills the pull request with says it as well.
@@ -306,7 +319,7 @@ func buildAndPublishMigration(
 			// The stale branch is still there and still carries the migration,
 			// so it is reported as prepared, behind its base, and why.
 			prepared.Prepared = true
-			prepared.Note = migrationNote(staleBranchNote(params.BaseBranch, err), params.AuthToken)
+			prepared.Note = migrationNote(staleBranchNote(params.BaseBranch, err), params.secrets()...)
 			logger.Warnf(
 				"[golang] Could not delete the migration branch %s to prepare it again on top of %s: %v",
 				prepared.Branch, params.BaseBranch, err,
@@ -345,7 +358,7 @@ func publishMigrationBranch(
 		// branch that has them all the same: nothing in the build reads them
 		// (see deletionRefusal).
 		prepared.Compiles = build.Compiles
-		prepared.Note = migrationNote(build.Note, params.AuthToken)
+		prepared.Note = migrationNote(build.Note, params.secrets()...)
 		logger.Infof(
 			"[golang] Prepared the migration of %s to %s (%s) on branch %s",
 			major.Path, major.NextPath, major.NextVersion, prepared.Branch,
@@ -362,7 +375,7 @@ func publishMigrationBranch(
 			prepared.Branch,
 		)
 	default:
-		prepared.Note = migrationNote(err.Error(), params.AuthToken)
+		prepared.Note = migrationNote(err.Error(), params.secrets()...)
 		logger.Warnf(
 			"[golang] Could not prepare the migration of %s to %s: %v",
 			major.Path, major.NextPath, err,
@@ -1376,7 +1389,7 @@ func migrationCommitMessage(major MajorAvailable, build migrationBuild) string {
 		sb.WriteString("which are a decision rather than an edit this tool should be making.\n")
 	}
 	if build.Note != "" {
-		sb.WriteString("\n" + migrationNote(build.Note, "") + "\n")
+		sb.WriteString("\n" + migrationNote(build.Note) + "\n")
 	}
 
 	return sb.String()
@@ -1415,13 +1428,13 @@ func isDirectory(path string) bool {
 }
 
 // migrationNote renders a message for the pull request description: one line,
-// redacted, and short enough for a table cell.
-func migrationNote(message, token string) string {
+// redacted with every token given, and short enough for a table cell.
+func migrationNote(message string, tokens ...string) string {
 	if message == "" {
 		return ""
 	}
 
-	return truncateNote(support.RedactTokens(collapseWhitespace(message), token))
+	return truncateNote(support.RedactTokens(collapseWhitespace(message), tokens...))
 }
 
 // joinNotes appends a note to another, so a row that has several things to say

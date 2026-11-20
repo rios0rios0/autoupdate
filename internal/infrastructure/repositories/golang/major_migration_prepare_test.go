@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
+	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
 	"github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
@@ -1006,16 +1007,22 @@ func TestPrepareLocalMigrations(t *testing.T) {
 	output := "Checking for newer majors published under a different path...\n" +
 		"GO_MAJOR_AVAILABLE=.|github.com/example/lib|v1.2.3|github.com/example/lib/v3|v3.0.1\n"
 
+	providerRequests := 0
+
 	// when
 	migrations := golang.PrepareLocalMigrations(context.Background(), repoDir, golang.LocalUpgradeOptions{
 		ProviderName: "github",
 		Repository:   entities.Repository{Organization: "example", Name: "app", DefaultBranch: "main"},
-		Provider:     provider,
+		MigrationProvider: func(context.Context) repositories.ProviderRepository {
+			providerRequests++
+			return provider
+		},
 
 		PrepareMajorMigrations: true,
 	}, output, "main")
 
 	// then
+	assert.Equal(t, 1, providerRequests, "the provider is asked for once, after the push")
 	require.Len(t, migrations, 1)
 	assert.True(t, migrations[0].Prepared)
 	assert.Equal(t, "chore/migrate-example-lib-v3", migrations[0].Branch)
@@ -1023,6 +1030,84 @@ func TestPrepareLocalMigrations(t *testing.T) {
 	assert.Contains(t, provider.BranchInputs[0].CommitMessage, "prepare the migration of github.com/example/lib")
 	assert.Equal(t, []string{"get github.com/example/lib/v3@v3.0.1", "mod tidy", "vet ./..."},
 		runner.commands())
+}
+
+func TestPrepareLocalMigrationsAsksForTheProviderOnlyWhenItPrepares(t *testing.T) {
+	t.Parallel()
+
+	majorAvailable := "GO_MAJOR_AVAILABLE=.|github.com/example/lib|v1.2.3|github.com/example/lib/v3|v3.0.1\n"
+
+	t.Run("should not ask for a provider when no newer major is waiting", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- asking would mean a token request, an az call among them, for nothing
+		providerRequests := 0
+		opts := golang.LocalUpgradeOptions{
+			ProviderName: "github",
+			MigrationProvider: func(context.Context) repositories.ProviderRepository {
+				providerRequests++
+				return &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+			},
+			PrepareMajorMigrations: true,
+		}
+
+		// when
+		migrations := golang.PrepareLocalMigrations(t.Context(), t.TempDir(), opts, "no newer majors\n", "main")
+
+		// then
+		assert.Empty(t, migrations)
+		assert.Zero(t, providerRequests)
+	})
+
+	t.Run("should not ask for a provider when preparing migrations is off", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		providerRequests := 0
+		opts := golang.LocalUpgradeOptions{
+			ProviderName: "github",
+			MigrationProvider: func(context.Context) repositories.ProviderRepository {
+				providerRequests++
+				return &repositorydoubles.SpyProviderRepository{ProviderName: "github"}
+			},
+			PrepareMajorMigrations: false,
+		}
+
+		// when
+		migrations := golang.PrepareLocalMigrations(t.Context(), t.TempDir(), opts, majorAvailable, "main")
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Zero(t, providerRequests)
+	})
+}
+
+func TestMigrationNotesRedactEveryToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should redact the provider API's token when it differs from git's", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- standalone mode, where the API's token may be one the gh or az CLI issued
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		provider := &repositorydoubles.SpyProviderRepository{
+			ProviderName:    "github",
+			Token:           "fixture-api-token-placeholder",
+			CreateBranchErr: errors.New("POST /branches with fixture-api-token-placeholder: 401 Unauthorized"),
+		}
+		params := libMigrationParams(repoDir, provider, &stubGoRunner{})
+		params.AuthToken = "fixture-git-token-placeholder"
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), params, true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "401 Unauthorized")
+		assert.NotContains(t, migrations[0].Note, "fixture-api-token-placeholder")
+	})
 }
 
 func TestMigrationPreparationEdgeCases(t *testing.T) {

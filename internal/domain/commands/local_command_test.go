@@ -12,9 +12,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/commands"
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
-	infraRepos "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	globalEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
-	gitforgeDoubles "github.com/rios0rios0/gitforge/v4/test/doubles"
 	langEntities "github.com/rios0rios0/langforge/pkg/domain/entities"
 )
 
@@ -649,9 +647,8 @@ func TestLocalCommandExecute(t *testing.T) {
 			0o600,
 		))
 
-		registry := infraRepos.NewProviderRegistry()
-		credentials := &gitforgeDoubles.CredentialResolverStub{}
-		cmd := commands.NewLocalCommand(registry, credentials)
+		credentials := unusedCredentials()
+		cmd := newLocalCommand(credentials, unusedCredentials())
 
 		// when
 		err := cmd.Execute(context.Background(), commands.LocalOptions{
@@ -674,9 +671,8 @@ func TestLocalCommandExecute(t *testing.T) {
 		repoDir := initTestGitRepo(t)
 		runGit(t, repoDir, "remote", "add", "origin", "git@github.com:rios0rios0/autoupdate.git")
 
-		registry := infraRepos.NewProviderRegistry()
-		credentials := &gitforgeDoubles.CredentialResolverStub{}
-		cmd := commands.NewLocalCommand(registry, credentials)
+		credentials := unusedCredentials()
+		cmd := newLocalCommand(credentials, unusedCredentials())
 
 		settings := &entities.Settings{ExcludeRepos: []string{"rios0rios0/autoupdate"}}
 
@@ -706,9 +702,8 @@ func TestLocalCommandExecute(t *testing.T) {
 			0o600,
 		))
 
-		registry := infraRepos.NewProviderRegistry()
-		credentials := &gitforgeDoubles.CredentialResolverStub{}
-		cmd := commands.NewLocalCommand(registry, credentials)
+		credentials := unusedCredentials()
+		cmd := newLocalCommand(credentials, unusedCredentials())
 
 		// when
 		err := cmd.Execute(context.Background(), commands.LocalOptions{

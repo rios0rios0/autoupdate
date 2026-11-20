@@ -304,58 +304,6 @@ func TestLocalHasChanges(t *testing.T) {
 	})
 }
 
-func TestOriginPushURL(t *testing.T) {
-	t.Parallel()
-
-	t.Run("should return origin's URL as the repository's own configuration names it", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := createTestRepoWithHTTPSRemote(t)
-
-		// when
-		url, err := gitlocal.OriginPushURL(repoDir)
-
-		// then
-		require.NoError(t, err)
-		assert.Equal(t, "https://github.com/test/test-repo.git", url)
-	})
-
-	t.Run("should apply an insteadOf rule of the repository's own configuration", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := createTestRepoWithHTTPSRemote(t)
-		repo, err := git.PlainOpen(repoDir)
-		require.NoError(t, err)
-		cfg, err := repo.Config()
-		require.NoError(t, err)
-		cfg.URLs["git@github.com:"] = &gitconfig.URL{Name: "git@github.com:", InsteadOf: "https://github.com/"}
-		require.NoError(t, repo.SetConfig(cfg))
-
-		// when
-		url, err := gitlocal.OriginPushURL(repoDir)
-
-		// then
-		require.NoError(t, err)
-		assert.Equal(t, "git@github.com:test/test-repo.git", url)
-	})
-
-	t.Run("should return error when the repository has no origin", func(t *testing.T) {
-		t.Parallel()
-
-		// given
-		repoDir := createTestRepoWithCommit(t)
-
-		// when
-		url, err := gitlocal.OriginPushURL(repoDir)
-
-		// then
-		require.ErrorContains(t, err, "failed to get origin remote")
-		assert.Empty(t, url)
-	})
-}
-
 func TestStageCommitAndPush(t *testing.T) {
 	t.Parallel()
 

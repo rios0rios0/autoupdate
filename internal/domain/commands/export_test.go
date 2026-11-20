@@ -31,8 +31,8 @@ var ResolveLocalSettings = resolveLocalSettings //nolint:gochecknoglobals // tes
 // LoadRepoSettings exports loadRepoSettings for testing.
 var LoadRepoSettings = loadRepoSettings //nolint:gochecknoglobals // test export
 
-// RunLocalUpgrade exports runLocalUpgrade for testing.
-var RunLocalUpgrade = runLocalUpgrade //nolint:gochecknoglobals // test export
+// LocalUpgradeHandlerFor exports localUpgradeHandlerFor for testing.
+var LocalUpgradeHandlerFor = localUpgradeHandlerFor //nolint:gochecknoglobals // test export
 
 // LocalUpgradeHandlers exports localUpgradeHandlers for testing.
 var LocalUpgradeHandlers = localUpgradeHandlers //nolint:gochecknoglobals // test export
@@ -48,6 +48,9 @@ var ParseGitRemote = parseGitRemote //nolint:gochecknoglobals // test export
 
 // LocalTokens exports localTokens for testing.
 type LocalTokens = localTokens
+
+// LocalMigrationProvider exports localMigrationProvider for testing.
+var LocalMigrationProvider = localMigrationProvider //nolint:gochecknoglobals // test export
 
 // ResolveLocalTokens exports resolveLocalTokens for testing.
 var ResolveLocalTokens = (*LocalCommand).resolveLocalTokens //nolint:gochecknoglobals // test export

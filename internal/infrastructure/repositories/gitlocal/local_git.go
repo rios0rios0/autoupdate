@@ -200,30 +200,6 @@ func (c *LocalGitContext) RestoreStash() error {
 	return nil
 }
 
-// OriginPushURL returns the URL a push to origin dials: origin's first URL as go-git reads it,
-// from the repository's own configuration with only that configuration's insteadOf rules
-// applied -- the URL collectAuthMethods and gitforge's PushWithTransportDetection work from.
-// It can differ from what `git remote get-url origin` prints, because git also applies the
-// global and system insteadOf rules, which go-git never reads.
-func OriginPushURL(repoDir string) (string, error) {
-	repo, err := git.PlainOpen(repoDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to open repository at %s: %w", repoDir, err)
-	}
-
-	origin, err := repo.Remote("origin")
-	if err != nil {
-		return "", fmt.Errorf("failed to get origin remote: %w", err)
-	}
-
-	urls := origin.Config().URLs
-	if len(urls) == 0 {
-		return "", fmt.Errorf("origin remote in %s has no URL", repoDir)
-	}
-
-	return urls[0], nil
-}
-
 // CurrentBranch returns the short name of the currently checked-out branch.
 func (c *LocalGitContext) CurrentBranch() (string, error) {
 	head, err := c.repo.Head()
