@@ -1,3 +1,0 @@
-kind: 'Fixed'
-body: 'fixed `autoupdate .` taking a token variable that holds only whitespace for git''s token, which passed the HTTPS check and then failed at the push: git''s token is now read the way gitforge''s credential chain reads the variables, trimmed and skipping an empty one'
-time: '2026-11-20T03:30:58.135741026Z'
