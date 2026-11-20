@@ -489,7 +489,7 @@ func (it *RunCommand) processLocalUpdaters(
 	cloneURL := provider.CloneURL(repo)
 	serviceType := gitlocal.ResolveServiceTypeFromURL(it.providerRegistry, cloneURL)
 	authMethods := gitlocal.CollectBatchAuthMethods(
-		it.providerRegistry, serviceType, provider.AuthToken(), settings,
+		it.providerRegistry, serviceType, provider.AuthToken(), settings, cloneURL,
 	)
 
 	gitOps := gitops.NewGitOperations(it.providerRegistry)

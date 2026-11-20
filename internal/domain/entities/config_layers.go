@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"strings"
 
 	logger "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -391,8 +393,22 @@ func FinalizeSettings(settings *Settings) {
 	settings.AzureDevOpsAccessToken = configEntities.ResolveToken(settings.AzureDevOpsAccessToken)
 
 	settings.GitLabCIJobToken = os.Getenv("CI_JOB_TOKEN")
+	settings.GitLabCIServerHost = gitLabCIServerHost()
 
 	if settings.GpgKeyPassphrase == "" {
 		settings.GpgKeyPassphrase = os.Getenv("GPG_PASSPHRASE")
 	}
+}
+
+// gitLabCIServerHost returns the host of the GitLab server a CI job runs on,
+// which issued its CI_JOB_TOKEN: CI_SERVER_HOST, else CI_SERVER_URL's host, else
+// "" outside GitLab CI.
+func gitLabCIServerHost() string {
+	if host := strings.TrimSpace(os.Getenv("CI_SERVER_HOST")); host != "" {
+		return host
+	}
+	if parsed, err := url.Parse(strings.TrimSpace(os.Getenv("CI_SERVER_URL"))); err == nil {
+		return parsed.Hostname()
+	}
+	return ""
 }

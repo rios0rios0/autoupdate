@@ -80,6 +80,10 @@ type Settings struct {
 	GitLabAccessToken      string `yaml:"gitlab_access_token"`
 	AzureDevOpsAccessToken string `yaml:"azure_devops_access_token"`
 	GitLabCIJobToken       string `yaml:"-"`
+	// GitLabCIServerHost is the host of the GitLab server a CI job runs on, the
+	// server that issued GitLabCIJobToken and the only one that accepts it:
+	// CI_SERVER_HOST, else CI_SERVER_URL's host, and "" outside GitLab CI.
+	GitLabCIServerHost string `yaml:"-"`
 }
 
 // CleanupEnabled reports whether stale aggregate-branch cleanup should run.
