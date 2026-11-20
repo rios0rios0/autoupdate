@@ -391,8 +391,40 @@ func FinalizeSettings(settings *Settings) {
 	settings.AzureDevOpsAccessToken = configEntities.ResolveToken(settings.AzureDevOpsAccessToken)
 
 	settings.GitLabCIJobToken = os.Getenv("CI_JOB_TOKEN")
+	settings.GitLabCIServerHost = ""
+	if settings.GitLabCIJobToken != "" {
+		settings.GitLabCIServerHost = gitLabCIServerHost()
+	}
 
 	if settings.GpgKeyPassphrase == "" {
 		settings.GpgKeyPassphrase = os.Getenv("GPG_PASSPHRASE")
 	}
+}
+
+// gitLabCIServerHostReader returns the host of the GitLab server a GitLab CI job
+// runs on; set once at startup by SetGitLabCIServerHostReader.
+var gitLabCIServerHostReader func() (string, error) //nolint:gochecknoglobals // set once at startup
+
+// SetGitLabCIServerHostReader sets what FinalizeSettings asks for the GitLab server
+// a CI job runs on, the one that issued its CI_JOB_TOKEN: the application installs
+// gitforge's GitLabCIServerHost, which reads only the job's own CI_SERVER_URL,
+// CI_SERVER_HOST, CI_SERVER_FQDN and CI_API_V4_URL, and fails when they are
+// missing, unreadable or disagree. Left unset, no server is known and the job
+// token is never sent, so a missing installation fails closed.
+func SetGitLabCIServerHostReader(read func() (string, error)) {
+	gitLabCIServerHostReader = read
+}
+
+// gitLabCIServerHost returns the host of the GitLab server the CI job runs on, or
+// "" when none can be known.
+func gitLabCIServerHost() string {
+	if gitLabCIServerHostReader == nil {
+		return ""
+	}
+	host, err := gitLabCIServerHostReader()
+	if err != nil {
+		logger.Infof("not using CI_JOB_TOKEN: %v", err)
+		return ""
+	}
+	return host
 }

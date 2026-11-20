@@ -138,9 +138,21 @@ The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` 
 - `repositories.CredentialResolver` (an alias of gitforge's `pkg/credentials` contract) ->
   `NewDefaultCredentialResolver()`, for the provider API's token: the forge's environment
   variables (`GITHUB_TOKEN` before `GH_TOKEN`, `AZURE_DEVOPS_EXT_PAT`, `SYSTEM_ACCESSTOKEN`,
-  `GITLAB_TOKEN`, `GL_TOKEN`; a GitLab token is declined while `GITLAB_HOST` or `GL_HOST` names a
-  server other than gitlab.com), then its CLI (`gh auth token --hostname github.com`,
+  `GITLAB_TOKEN`, `GL_TOKEN`; a GitLab token is declined while a variable names a GitLab server
+  other than gitlab.com: glab's `GITLAB_HOST`, `GITLAB_URI`, `GL_HOST`, `GITLAB_API_HOST` and
+  `GITLAB_REPO`, semantic-release's `GL_URL`/`GITLAB_URL`, Lerna's `GL_API_URL`, Terraform's
+  `GITLAB_BASE_URL`, or a GitLab CI job's `CI_SERVER_*`/`CI_API_V4_URL`, gitforge's
+  `CheckGitLabTokenServer`), then its CLI (`gh auth token --hostname github.com`,
   `az account get-access-token` for the Azure DevOps resource; GitLab has none).
+- Batch mode's git auth (`gitlocal.CollectBatchAuthMethods`) adds a GitLab CI job's
+  `CI_JOB_TOKEN` only for a clone URL on the server that issued it (`jobTokenAccepted`):
+  `Settings.GitLabCIServerHost`, which `FinalizeSettings` reads through the reader `main.go`
+  installs (`entities.SetGitLabCIServerHostReader`, gitforge's `GitLabCIServerHost`: only the job's
+  own `CI_SERVER_*` variables, failing when they are missing, unreadable or disagree, as when a job
+  variable overrides `CI_SERVER_HOST`); with no server known, or no reader installed, it is not sent
+  at all. gitforge matches GitLab by a substring of the URL (`gitlab.company.com` is
+  GitLab too), so without that check a self-managed runner's job token reached gitlab.com, or a
+  gitlab.com job's token another server.
 - `repositories.GitCredentialResolver` -> `NewEnvCredentialResolver()`, for git's token: the same
   reading of the same variables, and never a CLI. One implementation reads both tokens, so they
   agree on order, trimming and the GitLab host check.

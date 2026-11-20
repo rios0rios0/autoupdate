@@ -16,7 +16,8 @@ type CredentialResolver = credentialEntities.CredentialResolver
 // operator exported, never one a CLI issued, because git sends it to whichever host origin's
 // URLs name. The container binds gitforge's EnvCredentialResolver, the reading of the forge's
 // environment variables CredentialResolver's chain starts with: in the same order, trimmed, and
-// with a GitLab token declined while GITLAB_HOST or GL_HOST names another server. It is a type
+// with a GitLab token declined while a variable names another GitLab server (gitforge's
+// CheckGitLabTokenServer: GITLAB_HOST, GL_URL, CI_SERVER_HOST and the rest). It is a type
 // of its own, rather than a second CredentialResolver, so the two cannot be wired the wrong way
 // round.
 type GitCredentialResolver interface {

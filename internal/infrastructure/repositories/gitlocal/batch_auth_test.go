@@ -31,7 +31,7 @@ func TestCollectBatchAuthMethods(t *testing.T) {
 
 		// when
 		methods := gitlocal.CollectBatchAuthMethods(
-			resolver, globalEntities.GITHUB, "provider-token", settings,
+			resolver, globalEntities.GITHUB, "provider-token", settings, "https://github.com/owner/repo.git",
 		)
 
 		// then
@@ -53,7 +53,7 @@ func TestCollectBatchAuthMethods(t *testing.T) {
 
 		// when
 		methods := gitlocal.CollectBatchAuthMethods(
-			resolver, globalEntities.GITHUB, "", settings,
+			resolver, globalEntities.GITHUB, "", settings, "https://github.com/owner/repo.git",
 		)
 
 		// then
@@ -70,18 +70,137 @@ func TestCollectBatchAuthMethods(t *testing.T) {
 			},
 		}
 		settings := &entities.Settings{
-			GitLabAccessToken: "gitlab-pat",
-			GitLabCIJobToken:  "ci-job-token",
+			GitLabAccessToken:  "gitlab-pat",
+			GitLabCIJobToken:   "ci-job-token",
+			GitLabCIServerHost: "gitlab.com",
 		}
 
 		// when
 		methods := gitlocal.CollectBatchAuthMethods(
-			resolver, globalEntities.GITLAB, "provider-token", settings,
+			resolver, globalEntities.GITLAB, "provider-token", settings, "https://gitlab.com/group/project.git",
 		)
 
 		// then
 		assert.Len(t, methods, 3) // provider + gitlab PAT + CI job token
 	})
+
+	t.Run("should leave the CI job token out for a gitlab.com repository when the job runs on another server",
+		func(t *testing.T) {
+			t.Parallel()
+
+			// given: a self-managed runner, whose job token only that server accepts
+			resolver := &stubPushAuthResolver{
+				authMethods: []transport.AuthMethod{
+					&http.BasicAuth{Username: "oauth2", Password: "some-token"},
+				},
+			}
+			settings := &entities.Settings{
+				GitLabCIJobToken:   "ci-job-token",
+				GitLabCIServerHost: "gitlab.example.com",
+			}
+
+			// when
+			methods := gitlocal.CollectBatchAuthMethods(
+				resolver, globalEntities.GITLAB, "provider-token", settings, "https://gitlab.com/group/project.git",
+			)
+
+			// then
+			assert.Len(t, methods, 1) // the provider token only
+		})
+
+	t.Run("should use the CI job token for a repository on the GitLab server the job runs on", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		resolver := &stubPushAuthResolver{
+			authMethods: []transport.AuthMethod{
+				&http.BasicAuth{Username: "oauth2", Password: "some-token"},
+			},
+		}
+		settings := &entities.Settings{
+			GitLabCIJobToken:   "ci-job-token",
+			GitLabCIServerHost: "gitlab.example.com",
+		}
+
+		// when
+		methods := gitlocal.CollectBatchAuthMethods(
+			resolver, globalEntities.GITLAB, "provider-token", settings,
+			"https://gitlab.example.com/group/project.git",
+		)
+
+		// then
+		assert.Len(t, methods, 2) // provider + CI job token
+	})
+
+	t.Run("should leave the CI job token out when no CI server is known", func(t *testing.T) {
+		t.Parallel()
+
+		// given: no CI_SERVER_HOST says which server issued the token, not even for gitlab.com
+		resolver := &stubPushAuthResolver{
+			authMethods: []transport.AuthMethod{
+				&http.BasicAuth{Username: "oauth2", Password: "some-token"},
+			},
+		}
+		settings := &entities.Settings{GitLabCIJobToken: "ci-job-token"}
+
+		// when
+		methods := gitlocal.CollectBatchAuthMethods(
+			resolver, globalEntities.GITLAB, "provider-token", settings, "https://gitlab.com/group/project.git",
+		)
+
+		// then
+		assert.Len(t, methods, 1) // the provider token only
+	})
+
+	t.Run("should leave the CI job token out for another server's repository when the job runs on gitlab.com",
+		func(t *testing.T) {
+			t.Parallel()
+
+			// given: gitforge matches GitLab by a substring, so gitlab.company.com is "GitLab" too
+			resolver := &stubPushAuthResolver{
+				authMethods: []transport.AuthMethod{
+					&http.BasicAuth{Username: "oauth2", Password: "some-token"},
+				},
+			}
+			settings := &entities.Settings{GitLabCIJobToken: "ci-job-token", GitLabCIServerHost: "gitlab.com"}
+
+			// when
+			methods := gitlocal.CollectBatchAuthMethods(
+				resolver, globalEntities.GITLAB, "provider-token", settings, "git@gitlab.company.com:group/project.git",
+			)
+
+			// then
+			assert.Len(t, methods, 1) // the provider token only
+		})
+
+	for _, scenario := range []struct {
+		name, server, cloneURL string
+		expected               int
+	}{
+		{"a lookalike host ends with the job's server", "gitlab.com", "https://evilgitlab.com/group/project.git", 1},
+		{"the clone URL carries batch mode's user name", "gitlab.com", "https://oauth2@gitlab.com/group/project.git", 2},
+		{"the hosts differ only in case", "GitLab.com", "https://gitlab.COM/group/project.git", 2},
+	} {
+		t.Run("should judge the CI job token by the whole host when "+scenario.name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			resolver := &stubPushAuthResolver{
+				authMethods: []transport.AuthMethod{
+					&http.BasicAuth{Username: "oauth2", Password: "some-token"},
+				},
+			}
+			settings := &entities.Settings{GitLabCIJobToken: "ci-job-token", GitLabCIServerHost: scenario.server}
+
+			// when
+			methods := gitlocal.CollectBatchAuthMethods(
+				resolver, globalEntities.GITLAB, "provider-token", settings, scenario.cloneURL,
+			)
+
+			// then
+			assert.Len(t, methods, scenario.expected)
+		})
+	}
 
 	t.Run("should deduplicate tokens", func(t *testing.T) {
 		t.Parallel()
@@ -98,7 +217,7 @@ func TestCollectBatchAuthMethods(t *testing.T) {
 
 		// when
 		methods := gitlocal.CollectBatchAuthMethods(
-			resolver, globalEntities.GITHUB, "same-token", settings,
+			resolver, globalEntities.GITHUB, "same-token", settings, "https://github.com/owner/repo.git",
 		)
 
 		// then
@@ -113,7 +232,7 @@ func TestCollectBatchAuthMethods(t *testing.T) {
 
 		// when
 		methods := gitlocal.CollectBatchAuthMethods(
-			nil, globalEntities.GITHUB, "token", settings,
+			nil, globalEntities.GITHUB, "token", settings, "https://github.com/owner/repo.git",
 		)
 
 		// then
@@ -129,7 +248,7 @@ func TestCollectBatchAuthMethods(t *testing.T) {
 
 		// when
 		methods := gitlocal.CollectBatchAuthMethods(
-			resolver, globalEntities.UNKNOWN, "token", settings,
+			resolver, globalEntities.UNKNOWN, "token", settings, "https://example.com/repo.git",
 		)
 
 		// then
