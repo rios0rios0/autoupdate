@@ -379,6 +379,73 @@ func TestResolveLocalTokensForGitLab(t *testing.T) {
 		// then
 		require.NoError(t, err)
 	})
+
+	for name, hostName := range map[string]string{
+		"the way GitLab documents it": "altssh.gitlab.com",
+		"in another letter case":      "AltSSH.GitLab.com",
+	} {
+		t.Run("should accept gitlab.com's SSH on port 443, named "+name, func(t *testing.T) {
+			t.Parallel()
+
+			// given -- GitLab's stanza for a blocked port 22:
+			// `Host gitlab.com`, `Hostname altssh.gitlab.com`, `Port 443`
+			cmd := commands.NewLocalCommand(
+				infraRepos.NewProviderRegistry(), cliCredentials(), noGitToken(),
+				&gitlocal.OriginRepository{SSHHostName: func(string) string { return hostName }},
+			)
+
+			// when
+			_, err := commands.ResolveLocalTokens(
+				cmd, t.Context(), commands.LocalOptions{}, remoteFor(t, "git@gitlab.com:group/repo.git"),
+			)
+
+			// then
+			require.NoError(t, err)
+		})
+	}
+
+	altSSHOrigins := map[string]*commands.RemoteInfo{
+		"scp-like": remoteFor(t, "git@altssh.gitlab.com:group/repo.git"),
+		// gitforge's parser does not take this form for GitLab yet, so the remote is
+		// built by hand: the server check must accept it once it does
+		"ssh:// on port 443": {
+			ProviderType: "gitlab", ServiceType: globalEntities.GITLAB, Org: "group", RepoName: "repo",
+			RemoteURL: "ssh://git@altssh.gitlab.com:443/group/repo.git",
+			PushURLs:  []string{"ssh://git@altssh.gitlab.com:443/group/repo.git"},
+		},
+	}
+	for name, remote := range altSSHOrigins {
+		t.Run("should accept an origin naming altssh.gitlab.com directly, "+name, func(t *testing.T) {
+			t.Parallel()
+
+			// given
+			cmd := newLocalCommand(cliCredentials(), noGitToken())
+
+			// when
+			_, err := commands.ResolveLocalTokens(cmd, t.Context(), commands.LocalOptions{}, remote)
+
+			// then
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("should refuse a lookalike of gitlab.com's port-443 host", func(t *testing.T) {
+		t.Parallel()
+
+		// given
+		cmd := commands.NewLocalCommand(
+			infraRepos.NewProviderRegistry(), cliCredentials(), noGitToken(),
+			&gitlocal.OriginRepository{SSHHostName: func(string) string { return "altssh.gitlab.com.example.net" }},
+		)
+
+		// when
+		_, err := commands.ResolveLocalTokens(
+			cmd, t.Context(), commands.LocalOptions{}, remoteFor(t, "git@gitlab.com:group/repo.git"),
+		)
+
+		// then
+		require.ErrorIs(t, err, commands.ErrSelfManagedGitLab)
+	})
 }
 
 // TestResolveLocalTokensLogging is not parallel: it swaps the standard logger's hooks, which

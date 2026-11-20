@@ -396,7 +396,8 @@ than gitlab.com: it belongs to that server, so pass `--token` for a gitlab.com r
 `origin` on a self-managed GitLab server is refused, even with `--token`: autoupdate's GitLab
 provider only talks to gitlab.com, so it could open no merge request there and would send your
 token to gitlab.com. An SSH alias counts as gitlab.com when your SSH client configuration gives
-it `HostName gitlab.com`.
+it `HostName gitlab.com`, or `HostName altssh.gitlab.com`, where GitLab serves SSH on port 443 for
+networks that block port 22.
 
 The run logs which source it used, never the token. When no source has one, it stops before it
 touches the repository and lists every source it tried; a dry run only warns. A project type

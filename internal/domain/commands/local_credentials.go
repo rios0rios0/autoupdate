@@ -14,8 +14,14 @@ import (
 	globalEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
 )
 
-// gitlabHost is the only GitLab server gitforge's GitLab provider talks to.
-const gitlabHost = "gitlab.com"
+const (
+	// gitlabHost is the only GitLab server gitforge's GitLab provider talks to.
+	gitlabHost = "gitlab.com"
+	// gitlabAltSSHHost is where gitlab.com serves SSH on port 443, for networks that block
+	// port 22. GitLab's documented `Host gitlab.com` stanza (`Hostname altssh.gitlab.com`,
+	// `Port 443`) points an origin there, and the repositories it reaches are gitlab.com's.
+	gitlabAltSSHHost = "altssh.gitlab.com"
+)
 
 var (
 	// ErrNoPushToken reports an origin git would push to over HTTP(S) with no token it may be
@@ -154,16 +160,22 @@ func (it *LocalCommand) refuseSelfManagedGitLab(remote *remoteInfo) error {
 	}
 
 	host := it.origins.HostName(remote.RemoteURL)
-	if strings.EqualFold(host, gitlabHost) {
+	if onGitLabDotCom(host) {
 		return nil
 	}
 
 	return fmt.Errorf(
 		"%w: its server is %s, but autoupdate's GitLab provider only talks to %s, so no token is "+
 			"sent and no merge request can be opened (an SSH alias counts as %s when the SSH "+
-			"client configuration gives it HostName %s)",
-		ErrSelfManagedGitLab, host, gitlabHost, gitlabHost, gitlabHost,
+			"client configuration gives it HostName %s or %s)",
+		ErrSelfManagedGitLab, host, gitlabHost, gitlabHost, gitlabHost, gitlabAltSSHHost,
 	)
+}
+
+// onGitLabDotCom reports whether a server is gitlab.com: its own host, or the one it serves
+// SSH on over port 443. Host names are case-insensitive.
+func onGitLabDotCom(host string) bool {
+	return strings.EqualFold(host, gitlabHost) || strings.EqualFold(host, gitlabAltSSHHost)
 }
 
 // describeSource names a credential source for an error, as "the gh CLI".

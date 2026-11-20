@@ -1,3 +1,3 @@
 kind: 'Security'
-body: 'stopped `autoupdate .` from sending a token to gitlab.com for an `origin` on a self-managed GitLab server: gitforge reads any SSH host containing `gitlab` as GitLab and its provider only talks to gitlab.com, so the `GITLAB_TOKEN` meant for that server became the API token there; such an `origin` is now refused, even with `--token`, unless its SSH alias resolves to gitlab.com'
+body: 'stopped `autoupdate .` from sending a token to gitlab.com for an `origin` on a self-managed GitLab server: gitforge reads any SSH host containing `gitlab` as GitLab and its provider only talks to gitlab.com, so the `GITLAB_TOKEN` meant for that server became the API token there; such an `origin` is now refused, even with `--token`, unless its SSH alias resolves to gitlab.com, or to altssh.gitlab.com, where GitLab serves SSH on port 443'
 time: '2026-11-20T03:30:58.137646864Z'

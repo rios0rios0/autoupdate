@@ -176,6 +176,27 @@ func TestOriginRepositoryHostName(t *testing.T) {
 		assert.Equal(t, []string{"gitlab.com-work", "gitlab.com-work"}, asked)
 	})
 
+	t.Run("should return altssh.gitlab.com for gitlab.com's SSH on port 443", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- named directly, and through GitLab's documented `Host gitlab.com` stanza
+		direct := &gitlocal.OriginRepository{SSHHostName: func(string) string { return "" }}
+		stanza := &gitlocal.OriginRepository{SSHHostName: func(alias string) string {
+			if alias == "gitlab.com" {
+				return "altssh.gitlab.com"
+			}
+			return ""
+		}}
+
+		// when
+		directHost := direct.HostName("ssh://git@altssh.gitlab.com:443/group/repo.git")
+		stanzaHost := stanza.HostName("git@gitlab.com:group/repo.git")
+
+		// then
+		assert.Equal(t, "altssh.gitlab.com", directHost)
+		assert.Equal(t, "altssh.gitlab.com", stanzaHost)
+	})
+
 	t.Run("should return no host for a path on the local filesystem", func(t *testing.T) {
 		t.Parallel()
 

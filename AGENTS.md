@@ -156,7 +156,9 @@ then calls `resolveLocalTokens` (`internal/domain/commands/local_credentials.go`
 
 - A GitLab origin whose server (`OriginRepository.HostName`) is not gitlab.com fails with
   `ErrSelfManagedGitLab`, `--token` or not: gitforge's parser takes any SSH host containing
-  `gitlab` for GitLab, and its provider only talks to gitlab.com.
+  `gitlab` for GitLab, and its provider only talks to gitlab.com. `altssh.gitlab.com`, where
+  gitlab.com serves SSH on port 443 (GitLab's documented `Host gitlab.com` stanza), counts as
+  gitlab.com (`onGitLabDotCom`, matched case-insensitively).
 - `--token` is the operator's explicit choice and serves both git and the API.
 - Otherwise `localTokens.Git` is `GitCredentialResolver`'s token, or empty. When it is empty and
   **any** of origin's push URLs is http(s), the run fails with `ErrNoPushToken`. Any, not the
