@@ -30,12 +30,15 @@ type LocalUpgradeOptions struct {
 	// AllowMajorUpdates decides whether the major-version guard runs. Resolved by
 	// entities.MajorUpdatesAllowed, which defaults it to true.
 	AllowMajorUpdates bool
-	// Repository and Provider are what the migration preparation needs to push
-	// a branch carrying a newer major: the repository the provider API is asked
-	// about, and the API itself. A caller without a provider leaves them empty
-	// and the findings are reported without a migration.
-	Repository entities.Repository
-	Provider   repositories.ProviderRepository
+	// Repository and MigrationProvider are what the migration preparation needs to
+	// push a branch carrying a newer major: the repository the provider API is asked
+	// about, and a way to reach the API itself. MigrationProvider is only called once
+	// the upgrade is pushed and a newer major is waiting, so the token the provider
+	// carries is asked for then: an Azure CLI token lasts about an hour, and an upgrade
+	// can outlast it. A caller without a provider leaves it nil, or answers nil, and
+	// the findings are reported without a migration.
+	Repository        entities.Repository
+	MigrationProvider func(ctx context.Context) repositories.ProviderRepository
 	// PrepareMajorMigrations decides whether a branch is prepared for each newer
 	// major the upgrade could not reach. Resolved by
 	// entities.PrepareMajorMigrationsEnabled, which defaults it to true.
@@ -239,6 +242,9 @@ func prepareLocalMigrations(
 	output, baseBranch string,
 ) []MigrationPrepared {
 	majors := ParseMajorsAvailable(output)
+	if len(majors) == 0 {
+		return nil
+	}
 
 	goBinary, err := findGoBinary()
 	if err != nil {
@@ -255,7 +261,7 @@ func prepareLocalMigrations(
 		RepoDir:      repoDir,
 		BaseBranch:   baseBranch,
 		ProviderName: opts.ProviderName,
-		Provider:     opts.Provider,
+		Provider:     migrationProviderFor(ctx, opts),
 		Repo:         opts.Repository,
 		AuthToken:    opts.AuthToken,
 		GoBinary:     goBinary,
@@ -264,6 +270,16 @@ func prepareLocalMigrations(
 		DryRun:       opts.DryRun,
 		Runner:       localCmdRunner,
 	}, opts.PrepareMajorMigrations)
+}
+
+// migrationProviderFor asks for the provider a migration branch is committed through,
+// only when a branch will actually be prepared: a rehearsal and disabled preparation
+// prepare none, and asking would cost a token request for nothing.
+func migrationProviderFor(ctx context.Context, opts LocalUpgradeOptions) repositories.ProviderRepository {
+	if opts.MigrationProvider == nil || opts.DryRun || !opts.PrepareMajorMigrations {
+		return nil
+	}
+	return opts.MigrationProvider(ctx)
 }
 
 // runLanguageUpgradeScript builds and executes the bash script that

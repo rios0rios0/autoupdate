@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed `autoupdate .` opening its pull request, and preparing a Go migration branch, with the API token it resolved before the upgrade, which an `az` sign-in can let expire during a long upgrade: the token is now asked for again right before each use'
+time: '2026-11-20T03:30:58.131411368Z'

@@ -392,18 +392,27 @@ autoupdate --token ghp_abc123 .
 | GitLab       | `GITLAB_TOKEN`, then `GL_TOKEN`                   | none                  |
 
 A `GITLAB_TOKEN` or `GL_TOKEN` is not used while `GITLAB_HOST` or `GL_HOST` names a server other
-than gitlab.com: it belongs to that server, so pass `--token` for a gitlab.com repository.
+than gitlab.com: it belongs to that server, so pass `--token` for a gitlab.com repository. An
+`origin` on a self-managed GitLab server is refused, even with `--token`: autoupdate's GitLab
+provider only talks to gitlab.com, so it could open no merge request there and would send your
+token to gitlab.com. An SSH alias counts as gitlab.com when your SSH client configuration gives
+it `HostName gitlab.com`, or `HostName altssh.gitlab.com`, where GitLab serves SSH on port 443 for
+networks that block port 22.
 
 The run logs which source it used, never the token. When no source has one, it stops before it
-touches the repository and lists every source it tried; a dry run only warns.
+touches the repository and lists every source it tried; a dry run only warns. A project type
+`autoupdate .` has no upgrade for stops before any source is asked. The token for the API is
+asked for again right before the pull request is opened, so a CLI token that expired during a
+long upgrade is replaced rather than used.
 
 A token the CLI issued is only sent to the forge's API, to open the pull request. git itself --
 the HTTPS push to `origin`, and the credentials the upgrade scripts fetch private dependencies
 with -- only ever receives `--token` or the environment variable: `origin` is matched to a forge
 by its URL, so a remote whose URL merely contains `github.com` would otherwise receive your
-token. With nothing but a CLI sign-in, `origin` therefore has to be an SSH remote (below). An
-HTTPS `origin` needs `--token` or the environment variable, and the run says so before it
-changes anything. To hand it the CLI's token yourself:
+token. With nothing but a CLI sign-in, every URL a push to `origin` may use therefore has to be
+SSH (below): its `url`, any second `url`, and its `pushurl`, which is where the push goes when
+there is one. An `origin` with any HTTPS URL needs `--token` or the environment variable, and the
+run says so before it changes anything. To hand it the CLI's token yourself:
 
 ```bash
 GH_TOKEN="$(gh auth token)" autoupdate .

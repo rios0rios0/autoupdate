@@ -12,7 +12,6 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	infraRepos "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories"
 	dartRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dart"
-	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
 	pyRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/python"
@@ -54,10 +53,11 @@ type remoteInfo struct {
 	Project      string // Azure DevOps only
 	RepoName     string
 	RemoteURL    string
-	// PushURL is the URL the push dials (gitlocal.OriginPushURL), which is what decides
-	// whether it needs a token. It differs from RemoteURL when a global insteadOf rule
-	// rewrites what git prints but not what go-git pushes to.
-	PushURL string
+	// PushURLs are every URL a push to origin may dial (OriginRepository.PushURLs), which
+	// is what decides whether it needs a token. They differ from RemoteURL when origin has
+	// a pushurl or a second url, or when a global insteadOf rule rewrites what git prints
+	// but not what go-git pushes to. Execute reads them just before the credentials.
+	PushURLs []string
 }
 
 // serviceTypeToProvider returns a map from gitforge ServiceType to the provider name strings used by autoupdate.
@@ -97,17 +97,27 @@ type LocalCommand struct {
 	// container binds gitforge's default chain: the forge's environment variables,
 	// then its CLI.
 	credentials repositories.CredentialResolver
+	// gitCredentials supplies git's token when --token is empty: the forge's
+	// environment variables alone, never a CLI.
+	gitCredentials repositories.GitCredentialResolver
+	// origins says what a push to origin dials and which server origin is on.
+	origins repositories.OriginRepository
 }
 
-// NewLocalCommand creates a new LocalCommand with the given provider registry and
-// the credential resolver it falls back to when no --token is given.
+// NewLocalCommand creates a new LocalCommand with the given provider registry, the
+// resolvers it falls back to for the provider API's token and git's when no --token
+// is given, and the reader of what a push to origin involves.
 func NewLocalCommand(
 	providerRegistry *infraRepos.ProviderRegistry,
 	credentials repositories.CredentialResolver,
+	gitCredentials repositories.GitCredentialResolver,
+	origins repositories.OriginRepository,
 ) *LocalCommand {
 	return &LocalCommand{
 		providerRegistry: providerRegistry,
 		credentials:      credentials,
+		gitCredentials:   gitCredentials,
+		origins:          origins,
 	}
 }
 
@@ -160,16 +170,18 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 		return nil
 	}
 
+	// A project type local mode has no upgrade for stops here, before gh or az is asked
+	// for a token -- and az's tenant looked up over the network -- that nothing would use.
+	handler, handlerErr := localUpgradeHandlerFor(projType)
+	if handlerErr != nil {
+		return handlerErr
+	}
+
 	// Resolved before anything touches the checkout, so a run with no token to push
 	// or to open its pull request with stops before it creates a branch.
-	tokens, credentialErr := it.resolveLocalTokens(ctx, opts, remote)
-	if credentialErr != nil {
-		if !opts.DryRun {
-			return credentialErr
-		}
-		// A rehearsal pushes nothing and opens nothing, so a missing token does not
-		// stop it; it still says what would have stopped the real run.
-		logger.Warnf("[DRY RUN] A real run would stop here: %v", credentialErr)
+	tokens, authErr := it.authenticateLocalRun(ctx, opts, repoDir, remote)
+	if authErr != nil {
+		return authErr
 	}
 
 	// Detect current branch (used as the PR target / default branch)
@@ -192,9 +204,7 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 	}
 
 	// Run the appropriate upgrade
-	prInfo, upgradeErr := runLocalUpgrade(
-		ctx, repoDir, projType, remote.ProviderType, tokens, repo, opts, it.providerRegistry,
-	)
+	prInfo, upgradeErr := handler(ctx, repoDir, remote.ProviderType, tokens, repo, opts, it.providerRegistry)
 	if upgradeErr != nil {
 		return upgradeErr
 	}
@@ -208,7 +218,48 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 		return nil
 	}
 
-	return it.createLocalPRForProject(ctx, remote.ProviderType, tokens.API, repo, prInfo)
+	return it.openLocalPullRequest(ctx, remote.ProviderType, tokens, repo, prInfo)
+}
+
+// authenticateLocalRun reads what a push to origin dials and decides the run's tokens.
+//
+// What the push will dial decides whether it needs a token, so a checkout whose origin
+// go-git cannot read is refused rather than guessed at from what git printed: the push
+// reads it through go-git too, and would fail on it after the upgrade. A rehearsal pushes
+// nothing and opens nothing, so a missing token does not stop it; it still says what
+// would have stopped the real run.
+func (it *LocalCommand) authenticateLocalRun(
+	ctx context.Context, opts LocalOptions, repoDir string, remote *remoteInfo,
+) (localTokens, error) {
+	pushURLs, err := it.origins.PushURLs(repoDir)
+	if err != nil {
+		return localTokens{}, fmt.Errorf("failed to read the URLs a push to origin dials: %w", err)
+	}
+	remote.PushURLs = pushURLs
+
+	tokens, err := it.resolveLocalTokens(ctx, opts, remote)
+	if err != nil {
+		if !opts.DryRun {
+			return localTokens{}, err
+		}
+		logger.Warnf("[DRY RUN] A real run would stop here: %v", err)
+	}
+
+	return tokens, nil
+}
+
+// openLocalPullRequest opens the pull request for the pushed upgrade branch. The API's
+// token is asked for again now rather than reused from before the upgrade, which may have
+// taken most of an Azure CLI token's hour.
+func (it *LocalCommand) openLocalPullRequest(
+	ctx context.Context, providerType string, tokens localTokens, repo entities.Repository, info *localPRInfo,
+) error {
+	apiToken, err := tokens.API(ctx)
+	if err != nil {
+		return fmt.Errorf("pushed %s but could not open its pull request: %w", info.BranchName, err)
+	}
+
+	return it.createLocalPRForProject(ctx, providerType, apiToken, repo, info)
 }
 
 // localUpgradeHandler runs the local upgrade for a specific language and returns PR info.
@@ -294,22 +345,14 @@ func localUpgradeHandlers() map[langEntities.Language]localUpgradeHandler {
 	}
 }
 
-// runLocalUpgrade dispatches to the appropriate updater based on project type.
-func runLocalUpgrade(
-	ctx context.Context,
-	repoDir string,
-	projType langEntities.Language,
-	providerType string,
-	tokens localTokens,
-	repo entities.Repository,
-	opts LocalOptions,
-	registry *infraRepos.ProviderRegistry,
-) (*localPRInfo, error) {
+// localUpgradeHandlerFor returns the local upgrade for a project type, or an error when
+// local mode has none for it.
+func localUpgradeHandlerFor(projType langEntities.Language) (localUpgradeHandler, error) {
 	handler, ok := localUpgradeHandlers()[projType]
 	if !ok || handler == nil {
 		return nil, fmt.Errorf("unsupported project type: %s", projType)
 	}
-	return handler(ctx, repoDir, providerType, tokens, repo, opts, registry)
+	return handler, nil
 }
 
 func runGoLocalUpgrade(
@@ -329,8 +372,10 @@ func runGoLocalUpgrade(
 
 		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
 
-		Repository:             repo,
-		Provider:               localMigrationProvider(registry, providerType, tokens.API, opts),
+		Repository: repo,
+		MigrationProvider: func(ctx context.Context) repositories.ProviderRepository {
+			return localMigrationProvider(ctx, registry, providerType, tokens, opts)
+		},
 		PrepareMajorMigrations: entities.PrepareMajorMigrationsEnabled(opts.Settings),
 	})
 	if err != nil {
@@ -351,18 +396,32 @@ func runGoLocalUpgrade(
 // localMigrationProvider resolves the provider API a prepared migration branch
 // would be pushed through, and answers nil when there is none to be had.
 //
+// The Go upgrade calls it once the upgrade is pushed and a newer major is waiting,
+// and it asks for the API's token then, not before the upgrade: an Azure CLI token
+// can expire while the upgrade runs.
+//
 // The upgrade does not depend on it: a provider that cannot be reached costs
 // the notice its links, which is cheaper than failing a run that has already
 // produced the upgrade it was asked for.
 func localMigrationProvider(
+	ctx context.Context,
 	registry *infraRepos.ProviderRegistry,
-	providerType, token string,
+	providerType string,
+	tokens localTokens,
 	opts LocalOptions,
 ) repositories.ProviderRepository {
 	// Nothing would be prepared under either of these, so the client is not
 	// built: a rehearsal opens no pull request, and disabled preparation
 	// prepares no branch.
 	if registry == nil || opts.DryRun || !entities.PrepareMajorMigrationsEnabled(opts.Settings) {
+		return nil
+	}
+
+	token, err := tokens.API(ctx)
+	if err != nil {
+		logger.Warnf(
+			"[golang] Could not authenticate to the %s API to prepare migrations: %v", providerType, err,
+		)
 		return nil
 	}
 
@@ -596,22 +655,7 @@ func parseGitRemote(ctx context.Context, repoDir string) (*remoteInfo, error) {
 		return nil, fmt.Errorf("git remote get-url origin: %w", err)
 	}
 
-	remote, err := parseRemoteURL(strings.TrimSpace(string(output)))
-	if err != nil {
-		return nil, err
-	}
-
-	// git printed origin with every insteadOf rule applied, the global ones included, and
-	// the push reads it without those: `url."git@github.com:".insteadOf https://github.com/`,
-	// a common way to fetch private Go modules over SSH, leaves the push on HTTPS.
-	pushURL, pushErr := gitlocal.OriginPushURL(repoDir)
-	if pushErr != nil {
-		logger.Debugf("Could not read the URL the push dials, so the one git printed is used: %v", pushErr)
-		return remote, nil
-	}
-	remote.PushURL = pushURL
-
-	return remote, nil
+	return parseRemoteURL(strings.TrimSpace(string(output)))
 }
 
 // parseRemoteURL extracts provider, org, project, and repo name from a Git remote URL.
@@ -634,7 +678,6 @@ func parseRemoteURL(rawURL string) (*remoteInfo, error) {
 		Project:      parsed.Project,
 		RepoName:     parsed.RepoName,
 		RemoteURL:    rawURL,
-		PushURL:      rawURL,
 	}, nil
 }
 

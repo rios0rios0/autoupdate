@@ -1,0 +1,3 @@
+kind: 'Fixed'
+body: 'fixed `autoupdate .` asking `gh` or `az` for a token for a project type it has no upgrade for, and carrying on when go-git cannot read `origin` (a subdirectory or a linked worktree, where the push fails too): both now stop the run before anything is asked or changed'
+time: '2026-11-20T03:30:58.133701242Z'

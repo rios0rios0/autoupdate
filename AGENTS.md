@@ -51,7 +51,7 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - **Entry point**: `cmd/autoupdate/main.go` builds Cobra commands, `cmd/autoupdate/dig.go` wires the DI container
 - **DI registration**: `internal/container.go` registers all layers bottom-up (repos -> entities -> commands -> controllers)
 - **Domain commands**: `internal/domain/commands/` — `LocalCommand` (single repo), `RunCommand` (batch mode), `SelfUpdateCommand`, and `VersionCommand`
-- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `BuildLimiter`, `ProviderRepository`, `CredentialResolver` (an alias of gitforge's), and `SelfUpdateRepository` interfaces
+- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `BuildLimiter`, `ProviderRepository`, `CredentialResolver` (an alias of gitforge's), `GitCredentialResolver`, `OriginRepository`, and `SelfUpdateRepository` interfaces
 - **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations for local and batch modes), and `selfupdate`
 - **Support utilities**: `internal/support/` — filesystem helpers (including the shared repository walkers, see below), remote file checker bridging `langforge` with `gitforge`, repo config loader for per-repo opt-out, and the shared changelog writer (see below)
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
@@ -132,44 +132,67 @@ The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` 
 
 ### Credentials (Local Mode)
 
-`LocalCommand` takes a `repositories.CredentialResolver`, an alias of gitforge's
-`pkg/credentials` contract, which `internal/infrastructure/repositories/container.go` binds to
-`NewDefaultCredentialResolver()`: the forge's environment variables (`GITHUB_TOKEN` before
-`GH_TOKEN`, `AZURE_DEVOPS_EXT_PAT`, `SYSTEM_ACCESSTOKEN`, `GITLAB_TOKEN`, `GL_TOKEN`; a GitLab
-token is declined while `GITLAB_HOST` or `GL_HOST` names a server other than gitlab.com), then
-its CLI (`gh auth token --hostname github.com`, `az account get-access-token` for the Azure
-DevOps resource; GitLab has none). `resolveLocalTokens` (`internal/domain/commands/local_credentials.go`)
-runs right after the updater check and splits the result into `localTokens`:
+`LocalCommand` takes three ports beside the provider registry, which
+`internal/infrastructure/repositories/container.go` binds:
 
-- `--token` is the operator's explicit choice and fills both fields.
-- Otherwise `API` is the resolver's credential, and `Git` is `configHelpers.ResolveTokenFromEnv`
-  -- the environment alone, exactly what git received before the CLI fallback existed.
-- `API` goes to gitforge's provider calls only (`createLocalPRForProject`, `localMigrationProvider`),
-  which talk to fixed API hosts. `Git` goes to everything git does: the HTTPS push
-  (`gitlocal.collectAuthMethods`), the scripts' `AUTH_TOKEN` rewrites, and the migration's
-  `FileGitAuthConfig`. Never hand `API` to any of those: the push picks its adapter with
-  `GetAdapterByURL`, a **substring** match (`MatchesURL` is `strings.Contains(url, "github.com")`),
-  so a remote whose URL merely contains `github.com` receives whatever token git holds. The
-  environment's token has always been exposed that way; a token the operator never exported
-  must not be.
-- An HTTPS origin with an empty `Git` cannot be pushed to, so it fails with `ErrNoPushToken`
-  before the upgrade rather than at the push after it -- and before the resolver runs, since a
-  token the CLI issued could not be used. An SSH origin needs no `Git` token: the push uses the
-  SSH agent. The check reads `remoteInfo.PushURL`, the URL the push dials
-  (`gitlocal.OriginPushURL`: origin as go-git reads it, with only the repository's own
-  `insteadOf` rules), not what `git remote get-url` printed, which applies the global rules too:
-  `url."git@github.com:".insteadOf https://github.com/` shows an HTTPS origin to git as SSH,
-  and never to the push.
+- `repositories.CredentialResolver` (an alias of gitforge's `pkg/credentials` contract) ->
+  `NewDefaultCredentialResolver()`, for the provider API's token: the forge's environment
+  variables (`GITHUB_TOKEN` before `GH_TOKEN`, `AZURE_DEVOPS_EXT_PAT`, `SYSTEM_ACCESSTOKEN`,
+  `GITLAB_TOKEN`, `GL_TOKEN`; a GitLab token is declined while `GITLAB_HOST` or `GL_HOST` names a
+  server other than gitlab.com), then its CLI (`gh auth token --hostname github.com`,
+  `az account get-access-token` for the Azure DevOps resource; GitLab has none).
+- `repositories.GitCredentialResolver` -> `NewEnvCredentialResolver()`, for git's token: the same
+  reading of the same variables, and never a CLI. One implementation reads both tokens, so they
+  agree on order, trimming and the GitLab host check.
+- `repositories.OriginRepository` -> `gitlocal.OriginRepository`: origin's push URLs as go-git
+  reads them, and the server a remote URL reaches, an SSH alias resolved through
+  `kevinburke/ssh_config`.
+
+Before anything touches the checkout, `Execute` checks that the project type has a local upgrade
+(`localUpgradeHandlerFor`, so an unsupported type stops the run before gh or az runs), reads
+origin's push URLs (a checkout go-git cannot read -- a subdirectory, a linked worktree -- is an
+error, never a guess from what git printed, because the push reads them through go-git too), and
+then calls `resolveLocalTokens` (`internal/domain/commands/local_credentials.go`):
+
+- A GitLab origin whose server (`OriginRepository.HostName`) is not gitlab.com fails with
+  `ErrSelfManagedGitLab`, `--token` or not: gitforge's parser takes any SSH host containing
+  `gitlab` for GitLab, and its provider only talks to gitlab.com. `altssh.gitlab.com`, where
+  gitlab.com serves SSH on port 443 (GitLab's documented `Host gitlab.com` stanza), counts as
+  gitlab.com (`onGitLabDotCom`, matched case-insensitively).
+- `--token` is the operator's explicit choice and serves both git and the API.
+- Otherwise `localTokens.Git` is `GitCredentialResolver`'s token, or empty. When it is empty and
+  **any** of origin's push URLs is http(s), the run fails with `ErrNoPushToken`. Any, not the
+  first: go-git's URL list is every `url` followed by every `pushurl`, it pushes to the last one,
+  and `collectAuthMethods` picks its adapter from the first. The check reads the push URLs, not
+  `git remote get-url`, which applies global `insteadOf` rules the push never sees.
+- The API's credential is asked for once here to fail fast (an empty token counts as none), and
+  `localTokens.API(ctx)` asks again each time the token is used: right before
+  `createLocalPRForProject`, and in `localMigrationProvider`, which the Go upgrade calls through
+  `LocalUpgradeOptions.MigrationProvider` only after the push, when a newer major is waiting. An
+  Azure CLI token lasts about an hour, and az can hand out a cached one with minutes left.
+- `API` only reaches gitforge's provider calls, which talk to fixed API hosts. `Git` reaches
+  everything git does: the HTTPS push (`gitlocal.collectAuthMethods`), the scripts' `AUTH_TOKEN`
+  rewrites, and the migration's `FileGitAuthConfig`. Never hand `API` to any of those. The push
+  picks its adapter by a **substring** of origin's first URL (`MatchesURL` is
+  `strings.Contains(url, "github.com")`) and then pushes to origin's last URL, so the token git
+  holds goes to whatever host that last URL names: a lookalike such as `github.com.example.net`,
+  or, with a `pushurl` or a second `url` behind a URL that contains `github.com`, any host at
+  all. `--token` and the environment's token have always been exposed that way (gitforge is
+  narrowing it on the push side); a token the operator never exported must not be.
+- Migration notes are redacted with both tokens (`migrationParams.secrets`), because a provider
+  error can carry the API's token into the pull request description and the commit message.
 - The request names `Organization` (from origin) only on Azure DevOps, so `az` issues the token in
   that organization's Entra tenant.
 - One INFO line names `Credential.Source` ("gh CLI", "GITHUB_TOKEN environment variable",
   "--token flag"); the token is never logged. A failure names the forge and wraps the chain's
   error, which lists every source tried and matches `credentialEntities.ErrNoCredential`. A dry
-  run logs the failure as a warning and goes on.
+  run logs a credential failure as a warning and goes on.
 
-`autoupdate run` never consults the resolver: `providers[].token` stays required. Tests use
-gitforge's `test/doubles.CredentialResolverStub` (or the real chain over `CLIRunnerStub`), never
-the bound chain, which would run the real `gh` and `az`. `initRepoWithoutCommits` in
+`autoupdate run` never consults these resolvers: `providers[].token` stays required. Tests stub
+both resolvers with gitforge's `test/doubles.CredentialResolverStub`, or use gitforge's real
+`EnvCredentialResolver` over a `Lookup` map or its real chain over `CLIRunnerStub`, never the
+bound chain, which would run the real `gh` and `az`; `gitlocal.OriginRepository{SSHHostName: ...}`
+keeps the operator's SSH configuration out of them. `initRepoWithoutCommits` in
 `local_credentials_test.go` gives `Execute` a Go repository with no commit, so a test stops at
 `detectDefaultBranch`, right after the credentials and before any upgrade reaches the network.
 

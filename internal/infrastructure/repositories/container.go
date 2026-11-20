@@ -5,6 +5,7 @@ import (
 	csRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/csharp"
 	dartRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dart"
 	dfRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/dockerfile"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/gitlocal"
 	goRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
 	jvRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/java"
 	jsRepo "github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/javascript"
@@ -43,6 +44,21 @@ func RegisterProviders(container *dig.Container) error {
 	// it runs nothing; gh or az only run when a local run asks for a token.
 	if err := container.Provide(func() repositories.CredentialResolver {
 		return credentialInfra.NewDefaultCredentialResolver()
+	}); err != nil {
+		return err
+	}
+
+	// git's token without --token: the environment alone, read by the same resolver the chain
+	// above starts with, so both tokens come from one reading of the variables.
+	if err := container.Provide(func() repositories.GitCredentialResolver {
+		return credentialInfra.NewEnvCredentialResolver()
+	}); err != nil {
+		return err
+	}
+
+	// What a push to the checkout's origin dials, and which server origin is on.
+	if err := container.Provide(func() repositories.OriginRepository {
+		return gitlocal.NewOriginRepository()
 	}); err != nil {
 		return err
 	}
