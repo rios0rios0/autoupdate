@@ -19,7 +19,6 @@ import (
 	gitInfra "github.com/rios0rios0/gitforge/v4/pkg/git/infrastructure"
 	globalEntities "github.com/rios0rios0/gitforge/v4/pkg/global/domain/entities"
 	langEntities "github.com/rios0rios0/langforge/pkg/domain/entities"
-	langRegistry "github.com/rios0rios0/langforge/pkg/infrastructure/registry"
 )
 
 const (
@@ -43,6 +42,11 @@ type LocalOptions struct {
 	// is honored in local mode; missing settings means only the per-repo
 	// .autoupdate.yaml controls whether the update runs.
 	Settings *entities.Settings
+
+	// branchName, when set, is the branch a dedicated upgrade is made on instead of the
+	// one named after what it upgrades. Execute sets it when the checkout uses other
+	// ecosystems too, so every upgrade lands on one branch and in one pull request.
+	branchName string
 }
 
 // remoteInfo holds the parsed components of a Git remote URL.
@@ -93,6 +97,9 @@ type localPRInfo struct {
 // a given directory, pushes a branch, and creates a PR.
 type LocalCommand struct {
 	providerRegistry *infraRepos.ProviderRegistry
+	// updaterRegistry holds the updaters `autoupdate run` runs. Local mode runs every one
+	// of them that applies to the checkout and that no dedicated upgrade already covers.
+	updaterRegistry *infraRepos.UpdaterRegistry
 	// credentials supplies the provider API's token when --token is empty. The
 	// container binds gitforge's default chain: the forge's environment variables,
 	// then its CLI.
@@ -104,17 +111,19 @@ type LocalCommand struct {
 	origins repositories.OriginRepository
 }
 
-// NewLocalCommand creates a new LocalCommand with the given provider registry, the
-// resolvers it falls back to for the provider API's token and git's when no --token
-// is given, and the reader of what a push to origin involves.
+// NewLocalCommand creates a new LocalCommand with the given provider and updater
+// registries, the resolvers it falls back to for the provider API's token and git's when
+// no --token is given, and the reader of what a push to origin involves.
 func NewLocalCommand(
 	providerRegistry *infraRepos.ProviderRegistry,
+	updaterRegistry *infraRepos.UpdaterRegistry,
 	credentials repositories.CredentialResolver,
 	gitCredentials repositories.GitCredentialResolver,
 	origins repositories.OriginRepository,
 ) *LocalCommand {
 	return &LocalCommand{
 		providerRegistry: providerRegistry,
+		updaterRegistry:  updaterRegistry,
 		credentials:      credentials,
 		gitCredentials:   gitCredentials,
 		origins:          origins,
@@ -157,24 +166,22 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 		return nil
 	}
 
-	// Detect project type using langforge's registry
-	langProvider, detectErr := langRegistry.NewDefaultRegistry().Detect(repoDir)
-	if detectErr != nil {
-		return detectErr
-	}
-	projType := langProvider.Language()
-	logger.Infof("Detected project type: %s", projType)
-
-	if !updaterEnabledForLanguage(opts.Settings, projType) {
-		logger.Infof("Skipping %s: its updater is disabled in the configuration", projType)
-		return nil
+	repo := entities.Repository{
+		ID:           remote.RepoName,
+		Name:         remote.RepoName,
+		Organization: remote.Org,
+		Project:      remote.Project,
+		RemoteURL:    remote.RemoteURL,
 	}
 
-	// A project type local mode has no upgrade for stops here, before gh or az is asked
-	// for a token -- and az's tenant looked up over the network -- that nothing would use.
-	handler, handlerErr := localUpgradeHandlerFor(projType)
-	if handlerErr != nil {
-		return handlerErr
+	// The language langforge reads first decides the dedicated upgrade, when it has one;
+	// every other ecosystem the checkout uses is upgraded by its updater's ApplyUpdates,
+	// as `autoupdate run` upgrades it. Both are settled from disk before gh or az is asked
+	// for a token, so a checkout nothing applies to stops here.
+	primary, detectErr := detectPrimaryUpgrade(repoDir, opts.Settings)
+	others := it.localUpdatersFor(ctx, repoDir, repo, opts, primary.dedicatedUpdater())
+	if primary.handler == nil && len(others) == 0 {
+		return primary.nothingToUpgrade(detectErr)
 	}
 
 	// Resolved before anything touches the checkout, so a run with no token to push
@@ -191,19 +198,34 @@ func (it *LocalCommand) Execute(ctx context.Context, opts LocalOptions) error {
 	}
 	logger.Infof("Default branch: %s", defaultBranch)
 
-	// Built before the upgrade runs, because the Go updater prepares a migration
+	// Set before the upgrade runs, because the Go updater prepares a migration
 	// branch through this repository: the pull request it links to targets the
 	// same branch this run's own pull request does.
-	repo := entities.Repository{
-		ID:            remote.RepoName,
-		Name:          remote.RepoName,
-		Organization:  remote.Org,
-		Project:       remote.Project,
-		DefaultBranch: defaultBranch,
-		RemoteURL:     remote.RemoteURL,
+	repo.DefaultBranch = defaultBranch
+
+	if len(others) == 0 {
+		return it.runDedicatedUpgrade(ctx, repoDir, remote, tokens, repo, opts, primary.handler)
 	}
 
-	// Run the appropriate upgrade
+	if opts.DryRun {
+		return it.rehearseEveryEcosystem(ctx, repoDir, remote, tokens, repo, opts, primary, others)
+	}
+
+	return it.upgradeEveryEcosystem(ctx, repoDir, remote, tokens, repo, opts, primary, others)
+}
+
+// runDedicatedUpgrade is the run of a checkout that only uses the primary language's
+// ecosystem: the dedicated upgrade makes its branch, commit and push, and the pull request
+// is opened for what it pushed.
+func (it *LocalCommand) runDedicatedUpgrade(
+	ctx context.Context,
+	repoDir string,
+	remote *remoteInfo,
+	tokens localTokens,
+	repo entities.Repository,
+	opts LocalOptions,
+	handler localUpgradeHandler,
+) error {
 	prInfo, upgradeErr := handler(ctx, repoDir, remote.ProviderType, tokens, repo, opts, it.providerRegistry)
 	if upgradeErr != nil {
 		return upgradeErr
@@ -248,18 +270,31 @@ func (it *LocalCommand) authenticateLocalRun(
 	return tokens, nil
 }
 
-// openLocalPullRequest opens the pull request for the pushed upgrade branch. The API's
-// token is asked for again now rather than reused from before the upgrade, which may have
-// taken most of an Azure CLI token's hour.
+// openLocalPullRequest opens the pull request for the pushed upgrade branch, with the title
+// and description of the upgrade that pushed it.
 func (it *LocalCommand) openLocalPullRequest(
 	ctx context.Context, providerType string, tokens localTokens, repo entities.Repository, info *localPRInfo,
 ) error {
+	title, description := generatePRContent(info)
+	return it.openPullRequest(ctx, providerType, tokens, repo, info.BranchName, title, description)
+}
+
+// openPullRequest opens the pull request for a pushed branch. The API's token is asked for
+// again now rather than reused from before the upgrade, which may have taken most of an
+// Azure CLI token's hour.
+func (it *LocalCommand) openPullRequest(
+	ctx context.Context,
+	providerType string,
+	tokens localTokens,
+	repo entities.Repository,
+	branchName, title, description string,
+) error {
 	apiToken, err := tokens.API(ctx)
 	if err != nil {
-		return fmt.Errorf("pushed %s but could not open its pull request: %w", info.BranchName, err)
+		return fmt.Errorf("pushed %s but could not open its pull request: %w", branchName, err)
 	}
 
-	return it.createLocalPRForProject(ctx, providerType, apiToken, repo, info)
+	return it.createLocalPRForProject(ctx, providerType, apiToken, repo, branchName, title, description)
 }
 
 // localUpgradeHandler runs the local upgrade for a specific language and returns PR info.
@@ -317,6 +352,16 @@ func updaterEnabledForLanguage(settings *entities.Settings, projType langEntitie
 		return true
 	}
 
+	return updaterEnabled(settings, name)
+}
+
+// updaterEnabled reports whether the configuration leaves the named updater on. Settings
+// that never mention it leave it enabled, the default everywhere else.
+func updaterEnabled(settings *entities.Settings, name string) bool {
+	if settings == nil {
+		return true
+	}
+
 	config, configured := settings.Updaters[name]
 	if !configured {
 		return true
@@ -371,6 +416,7 @@ func runGoLocalUpgrade(
 		PushAuth:     registry,
 
 		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
+		BranchName:        opts.branchName,
 
 		Repository: repo,
 		MigrationProvider: func(ctx context.Context) repositories.ProviderRepository {
@@ -452,6 +498,7 @@ func runPythonLocalUpgrade(
 		PushAuth:     registry,
 
 		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
+		BranchName:        opts.branchName,
 	})
 	if err != nil {
 		return nil, err
@@ -482,6 +529,7 @@ func runJSLocalUpgrade(
 		PushAuth:     registry,
 
 		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
+		BranchName:        opts.branchName,
 	})
 	if err != nil {
 		return nil, err
@@ -512,6 +560,7 @@ func runDartLocalUpgrade(
 		PushAuth:     registry,
 
 		AllowMajorUpdates: entities.MajorUpdatesAllowed(opts.Settings),
+		BranchName:        opts.branchName,
 	})
 	if err != nil {
 		return nil, err
@@ -535,14 +584,12 @@ func (it *LocalCommand) createLocalPRForProject(
 	ctx context.Context,
 	providerType, token string,
 	repo entities.Repository,
-	info *localPRInfo,
+	branchName, prTitle, prDesc string,
 ) error {
 	provider, err := it.providerRegistry.Get(providerType, token)
 	if err != nil {
 		return fmt.Errorf("failed to create provider: %w", err)
 	}
-
-	prTitle, prDesc := generatePRContent(info)
 
 	targetBranch := repo.DefaultBranch
 	if !strings.HasPrefix(targetBranch, "refs/heads/") {
@@ -550,7 +597,7 @@ func (it *LocalCommand) createLocalPRForProject(
 	}
 
 	pr, createErr := provider.CreatePullRequest(ctx, repo, entities.PullRequestInput{
-		SourceBranch: "refs/heads/" + info.BranchName,
+		SourceBranch: "refs/heads/" + branchName,
 		TargetBranch: targetBranch,
 		Title:        prTitle,
 		Description:  prDesc,

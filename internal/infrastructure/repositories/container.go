@@ -74,22 +74,26 @@ func RegisterProviders(container *dig.Container) error {
 	}
 
 	// Register updater registry with all updater implementations
-	if err := container.Provide(func() *UpdaterRegistry {
-		reg := NewUpdaterRegistry()
-		reg.Register(tfRepo.NewUpdaterRepository())
-		reg.Register(goRepo.NewUpdaterRepository())
-		reg.Register(pyRepo.NewUpdaterRepository())
-		reg.Register(jsRepo.NewUpdaterRepository())
-		reg.Register(rbRepo.NewUpdaterRepository())
-		reg.Register(jvRepo.NewUpdaterRepository())
-		reg.Register(csRepo.NewUpdaterRepository())
-		reg.Register(dartRepo.NewUpdaterRepository())
-		reg.Register(plRepo.NewUpdaterRepository())
-		reg.Register(dfRepo.NewUpdaterRepository())
-		return reg
-	}); err != nil {
+	if err := container.Provide(NewDefaultUpdaterRegistry); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// NewDefaultUpdaterRegistry returns a registry holding every updater AutoUpdate ships,
+// which is the one both modes run with.
+func NewDefaultUpdaterRegistry() *UpdaterRegistry {
+	reg := NewUpdaterRegistry()
+	reg.Register(tfRepo.NewUpdaterRepository())
+	reg.Register(goRepo.NewUpdaterRepository())
+	reg.Register(pyRepo.NewUpdaterRepository())
+	reg.Register(jsRepo.NewUpdaterRepository())
+	reg.Register(rbRepo.NewUpdaterRepository())
+	reg.Register(jvRepo.NewUpdaterRepository())
+	reg.Register(csRepo.NewUpdaterRepository())
+	reg.Register(dartRepo.NewUpdaterRepository())
+	reg.Register(plRepo.NewUpdaterRepository())
+	reg.Register(dfRepo.NewUpdaterRepository())
+	return reg
 }

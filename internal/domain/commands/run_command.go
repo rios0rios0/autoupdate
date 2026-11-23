@@ -516,7 +516,7 @@ func (it *RunCommand) processLocalUpdaters(
 		return nil, 1
 	}
 
-	applied, errorCount := it.runUpdatersOnBranch(
+	applied, errorCount := runUpdatersOnBranch(
 		ctx, batchCtx, workspace.ToolingDir(), cache, updaters, provider, repo,
 	)
 	if len(applied) == 0 {
@@ -591,7 +591,7 @@ func removeRepositoryWorkspace(workspace *support.RepositoryWorkspace, repo enti
 // the repository's own, which is removed together with the clone -- except the
 // Go caches, which go into the run's shared cache, held while the updater runs so
 // it is never emptied under a go command (see applyLocalUpdater).
-func (it *RunCommand) runUpdatersOnBranch(
+func runUpdatersOnBranch(
 	ctx context.Context,
 	batchCtx *gitlocal.BatchGitContext,
 	toolingDir string,

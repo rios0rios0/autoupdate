@@ -18,6 +18,7 @@ import (
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/cmdrunner"
 	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/golang"
+	"github.com/rios0rios0/autoupdate/internal/support"
 	"github.com/rios0rios0/autoupdate/test/infrastructure/repositorydoubles"
 )
 
@@ -1098,6 +1099,33 @@ func TestMigrationNotesRedactEveryToken(t *testing.T) {
 		}
 		params := libMigrationParams(repoDir, provider, &stubGoRunner{})
 		params.AuthToken = "fixture-git-token-placeholder"
+
+		// when
+		migrations := golang.MigrationsForRun(t.Context(), params, true)
+
+		// then
+		require.Len(t, migrations, 1)
+		assert.False(t, migrations[0].Prepared)
+		assert.Contains(t, migrations[0].Note, "401 Unauthorized")
+		assert.NotContains(t, migrations[0].Note, "fixture-api-token-placeholder")
+	})
+
+	t.Run("should redact the API's token behind a checkout provider that answers git's", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- the provider standalone mode hands the updaters it runs on the checkout,
+		// whose AuthToken is git's token, as ApplyUpdates passes it on
+		repoDir := newMigrationCheckout(t, migrationCheckoutFixture())
+		api := &repositorydoubles.SpyProviderRepository{
+			ProviderName:    "github",
+			Token:           "fixture-api-token-placeholder",
+			CreateBranchErr: errors.New("POST /branches with fixture-api-token-placeholder: 401 Unauthorized"),
+		}
+		repo := entities.Repository{Organization: "example", Name: "app"}
+		provider := support.NewCheckoutProvider(repoDir, repo, api, "fixture-git-token-placeholder")
+		params := libMigrationParams(repoDir, nil, &stubGoRunner{})
+		params.Provider = provider
+		params.AuthToken = provider.AuthToken()
 
 		// when
 		migrations := golang.MigrationsForRun(t.Context(), params, true)

@@ -1,6 +1,7 @@
 package gitlocal
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,9 @@ type BatchGitContext struct {
 	repoDir       string
 	defaultBranch string
 	resolver      PushAuthResolver
+	// checkout reports a context opened on the operator's own checkout rather than on a
+	// clone the run made; see OpenCheckout.
+	checkout bool
 }
 
 // CloneRepository clones a remote repository into repoDir using the provided
@@ -66,7 +70,8 @@ func CloneRepository(
 }
 
 // NewBatchGitContextFromLocal creates a BatchGitContext from an existing local
-// repository. This is intended for testing — production code uses CloneRepository.
+// repository. This is intended for testing — production code uses CloneRepository,
+// and OpenCheckout for the operator's own checkout.
 func NewBatchGitContextFromLocal(repoDir, defaultBranch string) (*BatchGitContext, error) {
 	repo, err := gitops.OpenRepo(repoDir)
 	if err != nil {
@@ -84,6 +89,27 @@ func NewBatchGitContextFromLocal(repoDir, defaultBranch string) (*BatchGitContex
 		repoDir:       repoDir,
 		defaultBranch: strings.TrimPrefix(defaultBranch, "refs/heads/"),
 	}, nil
+}
+
+// OpenCheckout opens the operator's own checkout for the snapshots that keep one
+// updater's failure from reaching the others' changes, which `autoupdate .` takes from
+// the aggregate pipeline (HeadHash, AdvanceSnapshot, RestoreSnapshot and FlattenOnto); it
+// commits and pushes through LocalGitContext.
+//
+// A checkout is not a clone. It holds what git does not track -- ignored build output and
+// caches, an .env -- and go-git's hard reset deletes every file its index does not list,
+// ignored ones included, which is harmless in a clone the run throws away and data loss
+// in a checkout. RestoreSnapshot on a checkout therefore resets through git itself, which
+// only rewrites what git tracks, and then removes the untracked files the failing updater
+// wrote, never the ignored ones. The operator's own untracked work is not among them: the
+// run stashes it before any updater runs.
+func OpenCheckout(repoDir string) (*BatchGitContext, error) {
+	ctx, err := NewBatchGitContextFromLocal(repoDir, "")
+	if err != nil {
+		return nil, err
+	}
+	ctx.checkout = true
+	return ctx, nil
 }
 
 // RepoDir returns the filesystem path of the cloned repository.
@@ -227,11 +253,33 @@ func (c *BatchGitContext) HeadHash() (plumbing.Hash, error) {
 // known-good snapshot so the next updater starts from the accumulated
 // state of all prior successful updaters.
 func (c *BatchGitContext) RestoreSnapshot(hash plumbing.Hash) error {
+	if c.checkout {
+		return c.restoreCheckoutSnapshot(hash)
+	}
 	if err := c.workTree.Reset(&git.ResetOptions{
 		Mode:   git.HardReset,
 		Commit: hash,
 	}); err != nil {
 		return fmt.Errorf("failed to restore snapshot %s: %w", hash.String()[:7], err)
+	}
+	return nil
+}
+
+// restoreCheckoutSnapshot is RestoreSnapshot for the operator's checkout: `git reset
+// --hard` puts the tracked files back, and `git clean -d` (without -x) removes the
+// untracked ones, leaving every ignored file where it is.
+func (c *BatchGitContext) restoreCheckoutSnapshot(hash plumbing.Hash) error {
+	for _, args := range [][]string{
+		{"reset", "--hard", "--quiet", hash.String()},
+		{"clean", "-d", "--force", "--quiet"},
+	} {
+		output, err := support.GitCommand(context.TODO(), c.repoDir, args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf(
+				"failed to restore snapshot %s (git %s): %w\nOutput: %s",
+				hash.String()[:7], args[0], err, string(output),
+			)
+		}
 	}
 	return nil
 }
@@ -282,11 +330,20 @@ func (c *BatchGitContext) FlattenToWorktree() error {
 	if err != nil {
 		return fmt.Errorf("failed to resolve default branch ref: %w", err)
 	}
-	if resetErr := c.workTree.Reset(&git.ResetOptions{
+	return c.FlattenOnto(defaultRef.Hash())
+}
+
+// FlattenOnto collapses the snapshot commits made on top of base back into the
+// worktree and index, as FlattenToWorktree does for the default branch. `autoupdate .`
+// needs the base named: when a dedicated upgrade has already committed and pushed on
+// the branch, the snapshots sit on that commit, and resetting past it would rewrite a
+// commit the remote already has.
+func (c *BatchGitContext) FlattenOnto(base plumbing.Hash) error {
+	if err := c.workTree.Reset(&git.ResetOptions{
 		Mode:   git.MixedReset,
-		Commit: defaultRef.Hash(),
-	}); resetErr != nil {
-		return fmt.Errorf("failed to flatten worktree: %w", resetErr)
+		Commit: base,
+	}); err != nil {
+		return fmt.Errorf("failed to flatten worktree: %w", err)
 	}
 	return nil
 }

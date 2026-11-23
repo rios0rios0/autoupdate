@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
 )
@@ -113,3 +115,38 @@ var CleanupStaleAggregateBranches = cleanupStaleAggregateBranches //nolint:goche
 
 // ApplyLocalUpdater exports applyLocalUpdater for testing.
 var ApplyLocalUpdater = applyLocalUpdater //nolint:gochecknoglobals // test export
+
+// LocalUpdatersFor exports localUpdatersFor for testing.
+var LocalUpdatersFor = (*LocalCommand).localUpdatersFor //nolint:gochecknoglobals // test export
+
+// UpdaterOf returns the updater an applicable updater wraps.
+func UpdaterOf(au ApplicableUpdater) repositories.UpdaterRepository { return au.updater }
+
+// LocalUpgradeHandler exports localUpgradeHandler for testing.
+type LocalUpgradeHandler = localUpgradeHandler
+
+// BranchNameOf returns the branch a run asked a dedicated upgrade to use.
+func BranchNameOf(opts LocalOptions) string { return opts.branchName }
+
+// NewLocalTokensForTest builds the tokens of a local run: git's, and the API's.
+func NewLocalTokensForTest(gitToken, apiToken string) LocalTokens {
+	return localTokens{Git: gitToken, api: func(context.Context) (string, error) { return apiToken, nil }}
+}
+
+// UpgradeEveryEcosystemForTest runs upgradeEveryEcosystem with the given dedicated upgrade
+// standing in for the primary language's, which no test can run without the network.
+func UpgradeEveryEcosystemForTest(
+	ctx context.Context,
+	cmd *LocalCommand,
+	repoDir string,
+	remote *RemoteInfo,
+	tokens LocalTokens,
+	repo entities.Repository,
+	opts LocalOptions,
+	dedicatedUpdater string,
+	handler LocalUpgradeHandler,
+	others []ApplicableUpdater,
+) error {
+	primary := primaryUpgrade{updater: dedicatedUpdater, dedicated: true, handler: handler}
+	return cmd.upgradeEveryEcosystem(ctx, repoDir, remote, tokens, repo, opts, primary, others)
+}

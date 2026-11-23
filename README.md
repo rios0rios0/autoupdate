@@ -18,7 +18,7 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 
 ## Features
 
-- **Standalone Local Mode**: Run `autoupdate .` on any local repo -- auto-detects the Git provider from the remote URL, upgrades dependencies, and creates a PR
+- **Standalone Local Mode**: Run `autoupdate .` on any local repo -- auto-detects the Git provider from the remote URL, upgrades every ecosystem the checkout uses, and creates one PR
 - **Multi-Provider**: Supports GitHub, GitLab, and Azure DevOps as Git hosting providers
 - **API-Based Discovery**: Automatically discovers all repositories in an organization, group, or user account
 - **Extensible Updaters**: Plugin-based architecture for dependency ecosystems -- see [Supported Ecosystems](#supported-ecosystems)
@@ -369,6 +369,24 @@ autoupdate --dry-run .
 # Use an explicit token (overrides the environment variables and the gh/az CLI)
 autoupdate --token ghp_abc123 .
 ```
+
+`autoupdate .` upgrades every ecosystem the checkout uses, the way `autoupdate run` upgrades the
+same repository. The checkout's primary language -- the first one langforge reads in it -- keeps
+its dedicated local upgrade when it has one (Go, JavaScript, Python and Dart do). Every other
+ecosystem the checkout holds, found on disk and below the root too (Terraform kept in stack
+directories, a Go module of tests, a Dockerfile, a CI pipeline), is upgraded by the updater
+`autoupdate run` uses for it. `updaters.<name>.enabled: false` turns an ecosystem off here as it
+does there.
+
+| The checkout holds | Branch | Pull request |
+|--------------------|--------|--------------|
+| Only its primary language's ecosystem, which has a dedicated upgrade | That upgrade's own branch | That upgrade's own |
+| Anything else: more than one ecosystem, or only ecosystems without a dedicated upgrade | `chore/autoupdate-YYYY-MM-DD`, as in batch mode | One, naming every updater that changed something |
+
+When a dedicated upgrade and other ecosystems both apply, the dedicated upgrade commits first and
+the others follow as a second commit on the same branch. An updater that fails costs only its own
+changes; the others are kept, and files git ignores (caches, build output, an `.env`) are never
+touched. A pull request already open from today's branch makes the run stop, as in batch mode.
 
 > The `local` subcommand was removed in `1.0.0`. `autoupdate local` still works, hidden and
 > deprecated, so that the word is not silently read as a path -- but it warns and will go.

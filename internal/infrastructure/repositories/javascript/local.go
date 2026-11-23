@@ -27,6 +27,10 @@ type LocalUpgradeOptions struct {
 	PushAuth     gitlocal.PushAuthResolver // resolves auth methods for git push
 	// AllowMajorUpdates is resolved by entities.MajorUpdatesAllowed.
 	AllowMajorUpdates bool
+	// BranchName, when set, is the branch the upgrade is made on instead of the one named
+	// after what it upgrades: `autoupdate .` sets it when the checkout has other ecosystems
+	// too, so this upgrade and theirs share one branch and one pull request.
+	BranchName string
 }
 
 // LocalResult holds the outcome of a local upgrade operation.
@@ -53,6 +57,9 @@ func RunLocalUpgrade(
 	}
 
 	vCtx := resolveLocalVersionContext(ctx, repoDir)
+	if opts.BranchName != "" {
+		vCtx.BranchName = opts.BranchName
+	}
 
 	pkgMgr := detectLocalPackageManager(repoDir)
 

@@ -72,9 +72,12 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 3. Register in `internal/infrastructure/repositories/container.go`
 4. Add the ecosystem's default entry (`enabled`, `auto_complete`) to `configs/autoupdate.yaml`,
    the built-in defaults layer
-5. For local mode (`autoupdate .`), add it to the maps keyed by langforge `Language` in
-   `internal/domain/commands/local_command.go` (`updaterNameForLanguage`, `localUpgradeHandlers`,
-   `prContentGenerators`)
+5. Local mode (`autoupdate .`) picks the updater up through `LocalUpdater` with nothing more to
+   do: `LocalCommand` runs every registered updater that implements it, is enabled and detects its
+   ecosystem in the checkout (see "Every Ecosystem (Local Mode)" below). Add the ecosystem to
+   `updaterNameForLanguage` in `internal/domain/commands/local_command.go` when langforge has a
+   `Language` for it, and to `localUpgradeHandlers`/`prContentGenerators` only when it gets a
+   dedicated local upgrade, as Go, JavaScript, Python and Dart have
 
 ### Shared Updater Scaffolding
 
@@ -160,8 +163,10 @@ The `PushAuthResolver` interface in `gitlocal` abstracts the `ProviderRegistry` 
   reads them, and the server a remote URL reaches, an SSH alias resolved through
   `kevinburke/ssh_config`.
 
-Before anything touches the checkout, `Execute` checks that the project type has a local upgrade
-(`localUpgradeHandlerFor`, so an unsupported type stops the run before gh or az runs), reads
+Before anything touches the checkout, `Execute` settles what it will upgrade -- the primary
+language's dedicated upgrade (`detectPrimaryUpgrade`) and every other ecosystem's updater
+(`localUpdatersFor`), both read from disk -- so a checkout nothing applies to stops the run before
+gh or az runs. It then reads
 origin's push URLs (a checkout go-git cannot read -- a subdirectory, a linked worktree -- is an
 error, never a guess from what git printed, because the push reads them through go-git too), and
 then calls `resolveLocalTokens` (`internal/domain/commands/local_credentials.go`):
@@ -207,6 +212,49 @@ bound chain, which would run the real `gh` and `az`; `gitlocal.OriginRepository{
 keeps the operator's SSH configuration out of them. `initRepoWithoutCommits` in
 `local_credentials_test.go` gives `Execute` a Go repository with no commit, so a test stops at
 `detectDefaultBranch`, right after the credentials and before any upgrade reaches the network.
+
+### Every Ecosystem (Local Mode)
+
+`autoupdate .` upgrades every ecosystem the checkout uses, as `autoupdate run` upgrades the
+repository (`internal/domain/commands/local_ecosystems.go`):
+
+- **What runs.** `detectPrimaryUpgrade` reads the primary language through langforge and takes its
+  dedicated upgrade from `localUpgradeHandlers` (Go, JavaScript, Python, Dart), which keeps the
+  credential rules above and, for Go, prepares the major migrations after its push.
+  `localUpdatersFor` then takes, in name order, every registered updater that implements
+  `LocalUpdater`, is enabled, and detects its ecosystem, leaving out the one the dedicated upgrade
+  covers. Detection calls each updater's own `Detect` against a `support.CheckoutProvider` built
+  without an API, which answers `HasFile`, `ListFiles` and `GetFileContent` from disk the way the
+  forges answer them (a regular file; a suffix match over the whole tree the shared walker
+  enters), so it finds what batch mode finds in the same tree: Terraform below the root, a nested
+  Go module, a Dockerfile, a pipeline.
+- **One branch, one pull request.** A checkout whose only ecosystem is the primary language's, and
+  that language has a dedicated upgrade, runs exactly as before (`runDedicatedUpgrade`): that
+  upgrade's own branch, commit, push and pull request. Anything else runs `upgradeEveryEcosystem`
+  on the branch `buildAggregateBranchName` names, and stops when a pull request from it is
+  already open. The dedicated upgrade goes first, told the branch through `LocalOptions.branchName`
+  (each dedicated upgrade's `LocalUpgradeOptions.BranchName`); the others then run through the
+  batch helper `runUpdatersOnBranch`, and `FlattenOnto` folds their snapshots into a second commit,
+  pushed through `LocalGitContext.StageCommitAndPush` and therefore signed with the operator's git
+  configuration. The aggregate title and description builders name every contributor.
+- **The operator's work.** The run stashes uncommitted work once, before the dedicated upgrade, so
+  that upgrade's own `PrepareBranch` finds a clean tree and stays on the branch; the work is put
+  back on the starting branch at the end, as `PrepareBranch` does when it stashed.
+- **Rollback in a checkout.** go-git's hard reset deletes every file its index does not list,
+  ignored ones included: harmless in batch mode's throwaway clone, data loss in a checkout (a
+  `.terraform` cache, an `.env`). `gitlocal.OpenCheckout` opens the checkout for the snapshots, and
+  its `RestoreSnapshot` resets through git itself (`git reset --hard`, then `git clean -d` without
+  `-x`). Never roll a checkout back through a `BatchGitContext` opened any other way.
+  `TestOpenCheckoutRestoreSnapshot` pins it.
+- **Tokens.** The updaters get a `support.CheckoutProvider` built over the API provider
+  (`localTokens.API`) and git's token (`localTokens.Git`). API calls carry the API's token;
+  `AuthToken()` answers git's, because an updater hands it to git -- the Go updater writes it into
+  its script as `AUTH_TOKEN` and `GIT_HTTPS_TOKEN` -- and `APIToken()` names the API's, which
+  `support.ProviderTokens` adds to whatever redacts with a provider's tokens (the Go migration
+  notes). Of the updaters' `ApplyUpdates`, only the Go one reads `AuthToken()` today.
+- **Caches and cleanup.** No tooling directory and no shared cache: `ScriptEnv("")` leaves the
+  operator's own package-manager caches in place, as the dedicated upgrades always did. Local mode
+  never removes stale aggregate branches; that stays `autoupdate run`'s.
 
 ### Config System
 
@@ -1076,7 +1124,8 @@ No process may outlive its repository either. The Java script runs Gradle with
 `--no-daemon`: a Gradle daemon and the Kotlin compile daemon it starts for Kotlin build logic
 were measured at about a gigabyte resident, kept for hours, and per-repository Gradle homes
 would mean none of them is ever reused. `toolingSettings` sets `MSBUILDDISABLENODEREUSE=1` for
-the same reason. Standalone mode (`autoupdate .`) never reaches `ApplyUpdates` and keeps the
+the same reason. Standalone mode (`autoupdate .`) runs `ApplyUpdates` with no tooling directory and
+no shared cache, so it keeps the
 operator's own caches; `ScriptEnv("")` returns the process environment unchanged.
 
 ### Batch Mode Concurrency
