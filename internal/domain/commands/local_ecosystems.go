@@ -135,6 +135,7 @@ func (it *LocalCommand) localUpdatersFor(
 			Verbose:                opts.Verbose,
 			AllowMajorUpdates:      entities.MajorUpdatesAllowed(opts.Settings),
 			PrepareMajorMigrations: entities.PrepareMajorMigrationsEnabled(opts.Settings),
+			ImageRegistries:        entities.ConfiguredImageRegistries(opts.Settings),
 		}})
 	}
 

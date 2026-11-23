@@ -135,7 +135,7 @@ func GeneratePRTitle(tasks []upgradeTask) string {
 
 // GeneratePRDescription is exported for testing.
 func GeneratePRDescription(tasks []upgradeTask) string {
-	return generatePRDescription(tasks)
+	return generatePRDescription(tasks, nil)
 }
 
 // ApplyUpgrades is exported for testing.
@@ -193,7 +193,9 @@ func DetermineUpgrades(
 	allDeps []DepWithContent,
 	allowMajorUpdates bool,
 ) []UpgradeTask {
-	return u.determineUpgrades(ctx, provider, repo, allDeps, allowMajorUpdates)
+	//nolint:exhaustruct // only the major setting matters to these callers
+	opts := entities.UpdateOptions{AllowMajorUpdates: allowMajorUpdates}
+	return u.planUpgrades(ctx, provider, repo, allDeps, opts).upgrades
 }
 
 // CreateUpgradePR is exported for testing.
@@ -205,7 +207,7 @@ func CreateUpgradePR(
 	opts entities.UpdateOptions,
 	upgrades []UpgradeTask,
 ) ([]entities.PullRequest, error) {
-	return u.createUpgradePR(ctx, provider, repo, opts, upgrades)
+	return u.createUpgradePR(ctx, provider, repo, opts, upgradePlan{upgrades: upgrades, held: nil})
 }
 
 // ResolveTagsForSource is exported for testing.
@@ -221,4 +223,55 @@ func ResolveTagsForSource(
 // DependencyChanges is exported for testing.
 func DependencyChanges(upgrades []upgradeTask) []entities.DependencyChange {
 	return dependencyChanges(upgrades)
+}
+
+// HeldUpgrade is exported for testing.
+type HeldUpgrade = heldUpgrade
+
+// NewUpdaterRepositoryForTest creates an updater that asks registries through registry.
+func NewUpdaterRepositoryForTest(registry repositories.ImageRegistryRepository) *UpdaterRepository {
+	return &UpdaterRepository{registry: registry}
+}
+
+// PlanUpgrades is exported for testing.
+func PlanUpgrades(
+	ctx context.Context,
+	u *UpdaterRepository,
+	provider repositories.ProviderRepository,
+	repo entities.Repository,
+	allDeps []DepWithContent,
+	opts entities.UpdateOptions,
+) ([]UpgradeTask, []HeldUpgrade) {
+	plan := u.planUpgrades(ctx, provider, repo, allDeps, opts)
+	return plan.upgrades, plan.held
+}
+
+// HeldCandidate returns the tag a held upgrade left out.
+func HeldCandidate(h HeldUpgrade) string {
+	return h.candidate
+}
+
+// HeldDescription returns why a held upgrade was left out.
+func HeldDescription(h HeldUpgrade) string {
+	return h.describe()
+}
+
+// ImageCandidates is exported for testing.
+func ImageCandidates(current string, tags []string) []string {
+	return imageCandidates(current, tags)
+}
+
+// SameVersionLine is exported for testing.
+func SameVersionLine(current, candidate string) bool {
+	return sameVersionLine(current, candidate)
+}
+
+// GeneratePRDescriptionWithHeld is exported for testing.
+func GeneratePRDescriptionWithHeld(tasks []upgradeTask, held []heldUpgrade) string {
+	return generatePRDescription(tasks, held)
+}
+
+// UpgradeTaskImage returns the image or module source an upgradeTask moves.
+func UpgradeTaskImage(t UpgradeTask) string {
+	return t.dep.Source
 }

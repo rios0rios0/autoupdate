@@ -42,9 +42,15 @@ type SpyProviderRepository struct {
 	// --- GetTags ---
 	Tags       []string
 	GetTagsErr error
+	// TagsByRepository answers GetTags per repository, keyed by entities.RepoKey, for a test
+	// in which repositories differ; a repository it does not list gets Tags.
+	TagsByRepository map[string][]string
 
 	// --- HasFile ---
 	ExistingFiles map[string]bool
+	// ExistingFilesByRepository answers HasFile per repository, keyed by entities.RepoKey; a
+	// repository it does not list gets ExistingFiles.
+	ExistingFilesByRepository map[string]map[string]bool
 
 	// --- CreateBranchWithChanges ---
 	CreateBranchErr error
@@ -106,14 +112,20 @@ func (p *SpyProviderRepository) ListFiles(
 }
 
 func (p *SpyProviderRepository) GetTags(
-	_ context.Context, _ entities.Repository,
+	_ context.Context, repo entities.Repository,
 ) ([]string, error) {
+	if tags, ok := p.TagsByRepository[entities.RepoKey(repo)]; ok {
+		return tags, p.GetTagsErr
+	}
 	return p.Tags, p.GetTagsErr
 }
 
 func (p *SpyProviderRepository) HasFile(
-	_ context.Context, _ entities.Repository, path string,
+	_ context.Context, repo entities.Repository, path string,
 ) bool {
+	if files, ok := p.ExistingFilesByRepository[entities.RepoKey(repo)]; ok {
+		return files[path]
+	}
 	if p.ExistingFiles != nil {
 		return p.ExistingFiles[path]
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/rios0rios0/autoupdate/internal/domain/entities"
 	"github.com/rios0rios0/autoupdate/internal/domain/repositories"
+	"github.com/rios0rios0/autoupdate/internal/infrastructure/repositories/ociregistry"
 	"github.com/rios0rios0/autoupdate/internal/support"
 	langTerraform "github.com/rios0rios0/langforge/pkg/infrastructure/languages/terraform"
 )
@@ -44,11 +45,23 @@ const (
 // UpdaterRepository implements repositories.UpdaterRepository for Terraform module dependencies.
 // It reads files via the provider API, detects version refs, and creates PRs
 // with updated version strings — no local clone required.
-type UpdaterRepository struct{}
+type UpdaterRepository struct {
+	// registry is asked which tags a container registry holds, for the image pins of the
+	// files an image_registries rule covers. Nil means no registry can be asked, and a pin
+	// such a rule covers then stays where it is.
+	registry repositories.ImageRegistryRepository
+}
 
-// NewUpdaterRepository creates a new Terraform updater.
+// NewUpdaterRepository creates a new Terraform updater, which asks container registries
+// with the credentials the Docker configuration holds.
 func NewUpdaterRepository() repositories.UpdaterRepository {
-	return &UpdaterRepository{}
+	return &UpdaterRepository{registry: ociregistry.NewRegistryRepository()}
+}
+
+// NewUpdaterRepositoryWithDeps creates a Terraform updater that asks registries through the
+// given client (for testing).
+func NewUpdaterRepositoryWithDeps(registry repositories.ImageRegistryRepository) repositories.UpdaterRepository {
+	return &UpdaterRepository{registry: registry}
 }
 
 func (u *UpdaterRepository) Name() string { return updaterName }
@@ -85,8 +98,9 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	upgrades := u.determineUpgrades(ctx, provider, repo, allDeps, opts.AllowMajorUpdates)
-	if len(upgrades) == 0 {
+	plan := u.planUpgrades(ctx, provider, repo, allDeps, opts)
+	logHeldUpgrades(repo, plan.held)
+	if len(plan.upgrades) == 0 {
 		logger.Infof(
 			"[terraform] %s/%s: all Terraform dependencies up to date",
 			repo.Organization, repo.Name,
@@ -96,11 +110,11 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 
 	logger.Infof(
 		"[terraform] %s/%s: found %d dependencies to upgrade",
-		repo.Organization, repo.Name, len(upgrades),
+		repo.Organization, repo.Name, len(plan.upgrades),
 	)
 
 	if opts.DryRun {
-		for _, up := range upgrades {
+		for _, up := range plan.upgrades {
 			logger.Infof(
 				"[terraform] [DRY RUN] Would upgrade %s: %s -> %s",
 				extractRepoName(up.dep.Source), up.dep.CurrentVer, up.newVersion,
@@ -109,7 +123,7 @@ func (u *UpdaterRepository) CreateUpdatePRs(
 		return []entities.PullRequest{}, nil
 	}
 
-	return u.createUpgradePR(ctx, provider, repo, opts, upgrades)
+	return u.createUpgradePR(ctx, provider, repo, opts, plan)
 }
 
 // ApplyUpdates implements repositories.LocalUpdater for the clone-based pipeline.
@@ -131,7 +145,9 @@ func (u *UpdaterRepository) ApplyUpdates(
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
 
-	upgrades := u.determineUpgrades(ctx, provider, repo, allDeps, opts.AllowMajorUpdates)
+	plan := u.planUpgrades(ctx, provider, repo, allDeps, opts)
+	logHeldUpgrades(repo, plan.held)
+	upgrades := plan.upgrades
 	if len(upgrades) == 0 {
 		return nil, repositories.ErrNoUpdatesNeeded
 	}
@@ -150,7 +166,7 @@ func (u *UpdaterRepository) ApplyUpdates(
 		BranchName:    generateBranchName(upgrades),
 		CommitMessage: generateCommitMessage(upgrades),
 		PRTitle:       generatePRTitle(upgrades),
-		PRDescription: generatePRDescription(upgrades),
+		PRDescription: generatePRDescription(upgrades, plan.held),
 	}, nil
 }
 
@@ -268,50 +284,78 @@ func (u *UpdaterRepository) scanAllDependencies(
 	return allDeps
 }
 
-// determineUpgrades resolves tags and determines which deps need upgrading.
-func (u *UpdaterRepository) determineUpgrades(
+// upgradePlan is what a scan decided: the pins to move, and the newer image tags left out.
+type upgradePlan struct {
+	upgrades []upgradeTask
+	held     []heldUpgrade
+}
+
+// planUpgrades resolves each dependency's tags and decides which pins move, and where.
+//
+// A module moves to the newest released tag, as it always has. An image pin moves to the
+// newest tag the imagePlanner accepts, and the newer tags it does not accept are kept in the
+// plan so the log and the pull request can say so.
+func (u *UpdaterRepository) planUpgrades(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	allDeps []depWithContent,
-	allowMajorUpdates bool,
-) []upgradeTask {
-	moduleVersions := make(map[string]resolvedSource)
-	for _, dc := range allDeps {
-		src := dc.Dependency.Source
-		if _, ok := moduleVersions[src]; ok {
-			continue
-		}
-		tags, depRepo := resolveTagsForSource(ctx, provider, repo, src)
-		var latest string
-		if len(tags) > 0 {
-			latest = findLatestChangelogVersion(ctx, provider, depRepo, tags)
-		}
-		moduleVersions[src] = resolvedSource{tags: tags, depRepo: depRepo, latestVersion: latest}
-	}
+	opts entities.UpdateOptions,
+) upgradePlan {
+	resolver := newSourceResolver(provider, repo)
+	images := newImagePlanner(u.registry, opts.ImageRegistries, repo)
+	sources := make(map[sourceKey]resolvedSource)
 
-	var upgrades []upgradeTask
+	var plan upgradePlan
 	for _, dc := range allDeps {
-		resolved := moduleVersions[dc.Dependency.Source]
+		key := sourceKey{source: dc.Dependency.Source, kind: dc.Kind}
+		resolved, seen := sources[key]
+		if !seen {
+			resolved = resolveSource(ctx, provider, resolver, key)
+			sources[key] = resolved
+		}
 		if len(resolved.tags) == 0 {
 			continue
 		}
-		latestVersion := resolved.latestVersion
-		if dc.Dependency.CurrentVer == latestVersion {
+
+		var newVersion string
+		if dc.Kind == depKindImage {
+			var held []heldUpgrade
+			newVersion, held = images.choose(ctx, dc.Dependency, resolved.released)
+			plan.held = append(plan.held, held...)
+		} else if isNewerVersion(dc.Dependency.CurrentVer, resolved.latestVersion, opts.AllowMajorUpdates) {
+			newVersion = resolved.latestVersion
+		}
+		if newVersion == "" || newVersion == dc.Dependency.CurrentVer {
 			continue
 		}
-		if !isNewerVersion(dc.Dependency.CurrentVer, latestVersion, allowMajorUpdates) {
-			continue
-		}
-		upgrades = append(upgrades, upgradeTask{
+
+		plan.upgrades = append(plan.upgrades, upgradeTask{
 			dep:         dc.Dependency,
-			newVersion:  latestVersion,
+			newVersion:  newVersion,
 			fileContent: dc.FileContent,
 			kind:        dc.Kind,
 		})
 	}
 
-	return upgrades
+	return plan
+}
+
+// resolveSource reads the tags of the repository a source names and works out which of them
+// are released.
+func resolveSource(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	resolver *sourceResolver,
+	key sourceKey,
+) resolvedSource {
+	tags, depRepo := resolver.resolve(ctx, key)
+	if len(tags) == 0 {
+		return resolvedSource{tags: nil, depRepo: depRepo, released: nil, latestVersion: ""}
+	}
+
+	released := releasedTags(ctx, provider, depRepo, tags)
+	return resolvedSource{tags: tags, depRepo: depRepo, released: released, latestVersion: released[0]}
 }
 
 // createUpgradePR creates a branch with changes and opens a PR.
@@ -320,8 +364,9 @@ func (u *UpdaterRepository) createUpgradePR(
 	provider repositories.ProviderRepository,
 	repo entities.Repository,
 	opts entities.UpdateOptions,
-	upgrades []upgradeTask,
+	plan upgradePlan,
 ) ([]entities.PullRequest, error) {
+	upgrades := plan.upgrades
 	branchName := generateBranchName(upgrades)
 	if support.PullRequestOpen(ctx, provider, repo, updaterName, branchName) {
 		return []entities.PullRequest{}, nil
@@ -334,7 +379,7 @@ func (u *UpdaterRepository) createUpgradePR(
 		LogPrefix:     updaterName,
 		BranchName:    branchName,
 		Title:         generatePRTitle(upgrades),
-		Description:   generatePRDescription(upgrades),
+		Description:   generatePRDescription(upgrades, plan.held),
 		CommitMessage: generateCommitMessage(upgrades),
 		Changes:       fileChanges,
 	})
@@ -676,43 +721,25 @@ func buildSourceWithVersion(source, version string) string {
 // --- tag resolution ---
 
 // resolvedSource holds the tags, the repository entity, and the changelog-validated
-// latest version for a dependency source. The latestVersion is computed once per
-// unique source to avoid repeated CHANGELOG API calls.
+// versions for a dependency source: every released tag, newest first as the provider
+// sorted them, and the first of them. They are computed once per unique source to avoid
+// repeated CHANGELOG API calls.
 type resolvedSource struct {
 	tags          []string
 	depRepo       *entities.Repository
+	released      []string
 	latestVersion string
 }
 
+// resolveTagsForSource returns the tags of the repository a module source names, and that
+// repository: the first one in the organization carrying the source's last path segment.
 func resolveTagsForSource(
 	ctx context.Context,
 	provider repositories.ProviderRepository,
 	currentRepo entities.Repository,
 	source string,
 ) ([]string, *entities.Repository) {
-	repoName := extractRepoName(source)
-	if repoName == "" {
-		return nil, nil
-	}
-
-	allRepos, err := provider.DiscoverRepositories(
-		ctx, currentRepo.Organization,
-	)
-	if err != nil {
-		return nil, nil
-	}
-
-	for _, r := range allRepos {
-		if r.Name == repoName {
-			tags, tagsErr := provider.GetTags(ctx, r)
-			if tagsErr != nil {
-				return nil, nil
-			}
-			return tags, &r
-		}
-	}
-
-	return nil, nil
+	return newSourceResolver(provider, currentRepo).resolve(ctx, sourceKey{source: source, kind: depKindModule})
 }
 
 // versionHeadingRegex matches Keep-a-Changelog version headings like ## [1.2.3].
@@ -747,29 +774,46 @@ func findLatestChangelogVersion(
 	depRepo *entities.Repository,
 	tags []string,
 ) string {
+	return releasedTags(ctx, provider, depRepo, tags)[0]
+}
+
+// releasedTags returns, in their order, the tags the dependency repo's CHANGELOG.md
+// documents as releases. It returns every tag when there is no changelog, it lists no
+// version, or no tag matches one, to avoid breaking repos that don't follow the changelog
+// convention. tags must not be empty, and neither is the result.
+func releasedTags(
+	ctx context.Context,
+	provider repositories.ProviderRepository,
+	depRepo *entities.Repository,
+	tags []string,
+) []string {
 	if depRepo == nil || !provider.HasFile(ctx, *depRepo, "CHANGELOG.md") {
-		return tags[0]
+		return tags
 	}
 
 	content, err := provider.GetFileContent(ctx, *depRepo, "CHANGELOG.md")
 	if err != nil {
 		logger.Warnf("[terraform] Failed to read CHANGELOG.md from %s: %v", depRepo.Name, err)
-		return tags[0]
+		return tags
 	}
 
 	versions := extractChangelogVersions(content)
 	if len(versions) == 0 {
-		return tags[0]
+		return tags
 	}
 
+	var released []string
 	for _, tag := range tags {
 		if versions[stripVersionPrefix(tag)] {
-			return tag
+			released = append(released, tag)
 		}
+	}
+	if len(released) > 0 {
+		return released
 	}
 
 	logger.Warnf("[terraform] No tags from %s match any CHANGELOG version, using latest tag", depRepo.Name)
-	return tags[0]
+	return tags
 }
 
 // --- PR text generation ---
@@ -866,7 +910,9 @@ func dependencyChanges(upgrades []upgradeTask) []entities.DependencyChange {
 	return changes
 }
 
-func generatePRDescription(tasks []upgradeTask) string {
+// generatePRDescription renders the pull request body: the upgrades, then the newer image
+// tags it leaves out and why.
+func generatePRDescription(tasks []upgradeTask, held []heldUpgrade) string {
 	var sb strings.Builder
 	sb.WriteString("## Summary\n\n")
 
@@ -898,6 +944,7 @@ func generatePRDescription(tasks []upgradeTask) string {
 		}
 	}
 
+	sb.WriteString(heldUpgradesSection(held))
 	sb.WriteString("\n---\n")
 	sb.WriteString("*This PR was automatically created by [autoupdate](https://github.com/rios0rios0/autoupdate)*\n")
 	return sb.String()

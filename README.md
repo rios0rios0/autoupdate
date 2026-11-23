@@ -32,7 +32,7 @@ A self-hosted Dependabot alternative that automatically discovers repositories, 
 
 | Ecosystem      | Detected by                            | What it does                                                                                                                                                    |
 |----------------|----------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Terraform      | `*.tf`                                 | Detects Git-based module sources with `?ref=` tags, upgrades to latest tag                                                                                       |
+| Terraform      | `*.tf`                                 | Detects Git-based module sources with `?ref=` tags, upgrades to latest tag, and moves the container images a Terragrunt `.hcl` file pins by bare name -- see [Image Pins in Terragrunt Files](#image-pins-in-terragrunt-files) |
 | Go             | `go.mod`                               | Upgrades the Go version in every `go.mod` (root and nested modules), running `go get -u -t ./...` and `go mod tidy` in each                                       |
 | Python         | `pyproject.toml`, `requirements.txt`   | Upgrades through the manager the repository already uses -- PDM or pip -- never migrating it from one to the other                                               |
 | JavaScript     | `package.json`                         | Upgrades with the package manager the lockfile names (`pnpm`, `yarn`, or `npm`) and bumps `.nvmrc`/`.node-version`                                                |
@@ -94,6 +94,54 @@ The language updaters (Go, Python, JavaScript, Java, C#, Ruby) also refresh the 
 runtime in a `Dockerfile`. They do that inside the generated upgrade script, which does not talk to a
 registry, so they skip digest-pinned clauses and leave them to the Dockerfile updater -- which runs
 against the same branch in batch mode.
+
+## Image Pins in Terragrunt Files
+
+The Terraform updater also moves the container images a Terragrunt file pins by bare name, such as
+`api_image = "api:1.4.0"`. The name is read as the repository of the same organization that builds the
+image, and its released tags are the versions the pin may move to. Nothing in the pull request builds or
+runs the image -- a plan only passes the string along -- so three rules keep a pin from naming an image
+that cannot be pulled, or a rollout nobody planned:
+
+- **The image's own repository versions it.** A Helm chart is usually named after the image it deploys,
+  and its tags version the chart. A repository with a `Chart.yaml` at its root is never an image's
+  source; when several repositories remain, the one with a `Dockerfile` or `Containerfile` at its root is
+  taken, and when that does not settle it either, the pin is left alone.
+- **A jump to another version line is not applied.** A tag on another major, or written with a different
+  number of parts -- `0.0.4` to `0.26.0.5`, an image that started following upstream releases with a
+  build number appended -- is a rollout to plan, whatever `allow_major_updates` says. The pin moves along
+  its own line instead, and the pull request lists the newer tag under **Not applied**. Only a plain
+  dotted version is a pin or a candidate: a pre-release, `-alpine` or `latest` is left as it is.
+- **The tag must be in the registry the file pulls from, when you name it.** A repository's tags say
+  what was released, not what was pushed. With an `image_registries` rule covering the file, a pin only
+  moves to a tag that registry holds: a newer tag it lacks is listed under **Not applied** and the next
+  one down is tried. When the file pulls from several registries -- one file holding the pins of two
+  environments -- the tag must be in all of them, and when a registry cannot be asked, the pin stays
+  where it is.
+
+```yaml
+# Your configuration (layer 3) -- a target repository's own file cannot set this
+image_registries:
+  - registry: 'registry.example.com'         # host[:port], asked over HTTPS (OCI Distribution API)
+    namespace: 'team'                        # optional: `api:1.4.0` is looked up as `team/api`
+    repositories: ['my-org/infrastructure']  # optional: right-anchored patterns, as in exclude_repos
+    paths:                                   # optional: `*` stays in one directory, `**` spans any number
+      - 'environments/prod/**'
+      - 'environments/root.hcl'
+  - registry: 'dev-registry.example.com'
+    repositories: ['my-org/infrastructure']
+    paths:
+      - 'environments/dev/**'
+      - 'environments/root.hcl'
+```
+
+Registry credentials come from where `docker login` keeps them, never from AutoUpdate's configuration:
+the `DOCKER_AUTH_CONFIG` environment variable (a whole Docker configuration document, as GitLab CI hands
+one to a job), then `config.json` in `$DOCKER_CONFIG` or `~/.docker`, asking the credential helper it
+names for the host (`credHelpers`, else `credsStore`) before reading its `auths` entry. A registry is
+asked anonymously first, a credential is looked up only when the registry asks for one, and only the one
+stored for that registry's host is sent -- to the registry, or to the token service it names, which must
+be HTTPS.
 
 ## Installation
 
@@ -194,6 +242,14 @@ exclude_repos:
   - '*/oui'                                         # any org or org/project ending in /oui
   - 'rios0rios0/private-fork'                       # exact GitHub path
 
+# Check the image pins of these Terragrunt files against the registry they are pulled
+# from, so a pin only moves to a tag the registry holds -- see "Image Pins in Terragrunt
+# Files". Credentials come from the Docker configuration, never from this file.
+image_registries:
+  - registry: 'registry.example.com'
+    repositories: ['my-org/infrastructure']
+    paths: ['environments/prod/**']
+
 # The updaters section is optional. All 10 updaters (terraform, golang, python,
 # javascript, dart, ruby, java, csharp, pipeline, dockerfile) are enabled by default.
 # The binary ships those defaults; the copy published on `main` is fetched on top of them
@@ -261,6 +317,7 @@ And the keys it may **not** set, which are reported and ignored when a repositor
 | `github_access_token`, `gitlab_access_token`, `azure_devops_access_token`, `gpg_key_path`, `gpg_key_passphrase` | A repository handing AutoUpdate a credential — or a *path* to read one from — is a credential it chose |
 | `aggregate_branch_prefix` | The prefix decides which branches stale-branch cleanup **deletes**, and whose pull requests it closes |
 | `concurrency` | The fan-out is decided per organization, before any repository's own file has been read |
+| `image_registries` | The registry check sends your registry credentials, so which hosts it talks to -- and whether it runs -- is not a repository's to decide |
 
 This is not a trust check that runs at the right moment: the three non-operator layers
 decode through a struct that has no field for those keys, so there is nowhere for them to

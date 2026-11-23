@@ -20,8 +20,10 @@ type SpyProviderRepositoryBuilder struct {
 	files           []entities.File
 	listFileErr     error
 	tags            []string
+	tagsByRepo      map[string][]string
 	getTagsErr      error
 	existingFiles   map[string]bool
+	filesByRepo     map[string]map[string]bool
 	createBranchErr error
 	createdPR       *entities.PullRequest
 	createPRErr     error
@@ -92,6 +94,22 @@ func (b *SpyProviderRepositoryBuilder) WithTags(tags []string) *SpyProviderRepos
 	return b
 }
 
+// WithTagsByRepository sets the tags GetTags returns for each repository, keyed by
+// entities.RepoKey.
+func (b *SpyProviderRepositoryBuilder) WithTagsByRepository(tags map[string][]string) *SpyProviderRepositoryBuilder {
+	b.tagsByRepo = tags
+	return b
+}
+
+// WithExistingFilesByRepository sets the files HasFile finds in each repository, keyed by
+// entities.RepoKey.
+func (b *SpyProviderRepositoryBuilder) WithExistingFilesByRepository(
+	files map[string]map[string]bool,
+) *SpyProviderRepositoryBuilder {
+	b.filesByRepo = files
+	return b
+}
+
 // WithGetTagsErr sets the error to return from GetTags.
 func (b *SpyProviderRepositoryBuilder) WithGetTagsErr(err error) *SpyProviderRepositoryBuilder {
 	b.getTagsErr = err
@@ -142,22 +160,25 @@ func (b *SpyProviderRepositoryBuilder) Build() any {
 // BuildSpy creates the SpyProviderRepository with a concrete return type.
 func (b *SpyProviderRepositoryBuilder) BuildSpy() *SpyProviderRepository {
 	return &SpyProviderRepository{
-		ProviderName:    b.providerName,
-		Token:           b.token,
-		Repositories:    b.repositories,
-		DiscoverErr:     b.discoverErr,
-		FileContents:    b.fileContents,
-		FileContentErr:  b.fileContentErr,
-		Files:           b.files,
-		ListFileErr:     b.listFileErr,
-		Tags:            b.tags,
-		GetTagsErr:      b.getTagsErr,
-		ExistingFiles:   b.existingFiles,
-		CreateBranchErr: b.createBranchErr,
-		CreatedPR:       b.createdPR,
-		CreatePRErr:     b.createPRErr,
-		PRExistsResult:  b.prExistsResult,
-		PRExistsErr:     b.prExistsErr,
+		ProviderName:   b.providerName,
+		Token:          b.token,
+		Repositories:   b.repositories,
+		DiscoverErr:    b.discoverErr,
+		FileContents:   b.fileContents,
+		FileContentErr: b.fileContentErr,
+		Files:          b.files,
+		ListFileErr:    b.listFileErr,
+		Tags:           b.tags,
+		GetTagsErr:     b.getTagsErr,
+		ExistingFiles:  b.existingFiles,
+
+		TagsByRepository:          b.tagsByRepo,
+		ExistingFilesByRepository: b.filesByRepo,
+		CreateBranchErr:           b.createBranchErr,
+		CreatedPR:                 b.createdPR,
+		CreatePRErr:               b.createPRErr,
+		PRExistsResult:            b.prExistsResult,
+		PRExistsErr:               b.prExistsErr,
 	}
 }
 
@@ -173,8 +194,10 @@ func (b *SpyProviderRepositoryBuilder) Reset() testkit.Builder {
 	b.files = nil
 	b.listFileErr = nil
 	b.tags = nil
+	b.tagsByRepo = nil
 	b.getTagsErr = nil
 	b.existingFiles = nil
+	b.filesByRepo = nil
 	b.createBranchErr = nil
 	b.createdPR = nil
 	b.createPRErr = nil
@@ -219,6 +242,18 @@ func (b *SpyProviderRepositoryBuilder) Clone() testkit.Builder {
 	if b.existingFiles != nil {
 		clone.existingFiles = make(map[string]bool, len(b.existingFiles))
 		maps.Copy(clone.existingFiles, b.existingFiles)
+	}
+	if b.tagsByRepo != nil {
+		clone.tagsByRepo = make(map[string][]string, len(b.tagsByRepo))
+		for key, tags := range b.tagsByRepo {
+			clone.tagsByRepo[key] = append([]string(nil), tags...)
+		}
+	}
+	if b.filesByRepo != nil {
+		clone.filesByRepo = make(map[string]map[string]bool, len(b.filesByRepo))
+		for key, files := range b.filesByRepo {
+			clone.filesByRepo[key] = maps.Clone(files)
+		}
 	}
 
 	return clone

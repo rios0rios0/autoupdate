@@ -302,6 +302,8 @@ const (
 		"deletes, so it is the operator's alone to set"
 	reasonFanOut = "concurrency is an organization-level setting, decided before any " +
 		"repository's own file has been read"
+	reasonRegistries = "which registry an image pin is checked against, and so which hosts " +
+		"receive the operator's registry credentials, is the operator's to configure"
 )
 
 // operatorOnlyKeys names the top-level keys a restricted layer may write and AutoUpdate
@@ -314,6 +316,7 @@ var operatorOnlyKeys = map[string]string{
 	"providers":                 reasonDiscovery,
 	"aggregate_branch_prefix":   reasonDeletion,
 	"concurrency":               reasonFanOut,
+	"image_registries":          reasonRegistries,
 	"github_access_token":       reasonCredential,
 	"gitlab_access_token":       reasonCredential,
 	"azure_devops_access_token": reasonCredential,
