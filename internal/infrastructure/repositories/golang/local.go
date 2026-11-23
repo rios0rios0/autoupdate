@@ -43,6 +43,10 @@ type LocalUpgradeOptions struct {
 	// major the upgrade could not reach. Resolved by
 	// entities.PrepareMajorMigrationsEnabled, which defaults it to true.
 	PrepareMajorMigrations bool
+	// BranchName, when set, is the branch the upgrade is made on instead of the one named
+	// after what it upgrades: `autoupdate .` sets it when the checkout has other ecosystems
+	// too, so this upgrade and theirs share one branch and one pull request.
+	BranchName string
 }
 
 // LocalResult holds the outcome of a local upgrade operation.
@@ -73,6 +77,9 @@ func RunLocalUpgrade(
 	vCtx, err := resolveLocalVersionContext(ctx, repoDir)
 	if err != nil {
 		return nil, err
+	}
+	if opts.BranchName != "" {
+		vCtx.BranchName = opts.BranchName
 	}
 
 	if opts.DryRun {

@@ -369,7 +369,9 @@ func TestResolveLocalTokensForGitLab(t *testing.T) {
 			}
 			return ""
 		}}
-		cmd := commands.NewLocalCommand(infraRepos.NewProviderRegistry(), cliCredentials(), noGitToken(), origins)
+		cmd := commands.NewLocalCommand(
+			infraRepos.NewProviderRegistry(), infraRepos.NewUpdaterRegistry(), cliCredentials(), noGitToken(), origins,
+		)
 
 		// when
 		_, err := commands.ResolveLocalTokens(
@@ -390,7 +392,7 @@ func TestResolveLocalTokensForGitLab(t *testing.T) {
 			// given -- GitLab's stanza for a blocked port 22:
 			// `Host gitlab.com`, `Hostname altssh.gitlab.com`, `Port 443`
 			cmd := commands.NewLocalCommand(
-				infraRepos.NewProviderRegistry(), cliCredentials(), noGitToken(),
+				infraRepos.NewProviderRegistry(), infraRepos.NewUpdaterRegistry(), cliCredentials(), noGitToken(),
 				&gitlocal.OriginRepository{SSHHostName: func(string) string { return hostName }},
 			)
 
@@ -434,7 +436,7 @@ func TestResolveLocalTokensForGitLab(t *testing.T) {
 
 		// given
 		cmd := commands.NewLocalCommand(
-			infraRepos.NewProviderRegistry(), cliCredentials(), noGitToken(),
+			infraRepos.NewProviderRegistry(), infraRepos.NewUpdaterRegistry(), cliCredentials(), noGitToken(),
 			&gitlocal.OriginRepository{SSHHostName: func(string) string { return "altssh.gitlab.com.example.net" }},
 		)
 
@@ -584,15 +586,15 @@ func TestLocalCommandExecuteCredentials(t *testing.T) {
 
 	for transport, remoteURL := range map[string]string{"SSH": githubSSHRemote, "HTTPS": githubHTTPSRemote} {
 		t.Run(
-			"should not ask for a token for a project type it has no upgrade for, over "+transport,
+			"should not ask for a token for a checkout nothing upgrades, over "+transport,
 			func(t *testing.T) {
 				t.Parallel()
 
-				// given -- a Terraform repository, which only `autoupdate run` updates
+				// given -- a repository holding only prose, in which no ecosystem is found
 				repoDir := t.TempDir()
 				runGit(t, repoDir, "init", "-b", "main")
 				runGit(t, repoDir, "remote", "add", "origin", remoteURL)
-				require.NoError(t, os.WriteFile(filepath.Join(repoDir, "main.tf"), []byte("terraform {}\n"), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# notes\n"), 0o600))
 				credentials, gitCredentials := unusedCredentials(), unusedCredentials()
 				cmd := newLocalCommand(credentials, gitCredentials)
 
@@ -600,12 +602,36 @@ func TestLocalCommandExecuteCredentials(t *testing.T) {
 				err := cmd.Execute(t.Context(), commands.LocalOptions{RepoDir: repoDir})
 
 				// then
-				require.EqualError(t, err, "unsupported project type: terraform")
+				require.ErrorContains(t, err, "no supported language detected")
 				assert.Empty(t, credentials.Requests())
 				assert.Empty(t, gitCredentials.Requests())
 			},
 		)
 	}
+
+	t.Run("should go on to the credentials of a Terraform checkout, which it upgrades", func(t *testing.T) {
+		t.Parallel()
+
+		// given -- Terraform kept below the root, with no commit yet, so the run stops at
+		// detectDefaultBranch, past the credentials and before any upgrade
+		repoDir := t.TempDir()
+		runGit(t, repoDir, "init", "-b", "main")
+		runGit(t, repoDir, "remote", "add", "origin", githubSSHRemote)
+		stackDir := filepath.Join(repoDir, "stacks", "network")
+		// A directory needs the owner search bit, so 0o700 is the least-privilege mode here.
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(stackDir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(stackDir, "main.tf"), []byte("terraform {}\n"), 0o600))
+		credentials := cliCredentials()
+		cmd := newLocalCommand(credentials, noGitToken())
+
+		// when
+		err := cmd.Execute(t.Context(), commands.LocalOptions{RepoDir: repoDir})
+
+		// then -- not "unsupported project type": the Terraform updater applies
+		require.ErrorContains(t, err, "failed to detect current branch")
+		assert.NotEmpty(t, credentials.Requests())
+	})
 
 	t.Run("should refuse a checkout whose origin go-git cannot read", func(t *testing.T) {
 		t.Parallel()
@@ -640,7 +666,7 @@ func newLocalCommand(
 	credentials repositories.CredentialResolver, gitCredentials repositories.GitCredentialResolver,
 ) *commands.LocalCommand {
 	return commands.NewLocalCommand(
-		infraRepos.NewProviderRegistry(), credentials, gitCredentials,
+		infraRepos.NewProviderRegistry(), infraRepos.NewDefaultUpdaterRegistry(), credentials, gitCredentials,
 		&gitlocal.OriginRepository{SSHHostName: func(string) string { return "" }},
 	)
 }

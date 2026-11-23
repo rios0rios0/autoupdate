@@ -145,11 +145,13 @@ type migrationParams struct {
 // provider call, which is what a note is redacted with: git's, and the provider
 // API's. They differ in standalone mode, where the API's may be one the forge's CLI
 // issued, and a provider error can carry it into a note -- and from there into the
-// pull request description and the migration's commit message.
+// pull request description and the migration's commit message. The provider
+// standalone mode hands the updaters it runs on the checkout answers git's token
+// from AuthToken and the API's from APIToken, so both are read off it.
 func (p migrationParams) secrets() []string {
 	tokens := []string{p.AuthToken}
 	if p.Provider != nil {
-		tokens = append(tokens, p.Provider.AuthToken())
+		tokens = append(tokens, support.ProviderTokens(p.Provider)...)
 	}
 	return tokens
 }
