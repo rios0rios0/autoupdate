@@ -98,6 +98,7 @@ func TestDockerCredentialStoreLookup(t *testing.T) {
 
 		// given
 		home := t.TempDir()
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
 		require.NoError(t, os.MkdirAll(filepath.Join(home, ".docker"), 0o700))
 		require.NoError(t, os.WriteFile(filepath.Join(home, ".docker", "config.json"), []byte(
 			`{"auths":{"registry.example.com":{"username":"`+fixtureUser+`","password":"`+fixturePassword+`"}}}`,

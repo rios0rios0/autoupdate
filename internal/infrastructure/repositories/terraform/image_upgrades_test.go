@@ -493,7 +493,8 @@ func TestApplyUpdatesHoldsImagePins(t *testing.T) {
 		// given
 		repoDir := t.TempDir()
 		leaf := filepath.Join(repoDir, filepath.FromSlash(leafFile))
-		require.NoError(t, os.MkdirAll(filepath.Dir(leaf), 0o750))
+		// nosemgrep: go.lang.correctness.permissions.file_permission.incorrect-default-permission
+		require.NoError(t, os.MkdirAll(filepath.Dir(leaf), 0o700))
 		require.NoError(t, os.WriteFile(leaf, []byte(`locals {
   api_image       = "api:1.1.0"
   queue_operator_image = "queue-operator:0.0.4"
