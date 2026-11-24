@@ -29,6 +29,11 @@ type Settings struct {
 	ExcludeForks    bool                     `yaml:"exclude_forks"`
 	ExcludeArchived bool                     `yaml:"exclude_archived"`
 	ExcludeRepos    []string                 `yaml:"exclude_repos"`
+	// ImageRegistries names the container registry the image pins of some files are pulled
+	// from, so that a pin is only moved to a tag that registry holds. Operator-only: the
+	// check asks the registry with the operator's registry credentials, so which hosts it
+	// talks to is not a repository's to decide. See ImageRegistryRule.
+	ImageRegistries []ImageRegistryRule `yaml:"image_registries"`
 	// Concurrency is how many repositories are processed in parallel within an
 	// organization. Zero (the default) lets the run command pick a sensible
 	// built-in default; 1 forces fully sequential processing. A CLI flag, when
@@ -180,6 +185,10 @@ func ValidateSettings(settings *Settings, batch bool) error {
 			return fmt.Errorf("exclude_repos[%d] %q: invalid glob pattern: %w",
 				i, pattern, err)
 		}
+	}
+
+	if err := ValidateImageRegistries(settings.ImageRegistries); err != nil {
+		return err
 	}
 
 	return ValidateAggregateBranchPrefix(settings.AggregateBranchPrefix)

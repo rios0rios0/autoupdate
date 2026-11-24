@@ -51,8 +51,8 @@ Cobra CLI (controllers) -> Commands (domain logic) -> Repositories (ports/adapte
 - **Entry point**: `cmd/autoupdate/main.go` builds Cobra commands, `cmd/autoupdate/dig.go` wires the DI container
 - **DI registration**: `internal/container.go` registers all layers bottom-up (repos -> entities -> commands -> controllers)
 - **Domain commands**: `internal/domain/commands/` — `LocalCommand` (single repo), `RunCommand` (batch mode), `SelfUpdateCommand`, and `VersionCommand`
-- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `BuildLimiter`, `ProviderRepository`, `CredentialResolver` (an alias of gitforge's), `GitCredentialResolver`, `OriginRepository`, and `SelfUpdateRepository` interfaces
-- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations for local and batch modes), and `selfupdate`
+- **Domain ports**: `internal/domain/repositories/` — `UpdaterRepository`, `LocalUpdater`, `BuildLimiter`, `ProviderRepository`, `CredentialResolver` (an alias of gitforge's), `GitCredentialResolver`, `OriginRepository`, `ImageRegistryRepository`, and `SelfUpdateRepository` interfaces
+- **Infrastructure adapters**: `internal/infrastructure/repositories/` — updater implementations per ecosystem, plus `cmdrunner` (shared command execution), `gitlocal` (go-git operations for local and batch modes), `ociregistry` (container registry tag lists through the OCI Distribution API, with the Docker configuration's credentials), and `selfupdate`
 - **Support utilities**: `internal/support/` — filesystem helpers (including the shared repository walkers, see below), remote file checker bridging `langforge` with `gitforge`, repo config loader for per-repo opt-out, and the shared changelog writer (see below)
 - **Registries**: `provider_registry.go` (abstract factory for Git providers) and `updater_registry.go` (holds all updater implementations)
 
@@ -275,8 +275,8 @@ with `MergeUpdatersConfig` afterwards. Apply is atomic, and a comments-only docu
 
 Only the operator's layer is `ScopeOperator`. The other three decode through
 `RestrictedConfig`, which has **no field** for `providers`, any credential,
-`aggregate_branch_prefix` or `concurrency` -- enforcement by schema, not by a check that has
-to run at the right moment. `operatorOnlyKeys` only reports what was ignored. One field it *does*
+`aggregate_branch_prefix`, `concurrency` or `image_registries` -- enforcement by schema, not by
+a check that has to run at the right moment. `operatorOnlyKeys` only reports what was ignored. One field it *does*
 have is accepted in one direction only: `cleanup_stale_branches` may be switched **off** by
 a restricted layer and never on (`acceptSwitchOff`). Off can only ever remove an action, and
 `applySkipCleanupFlag` is applied in the controller *before* this layer is folded, so
@@ -501,7 +501,9 @@ Anything not shaped like a dotted numeric version — `lts/*`, `system`, `jruby-
 the comparison and the pin is left alone: those are deliberate choices by the repository being updated,
 and a release number from an unrelated channel is not a comparable replacement. `terraform`,
 `dockerfile` and the Go Dockerfile tag rewriter (`golang/dockerfile_tags.go`) reach the same conclusion
-through `golang.org/x/mod/semver` directly, since they compare registry tags rather than pin files.
+through `golang.org/x/mod/semver` directly, since they compare registry tags rather than pin files. The
+Terraform updater's image pins go through `support.IsNewerVersion` instead, because their tags can have
+four parts, which `semver` refuses (see "Image Pins in Terragrunt Files" below).
 
 ### Majors Are Allowed by Default
 
@@ -1022,6 +1024,62 @@ substitution cannot disagree about which lines are in play, and `golang/dockerfi
 skipped them from the start. In batch mode the `dockerfile` updater runs against the same aggregate
 branch, so those clauses are still upgraded — correctly. Do not "fix" a skipped clause by dropping its
 digest to make the substitution apply.
+
+### Image Pins in Terragrunt Files
+
+Besides module `?ref=` tags, the Terraform updater moves the images a Terragrunt `.hcl` file pins by
+bare name (`scanHCLFile`: `api_image = "api:1.4.0"`). The name is read as a repository of the same
+organization, and its released tags (`releasedTags`, the changelog filter modules use too) are what the
+pin may move to. Nothing in a pull request builds or runs that image -- a plan passes the string along
+-- so the reasoning behind "Majors Are Allowed by Default" does not reach it: no check would turn a bad
+pin into a red build, and the first thing to fail is a cluster pulling an image that was never pushed.
+`imagePlanner` (`image_upgrades.go`) therefore settles three things before a pin moves, and
+`planUpgrades` keeps every newer tag it declines (`heldUpgrade`) so the log and the pull request say so
+under **Not applied** (`heldUpgradesSection`). Modules are untouched by all of it.
+
+- **The repository that builds the image versions it** (`source_resolution.go`). Taking the first
+  repository carrying the name versioned pins by a Helm chart named after the image, whose tags version
+  the chart: a chart release was pinned as an image tag nobody built. `imageSourceRepository` drops
+  every repository with a `Chart.yaml` at its root, takes the one left, and when several are left, the
+  one with a `Dockerfile` or `Containerfile` at its root. Anything still ambiguous leaves the pin alone,
+  because a guess would version it by listing order. `sourceResolver` lists the organization once per
+  scan rather than once per dependency.
+- **Only plain dotted versions, newest first by number** (`imageCandidates`). A pin that is not
+  `^v?N(.N)*$` is not moved, and only such tags are candidates, so a pre-release, `-alpine` or
+  `latest` never replaces a pin. The candidates are re-ordered here with `support.IsNewerVersion`:
+  gitforge falls back to a string sort once a tag is not semver, which is how `0.26.0.5` came out ahead
+  of `0.0.10`, and the terraform comparator's string fallback then accepted it.
+- **A pin stays on its version line** (`sameVersionLine`): as many parts as the pin, and the same
+  major. `0.0.4` to `0.26.0.5` is an image that switched to an upstream version with a build number
+  appended -- a rollout to plan, not a bump. This holds whatever `allow_major_updates` says, for the
+  reason above; the walk passes over such a tag and the pin still moves along its own line. A 0.x minor
+  stays on the line on purpose: services released as `0.7.0`, `0.8.0`, ... would otherwise never move.
+- **The tag is in every registry the file pulls from, when the operator names them**
+  (`image_registries`, `entities.ImageRegistryRule`). A rule covers files by repository (the
+  `exclude_repos` matcher) and path (a `**`-aware glob, `matchPathGlob`); every rule covering a file
+  contributes its registry, and the tag must be in all of them, because one Terragrunt file can hold the
+  pins of two environments that pull from two registries. A tag a registry lacks is passed over for the
+  next one down. A registry that cannot be asked ends the walk with the pin where it is: an outage is
+  never read as an answer, and no older tag could be verified either. `ImageRegistryRepository.ListTags`
+  is asked once per registry and image per scan.
+
+`image_registries` is operator-only (`operatorOnlyKeys`, and no field in `RestrictedConfig`): the check
+sends the operator's registry credentials, so a repository must be able neither to point it at a host
+nor to switch it off for itself. The rules are validated with the rest of the settings
+(`ValidateImageRegistries`), because a typo that silently matched nothing would leave the pins exactly as
+unprotected as before.
+
+`ociregistry` is the client. It speaks the OCI Distribution API over HTTPS only (`GET /v2/<name>/tags/list`,
+paged by `Link`, a next page on another host refused), asks anonymously first and authenticates only when
+the registry challenges: `Bearer` through the token service the challenge names (which must be HTTPS),
+with basic credentials or, for an identity token, an OAuth2 refresh grant; `Basic` directly. A 404 is
+"no such repository", which is an answer (no tags); anything else unexpected is an error. Credentials come
+from where `docker login` keeps them (`DockerCredentialStore`), never from AutoUpdate's configuration:
+`DOCKER_AUTH_CONFIG`, then `config.json` in `$DOCKER_CONFIG` or `~/.docker`, asking the helper named for
+the host (`credHelpers`, else `credsStore`) before the `auths` entry. Only a bare-word helper name is run,
+the lookup is lazy so a public registry never reaches the store, and a credential is only ever looked up
+by, and sent for, its own host. Tests drive it against `httptest.NewTLSServer` and stub the helper runner;
+`TestRunCredentialHelper` runs a real helper script from `PATH`.
 
 ### Package Manager Selection (Python)
 

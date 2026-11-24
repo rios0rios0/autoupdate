@@ -17,6 +17,10 @@ type UpdateOptions struct {
 	// chore. Resolved by PrepareMajorMigrationsEnabled, which defaults it to
 	// true, with the same zero-value caveat as AllowMajorUpdates above.
 	PrepareMajorMigrations bool
+	// ImageRegistries are the operator's image_registries rules, naming the registry the
+	// image pins of a file are pulled from. Only the Terraform updater reads them, for the
+	// image pins of Terragrunt files. Resolved by ConfiguredImageRegistries.
+	ImageRegistries []ImageRegistryRule
 	// ToolingDir is where the scripts an updater runs keep their package managers'
 	// caches, downloads and temporary files. A batch run gives each repository its
 	// own and removes it with the repository, so nothing a repository needed

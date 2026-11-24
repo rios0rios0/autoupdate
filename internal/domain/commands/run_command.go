@@ -401,6 +401,7 @@ func (it *RunCommand) collectApplicableUpdaters(
 			Verbose:                runOpts.Verbose,
 			AllowMajorUpdates:      entities.MajorUpdatesAllowed(settings),
 			PrepareMajorMigrations: entities.PrepareMajorMigrationsEnabled(settings),
+			ImageRegistries:        entities.ConfiguredImageRegistries(settings),
 		}
 		if updaterCfg, ok := settings.Updaters[u.Name()]; ok {
 			opts.AutoComplete = updaterCfg.IsAutoComplete()

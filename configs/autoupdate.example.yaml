@@ -86,6 +86,21 @@ providers:
 #  - 'my-org/legacy-monorepo'
 #  - '*/sandbox'
 
+# (optional, layer 3 only) the container registry the image pins of some Terragrunt files
+# are pulled from. A pin in a file a rule covers only moves to a tag that registry holds;
+# when a file is covered by several rules, the tag must be in every one of their registries,
+# and when a registry cannot be asked the pin stays where it is. `registry` is a host with an
+# optional port, asked over HTTPS; `namespace` is the path the images are kept under;
+# `repositories` takes `exclude_repos` patterns; in `paths`, `*` stays within one directory
+# and `**` spans any number of them. Credentials are read where `docker login` keeps them
+# (`DOCKER_AUTH_CONFIG`, `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`, and the
+# credential helpers they name), never from this file. A target repository may not set it.
+#image_registries:
+#  - registry: 'registry.example.com'
+#    namespace: 'team'
+#    repositories: ['my-org/infrastructure']
+#    paths: ['environments/prod/**', 'environments/root.hcl']
+
 # ---------------------------------------------------------------------------
 # Updaters
 # ---------------------------------------------------------------------------
