@@ -1,3 +1,0 @@
-kind: 'Changed'
-body: 'changed the Terraform updater to keep an image pin of a Terragrunt file on its version line: a tag on another major, or written with a different number of parts (`0.0.4` to `0.26.0.5`), is no longer pinned whatever `allow_major_updates` says, because nothing in a pull request runs the image; the pin moves along its own line and the pull request lists the newer tag under "Not applied". Only a plain dotted version is moved, and only to another one, so a pre-release, a suffixed tag or `latest` never replaces a pin'
-time: '2026-11-23T23:31:45.699295744Z'

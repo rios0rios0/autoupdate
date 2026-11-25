@@ -22,6 +22,29 @@ Exceptions are acceptable depending on the circumstances (critical bug fixes tha
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-25
+
+### Added
+
+- added an optional registry check for the container images Terragrunt files pin by bare name (`api_image = "api:1.4.0"`): an `image_registries` rule in the operator configuration names the registry the files under some paths pull from, and a pin there then only moves to a tag that registry holds, trying the next tag down when the newest is missing and leaving the pin alone when the registry cannot be asked. It speaks the OCI Distribution API over HTTPS and reads credentials where `docker login` keeps them (`DOCKER_AUTH_CONFIG`, `$DOCKER_CONFIG` or `~/.docker/config.json`, and the credential helpers they name), never from the AutoUpdate configuration. Only the operator configuration may set `image_registries`, so a repository being updated cannot point the check, and the credentials it sends, at another host
+
+### Changed
+
+- changed the Go module `github.com/rios0rios0/gitforge/v4` from `v4.8.0` to `v4.9.0`
+- changed the Go modules `github.com/rios0rios0/gitforge/v4` from `v4.7.0` to `v4.7.1` and `gitlab.com/gitlab-org/api/client-go/v3` from `v3.53.0` to `v3.56.1`
+- changed the Terraform updater to keep an image pin of a Terragrunt file on its version line: a tag on another major, or written with a different number of parts (`0.0.4` to `0.26.0.5`), is no longer pinned whatever `allow_major_updates` says, because nothing in a pull request runs the image; the pin moves along its own line and the pull request lists the newer tag under "Not applied". Only a plain dotted version is moved, and only to another one, so a pre-release, a suffixed tag or `latest` never replaces a pin
+- read `GH_TOKEN` before `GITHUB_TOKEN`, gh's own order, so when both hold different tokens `GH_TOKEN` now wins (gitforge v4.9.0)
+
+### Fixed
+
+- fixed `autoupdate .` upgrading only the one language langforge reads first in the checkout, and only when it was Go, JavaScript, Python or Dart: a Terraform repository stopped with `unsupported project type: terraform`, a Dockerfile, pipeline, Java, C# or Ruby repository the same way, and a Go repository that also carried Terraform modules, Dockerfiles or CI pipelines had them silently left behind while `autoupdate run` upgraded all of them; local mode now upgrades every ecosystem it finds in the checkout on disk, below the root too, with the updaters `autoupdate run` uses, on one branch and in one pull request -- the primary language keeps its dedicated upgrade, a checkout holding only that ecosystem gets the same branch and pull request as before, and any other checkout, a Go repository with Terraform beside it included, now gets `chore/autoupdate-YYYY-MM-DD` as in batch mode
+- fixed the Terraform updater versioning an image pin by the first repository carrying the image name, which pinned the tags of a Helm chart named after the image (`0.3.0` for an image built only up to `0.0.4`); a repository with a `Chart.yaml` at its root is no longer an image source, a `Dockerfile` or `Containerfile` settles a choice between several, and an image no single repository builds is left alone. Tags are also ordered as numbers, so a four-part tag such as `0.26.0.5` no longer wins by string comparison
+
+### Security
+
+- stopped batch mode from adding a GitLab CI job's `CI_JOB_TOKEN` to git's credentials for a repository on another GitLab server than the one the job runs on: gitforge recognises GitLab by a substring of the URL, so a self-managed runner's job token was offered to gitlab.com when the provider token failed. The job token now goes only to the server the job's own `CI_SERVER_*` variables name (gitforge's `GitLabCIServerHost`), and nowhere when they are missing or disagree
+- stopped sending a GitHub token from the environment to github.com when `GITHUB_SERVER_URL`, `GITHUB_API_URL` or a `*.ghe.com` `GH_HOST` names another GitHub server, ran `gh` without the token variables so it reports only its own login, and recognised an HTTPS remote's forge only by its exact host, so a lookalike such as `github.com.evil.example` or `github.company.com` no longer passes as github.com (gitforge v4.9.0)
+
 ## [1.5.1] - 2026-11-19
 
 ### Fixed
